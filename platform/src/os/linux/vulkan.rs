@@ -2859,6 +2859,7 @@ impl CxVulkan {
         } {
             Ok(suboptimal) => suboptimal,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.wait_for_window_frame_fence("out-of-date swapchain recreate")?;
                 self.recreate_swapchain()?;
                 return Ok(false);
             }
@@ -2872,6 +2873,7 @@ impl CxVulkan {
         };
 
         if acquire_suboptimal || present_suboptimal {
+            self.wait_for_window_frame_fence("suboptimal swapchain recreate")?;
             self.recreate_swapchain()?;
         }
 
@@ -7072,6 +7074,19 @@ impl CxVulkan {
 
     fn device_wait_idle(&self) {
         let _ = unsafe { self.device.device_wait_idle() };
+    }
+
+    fn wait_for_window_frame_fence(&self, reason: &str) -> Result<(), String> {
+        if self.in_flight_fence == vk::Fence::null() {
+            return Ok(());
+        }
+        // Avoid teardown while the submitted frame still owns swapchain-backed resources.
+        unsafe {
+            self.device
+                .wait_for_fences(&[self.in_flight_fence], true, u64::MAX)
+                .map_err(|e| format!("wait_for_fences({reason}) failed: {e:?}"))?;
+        }
+        Ok(())
     }
 }
 

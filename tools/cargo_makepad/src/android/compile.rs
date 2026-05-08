@@ -108,7 +108,8 @@ fn has_explicit_lib_target(cargo_toml: &str, crate_dir: &Path) -> bool {
 }
 
 fn normalize_toml_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    let path = path.to_string_lossy().replace('\\', "/");
+    path.strip_prefix("//?/").unwrap_or(&path).to_string()
 }
 
 fn absolutize_manifest_path(crate_dir: &Path, value: &str) -> String {
@@ -969,7 +970,7 @@ fn bundle_ndk_shared_deps(
         resolve_ndk_prebuilt_root(sdk_dir, host_os, urls.ndk_version_full)?;
 
     // Path to llvm-readelf shipped with the NDK.
-    let readelf_path = ndk_prebuilt_root.join("bin/llvm-readelf");
+    let readelf_path = ndk_bin_path(&ndk_prebuilt_root, host_os, "llvm-readelf");
     if !readelf_path.exists() {
         // Gracefully skip when the NDK toolchain doesn't include llvm-readelf
         // (e.g. a stripped SDK install).
@@ -1053,7 +1054,7 @@ fn read_needed_shared_libs(
     let (_ndk_version, ndk_prebuilt_root) =
         resolve_ndk_prebuilt_root(sdk_dir, host_os, urls.ndk_version_full)?;
 
-    let readelf_path = ndk_prebuilt_root.join("bin/llvm-readelf");
+    let readelf_path = ndk_bin_path(&ndk_prebuilt_root, host_os, "llvm-readelf");
     if !readelf_path.exists() {
         return Ok(Vec::new());
     }
@@ -1152,7 +1153,10 @@ fn bundle_local_shared_deps(
 fn find_rustup_shared_lib(android_target: &AndroidTarget, lib_name: &str) -> Option<PathBuf> {
     let rustup_home = std::env::var_os("RUSTUP_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".rustup")))?;
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".rustup")))
+        .or_else(|| {
+            std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join(".rustup"))
+        })?;
     let toolchains_dir = rustup_home.join("toolchains");
     let tail = Path::new("lib")
         .join("rustlib")
@@ -1170,6 +1174,14 @@ fn find_rustup_shared_lib(android_target: &AndroidTarget, lib_name: &str) -> Opt
         }
     }
     None
+}
+
+fn ndk_bin_path(ndk_prebuilt_root: &Path, host_os: HostOs, name: &str) -> PathBuf {
+    let file_name = match host_os {
+        HostOs::WindowsX64 => format!("{name}.exe"),
+        _ => name.to_string(),
+    };
+    ndk_prebuilt_root.join("bin").join(file_name)
 }
 
 fn add_rust_library(
