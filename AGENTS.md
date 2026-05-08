@@ -1,3 +1,71 @@
+# Rusty XR Makepad Fork Agent Notes
+
+This checkout can be used as the maintained Makepad fork branch for the Rusty
+XR Makepad-first Quest lane. Upstream Makepad remains the framework source of
+truth; the Rusty XR branch should stay a shallow patch queue for Android
+packaging, Quest/Horizon OS Vulkan window-swapchain correctness, workspace
+metadata, and branch-local documentation.
+
+For Rusty XR tasks in this repo, read these first:
+
+- `RUSTY_XR_FORK_NOTES.md`
+- Rusty XR public docs:
+  - `docs/MAKEPAD_FORK_RELATIONSHIP.md`
+  - `docs/MAKEPAD_Q2Q_PARALLEL_APPROACH_COMPARISON.md`
+  - `docs/MAKEPAD_XR_GPU_PAGE_FAULT_INVESTIGATION.md`
+  - `docs/MAKEPAD_STEREO_COMPARISON_ITERATION.md`
+- Rusty XR example-local instructions:
+  - `examples/makepad-q2q-camera-shell/AGENTS.md`
+
+Those Rusty XR docs live in the Rusty XR repo, not in this Makepad checkout.
+Do not copy private planning notes, local paths, generated APKs, device logs,
+package identities, SDK caches, or downstream tuning into this branch.
+
+## Rusty XR Patch Boundaries
+
+Current acceptable Makepad-side changes for the Rusty XR lane are:
+
+- Android `cargo-makepad` packaging fixes needed by the public Makepad Quest
+  example lane.
+- Dependent Rust shared-library bundling for Android APK output.
+- Windows path normalization for generated Android wrapper inputs.
+- Targeted Android Vulkan frame-fence waits before destroying/recreating
+  swapchain-backed window resources after suboptimal or out-of-date returns.
+- Workspace metadata excludes for standalone CSG leaf crates.
+- Public-safe fork and agent notes.
+
+Keep Rusty XR app behavior in the Rusty XR repo. Keep camera transport,
+projection policy, scorecard markers, runtime profile keys, and public example
+code out of this Makepad fork unless the change is a general Makepad adapter or
+an upstreamable Makepad fix.
+
+## Rusty XR Validation Ladder
+
+Use focused validation for this fork branch:
+
+```powershell
+rustfmt --check platform\src\os\linux\vulkan.rs tools\cargo_makepad\src\android\compile.rs
+cargo metadata --manifest-path libs\csg\csg_math\Cargo.toml --no-deps --format-version 1
+cargo metadata --manifest-path libs\csg\csg_mesh\Cargo.toml --no-deps --format-version 1
+cargo metadata --manifest-path libs\csg\csg_sdf\Cargo.toml --no-deps --format-version 1
+cargo metadata --no-deps --format-version 1
+cargo check -p cargo-makepad
+cargo build -p cargo-makepad --release
+```
+
+Do not claim Makepad has a clean repo-wide formatting gate from this branch.
+`cargo fmt --all --check` currently reaches unrelated vendored/generated and
+Makepad-wide issues after the CSG metadata fix.
+
+For Quest comparison work, keep the ladder ordered:
+
+1. Minimal Makepad Quest/Vulkan surface smoke.
+2. Rusty XR Makepad synthetic OpenXR shell.
+3. Rusty XR synthetic stereo projection marker/scene.
+4. Camera metadata and acquisition logging.
+5. Hardware-buffer import.
+6. Stereo projection parity against the non-Makepad Rusty XR custom APK lane.
+
 # Studio Remote Runbook
 
 ## Execution Policy
