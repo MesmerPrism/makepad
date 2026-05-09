@@ -2739,9 +2739,6 @@ impl Cx {
                             let env = attach_jni_env();
                             android_jni::to_java_cleanup_video_playback_resources(env, video_id);
                         }
-                        self.call_event_handler(&Event::VideoPlaybackResourcesReleased(
-                            VideoPlaybackResourcesReleasedEvent { video_id },
-                        ));
                     }
                     self.os.video_configs.remove(&video_id);
                 }

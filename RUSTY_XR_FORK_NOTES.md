@@ -50,9 +50,6 @@ This branch currently carries:
 - A `Video` widget camera-permission option so camera playback can explicitly
   request headset-camera access on platforms where raw headset cameras are
   gated separately from the ordinary camera permission.
-- Android video cleanup completion when a widget requests cleanup for a video id
-  that has no retained platform player or surface resource, preventing the
-  widget from remaining in `CleaningUp` during source switches.
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.
