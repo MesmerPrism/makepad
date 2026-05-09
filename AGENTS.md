@@ -42,6 +42,8 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
   depth provider, depth swapchain, depth image, or depth start calls.
 - Makepad `Video` widget camera-permission routing when headset raw-camera
   sources require a different runtime permission from ordinary app cameras.
+- Android video cleanup completion for source-switch cases where no retained
+  platform player or surface exists for the requested video id.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 
