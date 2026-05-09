@@ -78,8 +78,16 @@ fn main_java(url: &str) -> String {
         package {url};
         import dev.makepad.android.MakepadActivity;
         public class MakepadApp extends MakepadActivity{{
+            public boolean isXrActivity(){{
+                return false;
+            }}
             public void switchActivity(){{
                 switchActivityClass(MakepadAppXr.class);
+            }}
+            public void startXrActivity(){{
+                switchActivityClass(MakepadAppXr.class);
+            }}
+            public void stopXrActivity(){{
             }}
         }}
     "#
@@ -92,7 +100,15 @@ fn xr_java(url: &str) -> String {
         package {url};
         import dev.makepad.android.MakepadActivity;
         public class MakepadAppXr extends MakepadActivity{{
+            public boolean isXrActivity(){{
+                return true;
+            }}
             public void switchActivity(){{
+                switchActivityClass(MakepadApp.class);
+            }}
+            public void startXrActivity(){{
+            }}
+            public void stopXrActivity(){{
                 switchActivityClass(MakepadApp.class);
             }}
         }}

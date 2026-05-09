@@ -1316,6 +1316,18 @@ pub unsafe fn to_java_switch_activity(env: *mut jni_sys::JNIEnv) {
     ndk_utils::call_void_method!(env, get_activity(), "switchActivity", "()V");
 }
 
+pub unsafe fn to_java_start_xr_activity(env: *mut jni_sys::JNIEnv) {
+    ndk_utils::call_void_method!(env, get_activity(), "startXrActivity", "()V");
+}
+
+pub unsafe fn to_java_stop_xr_activity(env: *mut jni_sys::JNIEnv) {
+    ndk_utils::call_void_method!(env, get_activity(), "stopXrActivity", "()V");
+}
+
+pub unsafe fn to_java_is_xr_activity(env: *mut jni_sys::JNIEnv) -> bool {
+    ndk_utils::call_bool_method!(env, get_activity(), "isXrActivity", "()Z") != 0
+}
+
 pub(crate) unsafe fn to_java_load_asset(filepath: &str) -> Option<Vec<u8>> {
     let env = attach_jni_env();
 

@@ -2792,10 +2792,34 @@ impl Cx {
                     self.os.xr_retry_surface_after_destroy = true;
                     self.os.ignore_destroy = true;
                     if !self.os.in_xr_mode {
-                        self.os.in_xr_mode = true;
-                        unsafe {
+                        let already_in_xr_activity = unsafe {
                             let env = attach_jni_env();
-                            android_jni::to_java_switch_activity(env);
+                            android_jni::to_java_is_xr_activity(env)
+                        };
+                        self.os.in_xr_mode = true;
+                        if already_in_xr_activity {
+                            #[cfg(use_vulkan)]
+                            {
+                                let existing_surface = self
+                                    .os
+                                    .display
+                                    .as_ref()
+                                    .map(|display| display.window)
+                                    .unwrap_or(std::ptr::null_mut());
+                                if !existing_surface.is_null() && self.os.openxr.session.is_none() {
+                                    self.try_create_xr_session_for_surface(
+                                        existing_surface,
+                                        self.os.display_size.x as i32,
+                                        self.os.display_size.y as i32,
+                                        "xr-start-presenting-existing-xr-activity",
+                                    );
+                                }
+                            }
+                        } else {
+                            unsafe {
+                                let env = attach_jni_env();
+                                android_jni::to_java_start_xr_activity(env);
+                            }
                         }
                     }
                 }
@@ -2814,7 +2838,7 @@ impl Cx {
                         self.os.in_xr_mode = false;
                         unsafe {
                             let env = attach_jni_env();
-                            android_jni::to_java_switch_activity(env);
+                            android_jni::to_java_stop_xr_activity(env);
                         }
                     }
                 }

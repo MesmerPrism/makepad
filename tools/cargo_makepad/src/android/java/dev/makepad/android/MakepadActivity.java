@@ -1644,6 +1644,16 @@ public class MakepadActivity
         finish();
     }
 
+    public boolean isXrActivity(){
+        return false;
+    }
+
+    public void startXrActivity(){
+    }
+
+    public void stopXrActivity(){
+    }
+
     private void cleanupVideoPlaybackState() {
         if (mVideoPlayerRunnables != null) {
             ArrayList<Long> videoIds = new ArrayList<>(mVideoPlayerRunnables.keySet());
