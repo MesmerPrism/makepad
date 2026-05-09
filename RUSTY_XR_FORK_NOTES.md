@@ -34,6 +34,9 @@ This branch currently carries:
 - A targeted Android Vulkan frame-fence wait before recreating
   swapchain-backed window resources after suboptimal or out-of-date present
   paths on Quest/Horizon OS.
+- Public-safe Android bootstrap phase markers for the Rusty XR Makepad Quest
+  validation lane. These bracket activity entry, Java init/surface bootstrap,
+  EGL setup, Vulkan backend startup, and handoff into Makepad's main loop.
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.
@@ -48,7 +51,7 @@ For this branch, use focused validation instead of claiming full Makepad
 repo-wide formatting hygiene:
 
 ```powershell
-rustfmt --check platform\src\os\linux\vulkan.rs tools\cargo_makepad\src\android\compile.rs
+rustfmt --check platform\src\os\linux\vulkan.rs platform\src\os\linux\android\android.rs tools\cargo_makepad\src\android\compile.rs
 cargo metadata --manifest-path libs\csg\csg_math\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_mesh\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_sdf\Cargo.toml --no-deps --format-version 1

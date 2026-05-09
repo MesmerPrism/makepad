@@ -31,6 +31,8 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
 - Windows path normalization for generated Android wrapper inputs.
 - Targeted Android Vulkan frame-fence waits before destroying/recreating
   swapchain-backed window resources after suboptimal or out-of-date returns.
+- Public-safe Android bootstrap phase markers used by the Rusty XR Makepad
+  Quest validation lane before Camera2 work starts.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 
@@ -44,7 +46,7 @@ an upstreamable Makepad fix.
 Use focused validation for this fork branch:
 
 ```powershell
-rustfmt --check platform\src\os\linux\vulkan.rs tools\cargo_makepad\src\android\compile.rs
+rustfmt --check platform\src\os\linux\vulkan.rs platform\src\os\linux\android\android.rs tools\cargo_makepad\src\android\compile.rs
 cargo metadata --manifest-path libs\csg\csg_math\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_mesh\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_sdf\Cargo.toml --no-deps --format-version 1

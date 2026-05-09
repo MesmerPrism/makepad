@@ -105,6 +105,15 @@ fn android_debug_log(prio: i32, msg: &str) {
     unsafe { __android_log_write(prio as c_int, "Makepad\0".as_ptr(), msg.as_ptr()) };
 }
 
+fn rusty_xr_android_bootstrap_marker(phase: &str) {
+    android_debug_log(
+        4,
+        &format!(
+            "RUSTY_XR_MAKEPAD_ANDROID_BOOTSTRAP schema=rusty.xr.makepad-android-bootstrap.v1 phase={phase} renderer=makepad android_packager=cargo-makepad"
+        ),
+    );
+}
+
 fn android_panic_summary(info: &std::panic::PanicHookInfo<'_>) -> String {
     let payload = if let Some(payload) = info.payload().downcast_ref::<&str>() {
         (*payload).to_string()
@@ -1761,6 +1770,7 @@ impl Cx {
     {
         let activity_thread_id = unsafe { libc_sys::syscall(libc_sys::SYS_GETTID) as u64 };
         let activity_handle = unsafe { android_jni::fetch_activity_handle(activity) };
+        rusty_xr_android_bootstrap_marker("activity-entry");
 
         let already_running = android_jni::from_java_messages_already_set();
 
@@ -1771,6 +1781,7 @@ impl Cx {
                 activity_handle,
                 activity_thread_id,
             ));
+            rusty_xr_android_bootstrap_marker("activity-switch");
 
             return;
         }
@@ -1781,13 +1792,17 @@ impl Cx {
 
         android_jni::jni_set_activity(activity_handle);
         android_jni::jni_set_from_java_tx(from_java_tx);
+        rusty_xr_android_bootstrap_marker("thread-spawn");
 
         // lets start a thread
         std::thread::spawn(move || {
+            rusty_xr_android_bootstrap_marker("render-thread-start");
             // SAFETY: This attaches the current thread to the JVM. It's safe as long as we're in the correct thread.
             unsafe { attach_jni_env() };
             let mut cx = startup();
+            rusty_xr_android_bootstrap_marker("cx-created");
             let mut libegl = LibEgl::try_load().expect("Cant load LibEGL");
+            rusty_xr_android_bootstrap_marker("egl-loaded");
 
             cx.os.activity_thread_id = Some(activity_thread_id);
             cx.os.render_thread_id =
@@ -1801,8 +1816,10 @@ impl Cx {
                 match from_java_rx.recv() {
                     Ok(FromJavaMessage::Init(params)) => {
                         initial_params = Some(params);
+                        rusty_xr_android_bootstrap_marker("bootstrap-init");
                     }
                     Ok(FromJavaMessage::SurfaceCreated { window }) => {
+                        rusty_xr_android_bootstrap_marker("bootstrap-surface-created");
                         // Bootstrap off the first SurfaceChanged so we have a
                         // real size. SurfaceCreated still hands us an acquired
                         // ANativeWindow ref, so release it immediately here to
@@ -1818,6 +1835,7 @@ impl Cx {
                         width,
                         height,
                     }) => {
+                        rusty_xr_android_bootstrap_marker("bootstrap-surface-changed");
                         if let Some((old_window, _, _)) =
                             initial_surface.replace((window, width, height))
                         {
@@ -1829,6 +1847,7 @@ impl Cx {
                         }
                     }
                     Ok(FromJavaMessage::SurfaceDestroyed { ack }) => {
+                        rusty_xr_android_bootstrap_marker("bootstrap-surface-destroyed");
                         if let Some((old_window, _, _)) = initial_surface.take() {
                             unsafe {
                                 if !old_window.is_null() {
@@ -1844,6 +1863,7 @@ impl Cx {
                 if initial_params.is_some() && initial_surface.is_some() {
                     let android_params = initial_params.take().unwrap();
                     let (window, width, height) = initial_surface.take().unwrap();
+                    rusty_xr_android_bootstrap_marker("bootstrap-ready");
                     break (window, width, height, android_params);
                 }
             };
@@ -1872,6 +1892,7 @@ impl Cx {
                 )
                 .expect("Cant create EGL context")
             };
+            rusty_xr_android_bootstrap_marker("egl-context-created");
 
             // SAFETY: This is loading OpenGL function pointers. It's safe as long as we have a valid EGL context.
             let libgl = LibGl::try_load(|s| {
@@ -1885,6 +1906,7 @@ impl Cx {
                 0 as _
             })
             .expect("Cant load openGL functions");
+            rusty_xr_android_bootstrap_marker("gl-loaded");
 
             // SAFETY: Create an EGL surface to keep GL APIs available on Android.
             // In Vulkan mode this must not bind the native window, or Vulkan surface creation will fail.
@@ -1913,6 +1935,7 @@ impl Cx {
                     pbuffer_attribs.as_ptr(),
                 )
             };
+            rusty_xr_android_bootstrap_marker("egl-surface-created");
 
             if unsafe {
                 (libegl.eglMakeCurrent.unwrap())(egl_display, surface, surface, egl_context)
@@ -1920,6 +1943,7 @@ impl Cx {
             {
                 panic!();
             }
+            rusty_xr_android_bootstrap_marker("egl-current");
 
             //libgl.enable_debugging();
 
@@ -1937,6 +1961,7 @@ impl Cx {
 
             #[cfg(use_vulkan)]
             {
+                rusty_xr_android_bootstrap_marker("vulkan-start");
                 match CxVulkan::new(
                     window,
                     cx.os.display_size.x.max(1.0) as u32,
@@ -1944,8 +1969,10 @@ impl Cx {
                 ) {
                     Ok(vulkan) => {
                         cx.os.vulkan = Some(vulkan);
+                        rusty_xr_android_bootstrap_marker("vulkan-ready");
                     }
                     Err(err) => {
+                        rusty_xr_android_bootstrap_marker("vulkan-failed");
                         crate::error!(
                             "Android Vulkan backend init failed on startup, continuing with OpenGL: {err}"
                         );
@@ -1958,7 +1985,9 @@ impl Cx {
             // drawable-surface state for the first frame. Do it explicitly here.
             cx.sync_android_surface_alive_from_backend();
 
+            rusty_xr_android_bootstrap_marker("before-main-loop");
             cx.main_loop(from_java_rx);
+            rusty_xr_android_bootstrap_marker("main-loop-exit");
             cx.stop_studio_websocket();
 
             #[cfg(use_vulkan)]
