@@ -120,6 +120,8 @@ impl AndroidVariant {
                 <uses-feature android:name="android.hardware.vr.headtracking" android:required="false"/>
                 <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="true"/>
                 <uses-feature android:name="com.oculus.feature.CONTEXTUAL_BOUNDARYLESS_APP" android:required="false"/>
+                <uses-feature android:name="android.hardware.camera" android:required="false"/>
+                <uses-feature android:name="android.hardware.camera2.full" android:required="false"/>
                 <uses-permission android:name="com.oculus.permission.USE_SCENE" />
                 <!-- Request hand and keyboard tracking for keyboard hand presence testing -->
                 <uses-feature android:name="oculus.software.handtracking" android:required="false"/>
@@ -127,6 +129,7 @@ impl AndroidVariant {
                 <uses-permission android:name="android.permission.INTERNET" />
                 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
                 <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+                <uses-permission android:name="android.permission.CAMERA"/>
                 <uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
                 <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
                 <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
@@ -602,6 +605,7 @@ mod tests {
             AndroidVariant::Default.manifest_xml("App", "MakepadApp", "dev.makepad.app", 33, true);
         assert!(xml.contains("android:theme=\"@style/MakepadAppTheme\""));
         assert!(xml.contains("android:theme=\"@style/MakepadLaunchTheme\""));
+        assert!(xml.contains("android.permission.CAMERA"));
         assert!(xml.contains("android:launchMode=\"singleTask\""));
     }
 
@@ -611,5 +615,9 @@ mod tests {
             AndroidVariant::Quest.manifest_xml("App", "MakepadApp", "dev.makepad.app", 33, true);
         assert!(xml.contains("android:theme=\"@style/MakepadAppTheme\""));
         assert!(xml.contains("android:theme=\"@style/MakepadLaunchTheme\""));
+        assert!(xml.contains("android.permission.CAMERA"));
+        assert!(xml.contains("horizonos.permission.HEADSET_CAMERA"));
+        assert!(xml.contains("android.hardware.camera"));
+        assert!(xml.contains("android.hardware.camera2.full"));
     }
 }

@@ -33,6 +33,8 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
   swapchain-backed window resources after suboptimal or out-of-date returns.
 - Public-safe Android activity/bootstrap phase markers used by the Rusty XR
   Makepad Quest validation lane before Camera2 work starts.
+- Quest manifest camera permission and optional camera feature declarations
+  needed by public examples that exercise Android NDK Camera2 diagnostics.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 

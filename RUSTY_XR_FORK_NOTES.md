@@ -38,6 +38,9 @@ This branch currently carries:
   Quest validation lane. These bracket Java activity entry, native library
   loading, native activity handoff, Java init/surface bootstrap, EGL setup,
   Vulkan backend startup, and handoff into Makepad's main loop.
+- Quest manifest camera permission and optional camera feature declarations so
+  public examples can validate Android NDK Camera2 metadata and acquisition
+  through the generated Android shell.
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.
