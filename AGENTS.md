@@ -40,6 +40,8 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
   Horizon OS volumetric-window handling.
 - Quest OpenXR environment-depth fallback behavior when the runtime refuses
   depth provider, depth swapchain, depth image, or depth start calls.
+- Makepad `Video` widget camera-permission routing when headset raw-camera
+  sources require a different runtime permission from ordinary app cameras.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 

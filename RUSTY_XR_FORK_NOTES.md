@@ -47,6 +47,9 @@ This branch currently carries:
   launch handling.
 - A Quest OpenXR environment-depth fallback that keeps passthrough and
   projection startup alive when the runtime declines depth provider setup.
+- A `Video` widget camera-permission option so camera playback can explicitly
+  request headset-camera access on platforms where raw headset cameras are
+  gated separately from the ordinary camera permission.
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.

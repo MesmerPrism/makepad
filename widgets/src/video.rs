@@ -427,6 +427,8 @@ pub struct Video {
     source_mode: VideoSourceMode,
     #[live(VideoCameraPreviewMode::Auto)]
     camera_preview_mode: VideoCameraPreviewMode,
+    #[live(VideoCameraPermission::Camera)]
+    camera_permission: VideoCameraPermission,
     #[rust]
     native_preview_attached: bool,
 
@@ -588,6 +590,16 @@ impl VideoRef {
         }
     }
 
+    /// Sets which camera runtime permission should be requested for camera playback.
+    ///
+    /// Use [`VideoCameraPermission::HeadsetCamera`] for headset-owned raw camera
+    /// sources that are separate from the normal Android camera permission.
+    pub fn set_camera_permission(&self, permission: VideoCameraPermission) {
+        if let Some(mut inner) = self.borrow_mut() {
+            inner.set_camera_permission(permission);
+        }
+    }
+
     /// Sets a camera source for the video.
     pub fn set_source_camera(
         &self,
@@ -714,6 +726,13 @@ pub enum VideoCameraPreviewMode {
     Auto,
     Texture,
     Native,
+}
+
+#[derive(Clone, Copy, Debug, Script, ScriptHook, PartialEq)]
+pub enum VideoCameraPermission {
+    #[pick]
+    Camera,
+    HeadsetCamera,
 }
 
 #[derive(Default, PartialEq, Debug)]
@@ -1093,15 +1112,29 @@ impl Video {
                 makepad_platform::event::video_playback::CameraPreviewMode::Texture
             };
 
-            cx.prepare_video_playback(
-                self.id,
-                source,
-                camera_preview_mode,
-                self.video_texture_handle.unwrap_or(0),
-                texture.texture_id(),
-                self.autoplay,
-                self.is_looping,
-            );
+            if matches!(&source, VideoSource::Camera(..))
+                && self.camera_permission == VideoCameraPermission::HeadsetCamera
+            {
+                cx.prepare_headset_camera_playback(
+                    self.id,
+                    source,
+                    camera_preview_mode,
+                    self.video_texture_handle.unwrap_or(0),
+                    texture.texture_id(),
+                    self.autoplay,
+                    self.is_looping,
+                );
+            } else {
+                cx.prepare_video_playback(
+                    self.id,
+                    source,
+                    camera_preview_mode,
+                    self.video_texture_handle.unwrap_or(0),
+                    texture.texture_id(),
+                    self.autoplay,
+                    self.is_looping,
+                );
+            }
 
             self.playback_state = PlaybackState::Preparing;
             self.last_error = None;
@@ -1425,6 +1458,17 @@ impl Video {
             self.native_preview_attached = false;
         }
         self.redraw(cx);
+    }
+
+    fn set_camera_permission(&mut self, permission: VideoCameraPermission) {
+        if self.playback_state == PlaybackState::Unprepared {
+            self.camera_permission = permission;
+        } else {
+            error!(
+                "Attempted to set camera permission while player {} state is: {:?}",
+                self.id.0, self.playback_state
+            );
+        }
     }
 
     fn set_source_in_memory(&mut self, data: Rc<Vec<u8>>) {
