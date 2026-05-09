@@ -792,6 +792,7 @@ pub struct CxOpenXrSession {
     pub depth_provider: XrEnvironmentDepthProviderMETA,
     pub passthrough: XrPassthroughFB,
     pub passthrough_layer: XrPassthroughLayerFB,
+    pub environment_depth_running: bool,
     pub width: u32,
     pub height: u32,
     pub recommended_width: u32,
@@ -971,6 +972,39 @@ impl CxOpenXrSession {
         unsafe { (xr.xrPassthroughLayerResumeFB)(passthrough_layer) }
             .to_result("xrPassthroughLayerResumeFB")?;
 
+        let (depth_provider, depth_swap_chain) =
+            match Self::create_environment_depth(xr, session, options) {
+                Ok(depth) => depth,
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR environment depth unavailable, continuing without depth: {err}"
+                    );
+                    (
+                        XrEnvironmentDepthProviderMETA(0),
+                        XrEnvironmentDepthSwapchainMETA(0),
+                    )
+                }
+            };
+
+        Ok((
+            passthrough,
+            passthrough_layer,
+            depth_provider,
+            depth_swap_chain,
+        ))
+    }
+
+    fn create_environment_depth(
+        xr: &LibOpenXr,
+        session: XrSession,
+        options: CxOpenXrOptions,
+    ) -> Result<
+        (
+            XrEnvironmentDepthProviderMETA,
+            XrEnvironmentDepthSwapchainMETA,
+        ),
+        String,
+    > {
         let edpci = XrEnvironmentDepthProviderCreateInfoMETA {
             create_flags: XrEnvironmentDepthProviderCreateFlagsMETA(0),
             ..Default::default()
@@ -983,8 +1017,14 @@ impl CxOpenXrSession {
             enabled: XrBool32::from_bool(options.remove_hands_from_depth),
             ..Default::default()
         };
-        unsafe { (xr.xrSetEnvironmentDepthHandRemovalMETA)(depth_provider, &edhrsi) }
-            .to_result("xrSetEnvironmentDepthHandRemovalMETA")?;
+        if let Err(err) =
+            unsafe { (xr.xrSetEnvironmentDepthHandRemovalMETA)(depth_provider, &edhrsi) }
+                .to_result("xrSetEnvironmentDepthHandRemovalMETA")
+        {
+            unsafe { (xr.xrDestroyEnvironmentDepthProviderMETA)(depth_provider) }
+                .log_error("xrDestroyEnvironmentDepthProviderMETA");
+            return Err(err);
+        }
 
         let edsci = XrEnvironmentDepthSwapchainCreateInfoMETA {
             ty: XrStructureType::ENVIRONMENT_DEPTH_SWAPCHAIN_CREATE_INFO_META,
@@ -992,14 +1032,19 @@ impl CxOpenXrSession {
             create_flags: XrEnvironmentDepthSwapchainCreateFlagsMETA(0),
         };
         let mut depth_swap_chain = XrEnvironmentDepthSwapchainMETA(0);
-        unsafe {
+        if let Err(err) = unsafe {
             (xr.xrCreateEnvironmentDepthSwapchainMETA)(
                 depth_provider,
                 &edsci,
                 &mut depth_swap_chain,
             )
         }
-        .to_result("xrCreateEnvironmentDepthSwapchainMETA")?;
+        .to_result("xrCreateEnvironmentDepthSwapchainMETA")
+        {
+            unsafe { (xr.xrDestroyEnvironmentDepthProviderMETA)(depth_provider) }
+                .log_error("xrDestroyEnvironmentDepthProviderMETA");
+            return Err(err);
+        }
 
         let mut edss = XrEnvironmentDepthSwapchainStateMETA {
             ty: XrStructureType::ENVIRONMENT_DEPTH_SWAPCHAIN_STATE_META,
@@ -1007,15 +1052,18 @@ impl CxOpenXrSession {
             width: 0,
             height: 0,
         };
-        unsafe { (xr.xrGetEnvironmentDepthSwapchainStateMETA)(depth_swap_chain, &mut edss) }
-            .to_result("xrGetEnvironmentDepthSwapchainStateMETA")?;
+        if let Err(err) =
+            unsafe { (xr.xrGetEnvironmentDepthSwapchainStateMETA)(depth_swap_chain, &mut edss) }
+                .to_result("xrGetEnvironmentDepthSwapchainStateMETA")
+        {
+            unsafe { (xr.xrDestroyEnvironmentDepthSwapchainMETA)(depth_swap_chain) }
+                .log_error("xrDestroyEnvironmentDepthSwapchainMETA");
+            unsafe { (xr.xrDestroyEnvironmentDepthProviderMETA)(depth_provider) }
+                .log_error("xrDestroyEnvironmentDepthProviderMETA");
+            return Err(err);
+        }
 
-        Ok((
-            passthrough,
-            passthrough_layer,
-            depth_provider,
-            depth_swap_chain,
-        ))
+        Ok((depth_provider, depth_swap_chain))
     }
 
     pub fn create_session(
@@ -1054,17 +1102,23 @@ impl CxOpenXrSession {
         #[cfg(use_vulkan)]
         session.destroy_session_vulkan(xr, vulkan);
         // alright lets destroy some things on the session
-        unsafe { (xr.xrStopEnvironmentDepthProviderMETA)(session.depth_provider) }
-            .log_error("xrStopEnvironmentDepthProviderMETA");
-        unsafe { (xr.xrDestroyEnvironmentDepthProviderMETA)(session.depth_provider) }
-            .log_error("xrDestroyEnvironmentDepthProviderMETA");
+        if session.environment_depth_running {
+            unsafe { (xr.xrStopEnvironmentDepthProviderMETA)(session.depth_provider) }
+                .log_error("xrStopEnvironmentDepthProviderMETA");
+        }
+        if session.depth_swap_chain.0 != 0 {
+            unsafe { (xr.xrDestroyEnvironmentDepthSwapchainMETA)(session.depth_swap_chain) }
+                .log_error("xrDestroyEnvironmentDepthSwapchainMETA");
+        }
+        if session.depth_provider.0 != 0 {
+            unsafe { (xr.xrDestroyEnvironmentDepthProviderMETA)(session.depth_provider) }
+                .log_error("xrDestroyEnvironmentDepthProviderMETA");
+        }
         unsafe { (xr.xrPassthroughPauseFB)(session.passthrough) }.log_error("xrPassthroughPauseFB");
         unsafe { (xr.xrDestroyPassthroughFB)(session.passthrough) }
             .log_error("xrDestroyPassthroughFB");
         unsafe { (xr.xrDestroySwapchain)(session.color_swap_chain) }
             .log_error("xrDestroySwapchain");
-        unsafe { (xr.xrDestroyEnvironmentDepthSwapchainMETA)(session.depth_swap_chain) }
-            .log_error("xrDestroyEnvironmentDepthSwapchainMETA");
         unsafe { (xr.xrDestroySpace)(session.head_space) }.log_error("xrDestroySpace");
         unsafe { (xr.xrDestroySpace)(session.local_space) }.log_error("xrDestroySpace");
         unsafe { (xr.xrDestroySession)(session.handle) }.log_error("xrDestroySession");
@@ -1259,26 +1313,29 @@ impl CxOpenXrFrame {
         }
         xr_cpu.wait_swapchain_ms = wait_swapchain_started.elapsed().as_secs_f64() * 1000.0;
 
-        let environment_depth_acquire_info = XrEnvironmentDepthImageAcquireInfoMETA {
-            space: session.local_space,
-            display_time: frame_state.predicted_display_time,
-            ..Default::default()
-        };
+        let depth_image = if session.environment_depth_running {
+            let environment_depth_acquire_info = XrEnvironmentDepthImageAcquireInfoMETA {
+                space: session.local_space,
+                display_time: frame_state.predicted_display_time,
+                ..Default::default()
+            };
 
-        let mut di = XrEnvironmentDepthImageMETA::default();
-        let acquire_depth_started = Instant::now();
-        let result = unsafe {
-            (xr.xrAcquireEnvironmentDepthImageMETA)(
-                session.depth_provider,
-                &environment_depth_acquire_info,
-                &mut di,
-            )
-        };
-        xr_cpu.acquire_depth_ms = acquire_depth_started.elapsed().as_secs_f64() * 1000.0;
-        let depth_image = if result == XrResult::SUCCESS {
-            Some(di)
+            let mut di = XrEnvironmentDepthImageMETA::default();
+            let acquire_depth_started = Instant::now();
+            let result = unsafe {
+                (xr.xrAcquireEnvironmentDepthImageMETA)(
+                    session.depth_provider,
+                    &environment_depth_acquire_info,
+                    &mut di,
+                )
+            };
+            xr_cpu.acquire_depth_ms = acquire_depth_started.elapsed().as_secs_f64() * 1000.0;
+            if result == XrResult::SUCCESS {
+                Some(di)
+            } else {
+                None
+            }
         } else {
-            //crate::log!("FAIL {:?}",result);
             None
         };
 

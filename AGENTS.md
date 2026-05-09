@@ -35,6 +35,11 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
   Makepad Quest validation lane before Camera2 work starts.
 - Quest manifest camera permission and optional camera feature declarations
   needed by public examples that exercise Android NDK Camera2 diagnostics.
+- Quest manifest XR launch metadata and non-resizeable activity declarations
+  used to keep generated Quest XR activities on the immersive path instead of
+  Horizon OS volumetric-window handling.
+- Quest OpenXR environment-depth fallback behavior when the runtime refuses
+  depth provider, depth swapchain, depth image, or depth start calls.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 

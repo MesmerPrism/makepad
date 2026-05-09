@@ -41,6 +41,12 @@ This branch currently carries:
 - Quest manifest camera permission and optional camera feature declarations so
   public examples can validate Android NDK Camera2 metadata and acquisition
   through the generated Android shell.
+- Quest manifest launch semantics for generated XR activities, including
+  VR-only/focus-aware metadata and non-resizeable activity declarations needed
+  to distinguish immersive presentation from Horizon OS volumetric-window
+  launch handling.
+- A Quest OpenXR environment-depth fallback that keeps passthrough and
+  projection startup alive when the runtime declines depth provider setup.
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.

@@ -206,8 +206,8 @@ impl CxOpenXrSession {
         let (passthrough, passthrough_layer, depth_provider, depth_swap_chain) =
             Self::create_passthrough_and_depth(xr, session, options)?;
 
-        let depth_images =
-            xr_array_fetch(XrSwapchainImageOpenGLESKHR::default(), |cap, len, buf| {
+        let depth_images = if depth_swap_chain.0 != 0 {
+            match xr_array_fetch(XrSwapchainImageOpenGLESKHR::default(), |cap, len, buf| {
                 unsafe {
                     (xr.xrEnumerateEnvironmentDepthSwapchainImagesMETA)(
                         depth_swap_chain,
@@ -217,7 +217,18 @@ impl CxOpenXrSession {
                     )
                 }
                 .to_result("xrEnumerateEnvironmentDepthSwapchainImagesMETA")
-            })?;
+            }) {
+                Ok(images) => images,
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR GLES: environment depth images unavailable, continuing without depth: {err}"
+                    );
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
 
         let swap_chain_len = color_images.len();
         let mut gl_depth_textures = vec![0; swap_chain_len];
@@ -310,8 +321,21 @@ impl CxOpenXrSession {
             }
         }
 
-        unsafe { (xr.xrStartEnvironmentDepthProviderMETA)(depth_provider) }
-            .to_result("xrStartEnvironmentDepthProviderMETA")?;
+        let environment_depth_running = if depth_provider.0 != 0 && !depth_images.is_empty() {
+            match unsafe { (xr.xrStartEnvironmentDepthProviderMETA)(depth_provider) }
+                .to_result("xrStartEnvironmentDepthProviderMETA")
+            {
+                Ok(()) => true,
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR GLES: environment depth provider did not start, continuing without depth: {err}"
+                    );
+                    false
+                }
+            }
+        } else {
+            false
+        };
         let inputs = CxOpenXrInputs::new_inputs(xr, session, instance)?;
 
         Ok(CxOpenXrSession {
@@ -327,6 +351,7 @@ impl CxOpenXrSession {
             depth_provider,
             passthrough,
             passthrough_layer,
+            environment_depth_running,
             width,
             height,
             recommended_width,

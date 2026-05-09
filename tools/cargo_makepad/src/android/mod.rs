@@ -117,7 +117,7 @@ impl AndroidVariant {
                                                                 
                 <uses-sdk android:targetSdkVersion="{sdk_version}" />
                 <uses-feature android:glEsVersion="0x00030001" android:required="true"/>
-                <uses-feature android:name="android.hardware.vr.headtracking" android:required="false"/>
+                <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true"/>
                 <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="true"/>
                 <uses-feature android:name="com.oculus.feature.CONTEXTUAL_BOUNDARYLESS_APP" android:required="false"/>
                 <uses-feature android:name="android.hardware.camera" android:required="false"/>
@@ -142,11 +142,15 @@ impl AndroidVariant {
                 <application
                     android:label="{label}"{icon_attr}
                     android:theme="@style/MakepadAppTheme"
-                    android:allowBackup="true"
+                    android:allowBackup="false"
+                    android:extractNativeLibs="true"
                     android:supportsRtl="true"
                     android:debuggable="true"
                     android:largeHeap="true"
                     tools:targetApi="{sdk_version}">
+                    <meta-data
+                        android:name="com.samsung.android.vr.application.mode"
+                        android:value="vr_only" />
                     <!-- Quest 3-only CPU/GPU trade: prefer one extra CPU level over one GPU level. -->
                     <meta-data
                         android:name="com.oculus.trade_cpu_for_gpu_amount"
@@ -156,7 +160,9 @@ impl AndroidVariant {
                         android:configChanges="screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode"
                         android:excludeFromRecents="false"
                         android:exported="true"
+                        android:hardwareAccelerated="false"
                         android:launchMode="singleTask"
+                        android:resizeableActivity="false"
                         android:screenOrientation="landscape"
                         android:windowSoftInputMode="adjustNothing|stateUnchanged"
                         android:theme="@style/MakepadLaunchTheme" 
@@ -170,13 +176,21 @@ impl AndroidVariant {
                     <activity
                         android:name="{class_name}Xr"
                         android:configChanges="screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode"
-                        android:excludeFromRecents="false"
+                        android:excludeFromRecents="true"
                         android:exported="true"
+                        android:hardwareAccelerated="false"
                         android:launchMode="singleTask"
+                        android:resizeableActivity="false"
                         android:screenOrientation="landscape"
                         android:windowSoftInputMode="adjustNothing|stateUnchanged"
                         android:theme="@style/MakepadLaunchTheme" 
                         >
+                        <meta-data
+                            android:name="com.oculus.vr.focusaware"
+                            android:value="true" />
+                        <meta-data
+                            android:name="com.oculus.intent.category.VR"
+                            android:value="vr_only" />
                         <intent-filter>
                             <action android:name="android.intent.action.MAIN" />
                             <category android:name="com.oculus.intent.category.VR" />
@@ -619,5 +633,17 @@ mod tests {
         assert!(xml.contains("horizonos.permission.HEADSET_CAMERA"));
         assert!(xml.contains("android.hardware.camera"));
         assert!(xml.contains("android.hardware.camera2.full"));
+        assert!(xml.contains("android.hardware.vr.headtracking"));
+        assert!(xml.contains("android:version=\"1\""));
+        assert!(xml.contains("android:required=\"true\""));
+        assert!(xml.contains("android:allowBackup=\"false\""));
+        assert!(xml.contains("android:extractNativeLibs=\"true\""));
+        assert!(xml.contains("com.samsung.android.vr.application.mode"));
+        assert!(xml.contains("android:hardwareAccelerated=\"false\""));
+        assert!(xml.contains("android:resizeableActivity=\"false\""));
+        assert!(xml.contains("android:excludeFromRecents=\"true\""));
+        assert!(xml.contains("com.oculus.vr.focusaware"));
+        assert!(xml.contains("com.oculus.intent.category.VR"));
+        assert!(xml.contains("android:value=\"vr_only\""));
     }
 }

@@ -437,32 +437,56 @@ impl CxOpenXrSession {
         let (passthrough, passthrough_layer, depth_provider, depth_swap_chain) =
             Self::create_passthrough_and_depth(xr, session, options)?;
 
-        let mut depth_swapchain_state = XrEnvironmentDepthSwapchainStateMETA {
-            ty: XrStructureType::ENVIRONMENT_DEPTH_SWAPCHAIN_STATE_META,
-            next: 0 as *mut _,
-            width: 0,
-            height: 0,
-        };
-        unsafe {
-            (xr.xrGetEnvironmentDepthSwapchainStateMETA)(
-                depth_swap_chain,
-                &mut depth_swapchain_state,
-            )
-        }
-        .to_result("xrGetEnvironmentDepthSwapchainStateMETA")?;
-
-        let depth_images =
-            xr_array_fetch(XrSwapchainImageVulkanKHR::default(), |cap, len, buf| {
-                unsafe {
-                    (xr.xrEnumerateEnvironmentDepthSwapchainImagesMETA)(
-                        depth_swap_chain,
-                        cap,
-                        len,
-                        buf as *mut std::ffi::c_void,
-                    )
+        let (depth_images, depth_width, depth_height) = if depth_swap_chain.0 != 0 {
+            let mut depth_swapchain_state = XrEnvironmentDepthSwapchainStateMETA {
+                ty: XrStructureType::ENVIRONMENT_DEPTH_SWAPCHAIN_STATE_META,
+                next: 0 as *mut _,
+                width: 0,
+                height: 0,
+            };
+            let state_result = unsafe {
+                (xr.xrGetEnvironmentDepthSwapchainStateMETA)(
+                    depth_swap_chain,
+                    &mut depth_swapchain_state,
+                )
+            }
+            .to_result("xrGetEnvironmentDepthSwapchainStateMETA");
+            match state_result {
+                Ok(()) => {
+                    match xr_array_fetch(XrSwapchainImageVulkanKHR::default(), |cap, len, buf| {
+                        unsafe {
+                            (xr.xrEnumerateEnvironmentDepthSwapchainImagesMETA)(
+                                depth_swap_chain,
+                                cap,
+                                len,
+                                buf as *mut std::ffi::c_void,
+                            )
+                        }
+                        .to_result("xrEnumerateEnvironmentDepthSwapchainImagesMETA")
+                    }) {
+                        Ok(images) => (
+                            images,
+                            depth_swapchain_state.width,
+                            depth_swapchain_state.height,
+                        ),
+                        Err(err) => {
+                            crate::warning!(
+                                "OpenXR Vulkan: environment depth images unavailable, continuing without depth: {err}"
+                            );
+                            (Vec::new(), 0, 0)
+                        }
+                    }
                 }
-                .to_result("xrEnumerateEnvironmentDepthSwapchainImagesMETA")
-            })?;
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR Vulkan: environment depth swapchain state unavailable, continuing without depth: {err}"
+                    );
+                    (Vec::new(), 0, 0)
+                }
+            }
+        } else {
+            (Vec::new(), 0, 0)
+        };
         let (color_swap_chain, color_images, render_targets) =
             Self::create_vulkan_projection_layer_resources(
                 xr,
@@ -472,11 +496,24 @@ impl CxOpenXrSession {
                 width,
                 height,
                 &depth_images,
-                depth_swapchain_state.width,
-                depth_swapchain_state.height,
+                depth_width,
+                depth_height,
             )?;
-        unsafe { (xr.xrStartEnvironmentDepthProviderMETA)(depth_provider) }
-            .to_result("xrStartEnvironmentDepthProviderMETA")?;
+        let environment_depth_running = if depth_provider.0 != 0 && !depth_images.is_empty() {
+            match unsafe { (xr.xrStartEnvironmentDepthProviderMETA)(depth_provider) }
+                .to_result("xrStartEnvironmentDepthProviderMETA")
+            {
+                Ok(()) => true,
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR Vulkan: environment depth provider did not start, continuing without depth: {err}"
+                    );
+                    false
+                }
+            }
+        } else {
+            false
+        };
         let inputs = CxOpenXrInputs::new_inputs(xr, session, instance)?;
 
         Ok(CxOpenXrSession {
@@ -497,6 +534,7 @@ impl CxOpenXrSession {
             depth_provider,
             passthrough,
             passthrough_layer,
+            environment_depth_running,
             width,
             height,
             recommended_width,
