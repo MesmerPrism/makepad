@@ -34,9 +34,10 @@ This branch currently carries:
 - A targeted Android Vulkan frame-fence wait before recreating
   swapchain-backed window resources after suboptimal or out-of-date present
   paths on Quest/Horizon OS.
-- Public-safe Android bootstrap phase markers for the Rusty XR Makepad Quest
-  validation lane. These bracket activity entry, Java init/surface bootstrap,
-  EGL setup, Vulkan backend startup, and handoff into Makepad's main loop.
+- Public-safe Android activity/bootstrap phase markers for the Rusty XR Makepad
+  Quest validation lane. These bracket Java activity entry, native library
+  loading, native activity handoff, Java init/surface bootstrap, EGL setup,
+  Vulkan backend startup, and handoff into Makepad's main loop.
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.

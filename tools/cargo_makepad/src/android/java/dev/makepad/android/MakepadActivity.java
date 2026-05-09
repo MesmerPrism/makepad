@@ -871,8 +871,19 @@ public class MakepadActivity
     private SelectionHandleView mSelectionHandleEnd;
     private int mSelectionHandleSizePx;
 
+    private static void rustyXrActivityMarker(String phase) {
+        Log.e(
+            "RustyXRMakepad",
+            "RUSTY_XR_MAKEPAD_ANDROID_ACTIVITY schema=rusty.xr.makepad-android-activity.v1 phase="
+                + phase
+                + " renderer=makepad android_packager=cargo-makepad"
+        );
+    }
+
     static {
+        rustyXrActivityMarker("java-load-library-before");
         System.loadLibrary("makepad");
+        rustyXrActivityMarker("java-load-library-after");
     }
 
     private void cacheWarmResumeSurfaceSnapshot(Bitmap snapshot) {
@@ -955,6 +966,7 @@ public class MakepadActivity
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        rustyXrActivityMarker("on-create-entry");
         if (mWebSocketsThread == null || !mWebSocketsThread.isAlive()) {
             mWebSocketsThread = new HandlerThread("WebSocketsThread");
             mWebSocketsThread.start();
@@ -1062,7 +1074,9 @@ public class MakepadActivity
         restoreWarmResumeSurfaceSnapshotIfAvailable();
         updateTaskDescription();
 
+        rustyXrActivityMarker("native-activity-on-create-before");
         MakepadNative.activityOnCreate(this);
+        rustyXrActivityMarker("native-activity-on-create-after");
 
         mVideoPlaybackThread = new HandlerThread("VideoPlayerThread");
         mVideoPlaybackThread.start(); // TODO: only start this if its needed.

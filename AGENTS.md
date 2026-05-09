@@ -31,8 +31,8 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
 - Windows path normalization for generated Android wrapper inputs.
 - Targeted Android Vulkan frame-fence waits before destroying/recreating
   swapchain-backed window resources after suboptimal or out-of-date returns.
-- Public-safe Android bootstrap phase markers used by the Rusty XR Makepad
-  Quest validation lane before Camera2 work starts.
+- Public-safe Android activity/bootstrap phase markers used by the Rusty XR
+  Makepad Quest validation lane before Camera2 work starts.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 
