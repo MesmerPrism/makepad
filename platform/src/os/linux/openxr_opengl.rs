@@ -363,10 +363,12 @@ impl CxOpenXrSession {
             active: false,
             anchor: CxOpenXrAnchor::default(),
             debug_inactive_begin_frame_logs: 0,
+            debug_end_frame_logs: 0,
             depth_swap_chain_index: 0,
             frame_state: XrFrameState::default(),
             active_display_refresh_rate_hz: None,
             last_predicted_display_time: None,
+            last_end_frame_result: None,
             inputs,
         })
     }
