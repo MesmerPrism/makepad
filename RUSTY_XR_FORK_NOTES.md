@@ -50,6 +50,10 @@ This branch currently carries:
 - A `Video` widget camera-permission option so camera playback can explicitly
   request headset-camera access on platforms where raw headset cameras are
   gated separately from the ordinary camera permission.
+- A small shader builtin, `xr_view_id()`, that exposes Makepad's existing
+  backend multiview index to application shader code for XR per-eye texture
+  selection without requiring app shaders to reference backend-specific
+  symbols.
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.

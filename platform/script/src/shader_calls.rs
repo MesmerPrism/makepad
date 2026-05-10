@@ -1058,6 +1058,25 @@ impl ShaderFnCompiler {
             return;
         }
 
+        // Expose the active XR multiview index to Makepad shader code without
+        // requiring application shaders to know the backend-specific builtin.
+        if name == id!(xr_view_id) {
+            for (_, s) in args {
+                self.stack.free_string(s);
+            }
+            let mut out = self.stack.new_string();
+            match output.backend {
+                ShaderBackend::Glsl => write!(out, "float(VIEW_ID)").ok(),
+                ShaderBackend::Wgsl => write!(out, "f32(VIEW_ID)").ok(),
+                ShaderBackend::Metal | ShaderBackend::Hlsl | ShaderBackend::Rust => {
+                    write!(out, "0.0").ok()
+                }
+            };
+            self.stack
+                .push(self.trap.pass(), ShaderType::Pod(builtins.pod_f32), out);
+            return;
+        }
+
         if name == id!(depth_clip) {
             let mut concrete_args = Vec::new();
             let mut formatted_args = Vec::new();

@@ -556,6 +556,13 @@ pub fn define_shader_builtins(
         script_args!(),
         |_vm, _args| ScriptValue::NIL,
     );
+    native.add_method(
+        heap,
+        math,
+        id_lut!(xr_view_id),
+        script_args!(),
+        |_vm, _args| 0.0.into(),
+    );
 
     // Bitcast helpers for shader code. These are primarily intended for shader use,
     // but we provide scalar runtime behavior so expressions can still evaluate.
@@ -1249,6 +1256,17 @@ pub fn type_table_builtin(
                 return builtins.pod_void;
             }
             return builtins.pod_void;
+        }
+        id!(xr_view_id) => {
+            if args.len() != 0 {
+                script_err_invalid_args!(
+                    trap,
+                    "shader builtin 'xr_view_id' requires 0 args, got {}",
+                    args.len()
+                );
+                return builtins.pod_void;
+            }
+            return builtins.pod_f32;
         }
         id!(length) => {
             if args.len() != 1 {
