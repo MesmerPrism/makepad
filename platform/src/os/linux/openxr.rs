@@ -807,12 +807,14 @@ pub struct CxOpenXrSession {
     pub anchor: CxOpenXrAnchor,
     pub inputs: CxOpenXrInputs,
     debug_inactive_begin_frame_logs: u32,
+    debug_end_frame_logs: u32,
 
     // leaked from Frame onto state
     pub depth_swap_chain_index: usize,
     pub frame_state: XrFrameState,
     pub active_display_refresh_rate_hz: Option<f32>,
     last_predicted_display_time: Option<XrTime>,
+    last_end_frame_result: Option<XrResult>,
 }
 
 #[derive(SerBin, DeBin)]
@@ -1439,12 +1441,18 @@ impl CxOpenXrFrame {
             };
         }
 
+        let projection_layer_flags = if session.native_passthrough_enabled {
+            XrCompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA
+                | XrCompositionLayerFlags::CORRECT_CHROMATIC_ABERRATION
+        } else {
+            XrCompositionLayerFlags::CORRECT_CHROMATIC_ABERRATION
+        };
+
         let comp_proj = XrCompositionLayerProjection {
             space: session.local_space,
             view_count: 2,
             views: &proj_views as *const _,
-            layer_flags: XrCompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA
-                | XrCompositionLayerFlags::CORRECT_CHROMATIC_ABERRATION,
+            layer_flags: projection_layer_flags,
             //XrCompositionLayerFlags::UNPREMULTIPLIED_ALPHA,
             ..Default::default()
         };
@@ -1475,7 +1483,25 @@ impl CxOpenXrFrame {
             ..Default::default()
         };
 
-        unsafe { (xr.xrEndFrame)(session.handle, &fei) }.log_error("xrEndFrame");
+        let result = unsafe { (xr.xrEndFrame)(session.handle, &fei) };
+        let result_changed = session.last_end_frame_result != Some(result);
+        if result != XrResult::SUCCESS || result_changed || session.debug_end_frame_logs < 4 {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_OPENXR_END_FRAME schema=rusty.xr.makepad-openxr-end-frame.v1 result={:?} resultCode={} nativePassthrough={} projectionBlendSourceAlpha={} layerCount={} environmentBlend=OPAQUE imageRectWidth={} imageRectHeight={} recommendedWidth={} recommendedHeight={} viewCount=2 colorArraySize=2",
+                result,
+                result.0,
+                session.native_passthrough_enabled,
+                projection_layer_flags.contains(XrCompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA),
+                layer_count,
+                session.width,
+                session.height,
+                session.recommended_width,
+                session.recommended_height,
+            );
+            session.debug_end_frame_logs += 1;
+        }
+        session.last_end_frame_result = Some(result);
+        result.log_error("xrEndFrame");
     }
 }
 

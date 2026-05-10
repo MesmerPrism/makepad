@@ -391,6 +391,7 @@ pub enum CxOsOp {
 
     XrStartPresenting,
     XrSetRenderScale(f32),
+    XrSetNativePassthrough(bool),
     XrSetLocalAnchor(XrAnchor),
     XrSetLocalFloor(f32),
     XrAdvertiseAnchor(XrAnchor),
@@ -475,6 +476,7 @@ impl std::fmt::Debug for CxOsOp {
 
             Self::XrStartPresenting => write!(f, "XrStartPresenting"),
             Self::XrSetRenderScale(_) => write!(f, "XrSetRenderScale"),
+            Self::XrSetNativePassthrough(_) => write!(f, "XrSetNativePassthrough"),
             Self::XrStopPresenting => write!(f, "XrStopPresenting"),
             Self::XrAdvertiseAnchor(_) => write!(f, "XrAdvertiseAnchor"),
             Self::XrSetLocalAnchor(_) => write!(f, "XrSetLocalAnchor"),
@@ -792,6 +794,11 @@ impl Cx {
 
     pub fn xr_set_render_scale(&mut self, scale: f32) {
         self.platform_ops.push(CxOsOp::XrSetRenderScale(scale));
+    }
+
+    pub fn xr_set_native_passthrough(&mut self, enabled: bool) {
+        self.platform_ops
+            .push(CxOsOp::XrSetNativePassthrough(enabled));
     }
 
     pub fn xr_advertise_anchor(&mut self, anchor: XrAnchor) {

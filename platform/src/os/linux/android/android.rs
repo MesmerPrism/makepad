@@ -95,7 +95,7 @@ const ANDROID_XR_BUFFER_SCALE_DEFAULT: f32 = 1.4;
 const ANDROID_XR_BUFFER_SCALE_MAX: f32 = 1.5;
 const ANDROID_XR_MULTISAMPLES: usize = 4;
 const ANDROID_XR_FIXED_FOVEATION_LEVEL: u8 = 3;
-const ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT: bool = false;
+const ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT: bool = true;
 
 fn android_debug_log(prio: i32, msg: &str) {
     use std::ffi::c_int;
@@ -184,7 +184,7 @@ impl Cx {
             multisamples: ANDROID_XR_MULTISAMPLES,
             remove_hands_from_depth: false,
             fixed_foveation_level: ANDROID_XR_FIXED_FOVEATION_LEVEL,
-            native_passthrough: ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT,
+            native_passthrough: self.os.xr_native_passthrough_requested,
         }
     }
 
@@ -2852,6 +2852,14 @@ impl Cx {
                         self.os.xr_buffer_scale_active = scale;
                     }
                 }
+                CxOsOp::XrSetNativePassthrough(enabled) => {
+                    self.os.xr_native_passthrough_requested = enabled;
+                    crate::log!(
+                        "Android XR native passthrough requested: enabled={} appliesImmediately={}",
+                        enabled,
+                        !self.os.in_xr_mode || self.os.openxr.session.is_none()
+                    );
+                }
                 CxOsOp::XrAdvertiseAnchor(anchor) => {
                     self.os.openxr.advertise_anchor(anchor);
                 }
@@ -3165,6 +3173,7 @@ impl Default for CxOs {
             in_xr_mode: false,
             xr_buffer_scale_active: ANDROID_XR_BUFFER_SCALE_DEFAULT,
             xr_buffer_scale_requested: ANDROID_XR_BUFFER_SCALE_DEFAULT,
+            xr_native_passthrough_requested: ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT,
             xr_display_refresh_rate_active_hz: None,
             xr_effective_frame_time_ms: None,
             xr_effective_frame_rate_hz: None,
@@ -3263,6 +3272,7 @@ pub struct CxOs {
     pub(crate) in_xr_mode: bool,
     pub(crate) xr_buffer_scale_active: f32,
     pub(crate) xr_buffer_scale_requested: f32,
+    pub(crate) xr_native_passthrough_requested: bool,
     pub(crate) xr_display_refresh_rate_active_hz: Option<f32>,
     pub(crate) xr_effective_frame_time_ms: Option<f64>,
     pub(crate) xr_effective_frame_rate_hz: Option<f64>,
