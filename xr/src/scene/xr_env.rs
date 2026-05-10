@@ -585,6 +585,18 @@ impl XrEnv {
         live_id!(xr_passthrough_camera)
     }
 
+    fn passthrough_camera_enabled(&self) -> bool {
+        self.env_cube
+    }
+
+    fn sync_passthrough_camera_if_enabled(&mut self, cx: &mut Cx) {
+        if self.passthrough_camera_enabled() {
+            self.world
+                .passthrough
+                .sync_camera(cx, Self::passthrough_video_id());
+        }
+    }
+
     fn draw_pose_box(
         &mut self,
         cx: &mut Cx2d,
@@ -785,15 +797,11 @@ impl XrEnv {
         match event {
             Event::XrUpdate(update) => {
                 self.world.last_xr_state = Some(update.state.clone());
-                self.world
-                    .passthrough
-                    .sync_camera(cx, Self::passthrough_video_id());
+                self.sync_passthrough_camera_if_enabled(cx);
             }
             Event::PermissionResult(result) if result.permission == Permission::HeadsetCamera => {
                 self.world.passthrough.camera_permission = Some(result.status);
-                self.world
-                    .passthrough
-                    .sync_camera(cx, Self::passthrough_video_id());
+                self.sync_passthrough_camera_if_enabled(cx);
                 cx.redraw_all();
             }
             Event::VideoInputs(ev) => {
@@ -802,9 +810,7 @@ impl XrEnv {
                 if self.world.passthrough.camera_choice.is_none() {
                     crate::warning!("XR passthrough camera: no suitable camera choice found");
                 }
-                self.world
-                    .passthrough
-                    .sync_camera(cx, Self::passthrough_video_id());
+                self.sync_passthrough_camera_if_enabled(cx);
                 cx.redraw_all();
             }
             Event::VideoYuvTexturesReady(ev) if ev.video_id == Self::passthrough_video_id() => {

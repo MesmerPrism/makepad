@@ -54,6 +54,10 @@ This branch currently carries:
   backend multiview index to application shader code for XR per-eye texture
   selection without requiring app shaders to reference backend-specific
   symbols.
+- An XR environment camera guard so `XrEnv` does not acquire a passthrough
+  camera stream unless the environment cube is enabled. This keeps custom
+  raw-camera projection examples from competing with Makepad's environment
+  capture path when `env.env_cube` is false.
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.
