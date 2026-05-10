@@ -792,6 +792,7 @@ pub struct CxOpenXrSession {
     pub depth_provider: XrEnvironmentDepthProviderMETA,
     pub passthrough: XrPassthroughFB,
     pub passthrough_layer: XrPassthroughLayerFB,
+    pub native_passthrough_enabled: bool,
     pub environment_depth_running: bool,
     pub width: u32,
     pub height: u32,
@@ -952,25 +953,31 @@ impl CxOpenXrSession {
         ),
         String,
     > {
-        let mut passthrough = XrPassthroughFB(0);
-        let ptci = XrPassthroughCreateInfoFB {
-            flags: XrPassthroughFlagsFB(0),
-            ..Default::default()
-        };
-        unsafe { (xr.xrCreatePassthroughFB)(session, &ptci, &mut passthrough) }
-            .to_result("xrCreatePassthroughFB")?;
+        let (passthrough, passthrough_layer) = if options.native_passthrough {
+            let mut passthrough = XrPassthroughFB(0);
+            let ptci = XrPassthroughCreateInfoFB {
+                flags: XrPassthroughFlagsFB(0),
+                ..Default::default()
+            };
+            unsafe { (xr.xrCreatePassthroughFB)(session, &ptci, &mut passthrough) }
+                .to_result("xrCreatePassthroughFB")?;
 
-        let plci = XrPassthroughLayerCreateInfoFB {
-            passthrough,
-            purpose: XrPassthroughLayerPurposeFB::RECONSTRUCTION,
-            ..Default::default()
+            let plci = XrPassthroughLayerCreateInfoFB {
+                passthrough,
+                purpose: XrPassthroughLayerPurposeFB::RECONSTRUCTION,
+                ..Default::default()
+            };
+            let mut passthrough_layer = XrPassthroughLayerFB(0);
+            unsafe { (xr.xrCreatePassthroughLayerFB)(session, &plci, &mut passthrough_layer) }
+                .to_result("xrCreatePassthroughLayerFB")?;
+            unsafe { (xr.xrPassthroughStartFB)(passthrough) }.to_result("xrPassthroughStartFB")?;
+            unsafe { (xr.xrPassthroughLayerResumeFB)(passthrough_layer) }
+                .to_result("xrPassthroughLayerResumeFB")?;
+            (passthrough, passthrough_layer)
+        } else {
+            crate::log!("OpenXR native passthrough composition layer disabled by options");
+            (XrPassthroughFB(0), XrPassthroughLayerFB(0))
         };
-        let mut passthrough_layer = XrPassthroughLayerFB(0);
-        unsafe { (xr.xrCreatePassthroughLayerFB)(session, &plci, &mut passthrough_layer) }
-            .to_result("xrCreatePassthroughLayerFB")?;
-        unsafe { (xr.xrPassthroughStartFB)(passthrough) }.to_result("xrPassthroughStartFB")?;
-        unsafe { (xr.xrPassthroughLayerResumeFB)(passthrough_layer) }
-            .to_result("xrPassthroughLayerResumeFB")?;
 
         let (depth_provider, depth_swap_chain) =
             match Self::create_environment_depth(xr, session, options) {
@@ -1114,9 +1121,12 @@ impl CxOpenXrSession {
             unsafe { (xr.xrDestroyEnvironmentDepthProviderMETA)(session.depth_provider) }
                 .log_error("xrDestroyEnvironmentDepthProviderMETA");
         }
-        unsafe { (xr.xrPassthroughPauseFB)(session.passthrough) }.log_error("xrPassthroughPauseFB");
-        unsafe { (xr.xrDestroyPassthroughFB)(session.passthrough) }
-            .log_error("xrDestroyPassthroughFB");
+        if session.passthrough.0 != 0 {
+            unsafe { (xr.xrPassthroughPauseFB)(session.passthrough) }
+                .log_error("xrPassthroughPauseFB");
+            unsafe { (xr.xrDestroyPassthroughFB)(session.passthrough) }
+                .log_error("xrDestroyPassthroughFB");
+        }
         unsafe { (xr.xrDestroySwapchain)(session.color_swap_chain) }
             .log_error("xrDestroySwapchain");
         unsafe { (xr.xrDestroySpace)(session.head_space) }.log_error("xrDestroySpace");
@@ -1439,16 +1449,29 @@ impl CxOpenXrFrame {
             ..Default::default()
         };
 
-        let layers = [
+        let layers_with_passthrough = [
             &comp_passthrough as *const _ as *const XrCompositionLayerBaseHeader,
             &comp_proj as *const _ as *const XrCompositionLayerBaseHeader,
         ];
+        let layers_without_passthrough =
+            [&comp_proj as *const _ as *const XrCompositionLayerBaseHeader];
+        let (layer_count, layers) = if session.native_passthrough_enabled {
+            (
+                layers_with_passthrough.len() as u32,
+                layers_with_passthrough.as_ptr(),
+            )
+        } else {
+            (
+                layers_without_passthrough.len() as u32,
+                layers_without_passthrough.as_ptr(),
+            )
+        };
 
         let fei = XrFrameEndInfo {
             display_time: self.frame_state.predicted_display_time,
             environment_blend_mode: XrEnvironmentBlendMode::OPAQUE,
-            layer_count: layers.len() as _,
-            layers: &layers as *const *const _,
+            layer_count,
+            layers,
             ..Default::default()
         };
 
@@ -1462,4 +1485,5 @@ pub struct CxOpenXrOptions {
     pub multisamples: usize,
     pub remove_hands_from_depth: bool,
     pub fixed_foveation_level: u8,
+    pub native_passthrough: bool,
 }

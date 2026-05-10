@@ -351,6 +351,7 @@ impl CxOpenXrSession {
             depth_provider,
             passthrough,
             passthrough_layer,
+            native_passthrough_enabled: options.native_passthrough,
             environment_depth_running,
             width,
             height,

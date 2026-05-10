@@ -95,6 +95,7 @@ const ANDROID_XR_BUFFER_SCALE_DEFAULT: f32 = 1.4;
 const ANDROID_XR_BUFFER_SCALE_MAX: f32 = 1.5;
 const ANDROID_XR_MULTISAMPLES: usize = 4;
 const ANDROID_XR_FIXED_FOVEATION_LEVEL: u8 = 3;
+const ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT: bool = false;
 
 fn android_debug_log(prio: i32, msg: &str) {
     use std::ffi::c_int;
@@ -183,6 +184,7 @@ impl Cx {
             multisamples: ANDROID_XR_MULTISAMPLES,
             remove_hands_from_depth: false,
             fixed_foveation_level: ANDROID_XR_FIXED_FOVEATION_LEVEL,
+            native_passthrough: ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT,
         }
     }
 
