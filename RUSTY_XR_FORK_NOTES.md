@@ -54,6 +54,9 @@ This branch currently carries:
   backend multiview index to application shader code for XR per-eye texture
   selection without requiring app shaders to reference backend-specific
   symbols.
+- App-visible XR event-state fields for the active per-eye OpenXR local-space
+  pose/FOV, so public examples can compute display-eye projection mappings from
+  runtime view state instead of hard-coded display constants.
 - An XR environment camera guard so `XrEnv` does not acquire a passthrough
   camera stream unless the environment cube is enabled. This keeps custom
   raw-camera projection examples from competing with Makepad's environment

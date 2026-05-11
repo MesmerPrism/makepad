@@ -973,10 +973,48 @@ pub struct XrSyncAnchor {
     pub anchor: XrAnchor,
 }
 
+#[derive(Clone, Copy, Debug, Default, SerBin, DeBin, PartialEq)]
+pub struct XrEyeFov {
+    pub angle_left: f32,
+    pub angle_right: f32,
+    pub angle_up: f32,
+    pub angle_down: f32,
+}
+
+impl XrEyeFov {
+    pub fn from_camera_fov(fov: CameraFov) -> Self {
+        Self {
+            angle_left: fov.angle_left,
+            angle_right: fov.angle_right,
+            angle_up: fov.angle_up,
+            angle_down: fov.angle_down,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, SerBin, DeBin, PartialEq)]
+pub struct XrEyeView {
+    pub pose: Pose,
+    pub fov: XrEyeFov,
+    pub valid: bool,
+}
+
+impl XrEyeView {
+    pub fn from_pose_fov(pose: Pose, fov: CameraFov, valid: bool) -> Self {
+        Self {
+            pose,
+            fov: XrEyeFov::from_camera_fov(fov),
+            valid,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, SerBin, DeBin)]
 pub struct XrState {
     pub time: f64,
     pub head_pose: Pose,
+    pub left_eye_view: XrEyeView,
+    pub right_eye_view: XrEyeView,
     pub order_counter: u8,
     pub anchor: Option<XrAnchor>,
     pub anchor_persisted: bool,
@@ -993,6 +1031,8 @@ impl XrState {
             order_counter: b.order_counter,
             time: (b.time - a.time) * f as f64 + a.time,
             head_pose: Pose::from_lerp(a.head_pose, b.head_pose, f),
+            left_eye_view: b.left_eye_view,
+            right_eye_view: b.right_eye_view,
             anchor: b.anchor,
             anchor_persisted: b.anchor_persisted,
             floor_y: b.floor_y,

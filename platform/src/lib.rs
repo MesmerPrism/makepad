@@ -174,6 +174,8 @@ pub use {
             WindowMovedEvent,
             XrAnchor,
             XrController,
+            XrEyeFov,
+            XrEyeView,
             XrHand,
             XrLocalEvent,
             XrState,

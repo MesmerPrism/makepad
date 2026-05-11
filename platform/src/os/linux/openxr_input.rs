@@ -72,6 +72,16 @@ impl CxOpenXrSession {
             order_counter: self.order_counter,
             time: (frame.frame_state.predicted_display_time.as_nanos() as f64) / 1e9f64,
             head_pose: frame.local_from_head.pose,
+            left_eye_view: XrEyeView::from_pose_fov(
+                frame.eyes[0].local_from_eye,
+                frame.projections[0].fov,
+                true,
+            ),
+            right_eye_view: XrEyeView::from_pose_fov(
+                frame.eyes[1].local_from_eye,
+                frame.projections[1].fov,
+                true,
+            ),
             anchor,
             anchor_persisted: self.anchor.anchor_persisted(),
             floor_y: self.anchor.floor_y(),
