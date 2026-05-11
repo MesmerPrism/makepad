@@ -1297,7 +1297,7 @@ impl AndroidCameraAccess {
                     continue;
                 };
 
-                let name = if (*entry.data.u8_) == ACAMERA_LENS_FACING_FRONT {
+                let facing_name = if (*entry.data.u8_) == ACAMERA_LENS_FACING_FRONT {
                     "Front Camera"
                 } else if (*entry.data.u8_) == ACAMERA_LENS_FACING_BACK {
                     "Back Camera"
@@ -1306,6 +1306,11 @@ impl AndroidCameraAccess {
                 } else {
                     continue;
                 };
+                let name = format!(
+                    "{} cameraId={}",
+                    facing_name,
+                    camera_id_str.to_string_lossy()
+                );
 
                 let mut sensor_orientation_degrees = 0i32;
                 let mut orientation_entry = std::mem::zeroed();
@@ -1356,7 +1361,7 @@ impl AndroidCameraAccess {
                     let input_id = LiveId::from_str(&format!("{:?}", camera_id_str)).into();
                     let desc = VideoInputDesc {
                         input_id,
-                        name: name.to_string(),
+                        name,
                         formats,
                     };
                     self.devices.push(AndroidCameraDevice {
