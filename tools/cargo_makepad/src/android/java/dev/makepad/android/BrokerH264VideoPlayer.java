@@ -861,7 +861,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.preferredWidth = clamp(preferredWidth, 16, 4096);
             this.preferredHeight = clamp(preferredHeight, 16, 4096);
             this.captureMs = clamp(captureMs, 100, 120000);
-            this.maxPackets = clamp(maxPackets, 1, MAX_STREAM_PACKETS);
+            this.maxPackets = clamp(maxPackets, 0, MAX_STREAM_PACKETS);
             this.bitrateBps = clamp(bitrateBps, 100000, 20000000);
             this.commandTimeoutMs = clamp(commandTimeoutMs, 500, 60000);
             this.streamTimeoutMs = clamp(streamTimeoutMs, 500, 120000);
