@@ -46,6 +46,7 @@ use {
             TouchUpdateEvent,
             VideoDecodingErrorEvent,
             VideoPlaybackCompletedEvent,
+            VideoPlaybackMetadataEvent,
             VideoPlaybackPreparedEvent,
             VideoPlaybackResourcesReleasedEvent,
             VideoSource,
@@ -1078,6 +1079,16 @@ impl Cx {
                 self.os
                     .video_surfaces
                     .insert(LiveId(video_id), surface_texture);
+                self.call_event_handler(&e);
+            }
+            FromJavaMessage::VideoPlaybackMetadata {
+                video_id,
+                metadata_json,
+            } => {
+                let e = Event::VideoPlaybackMetadata(VideoPlaybackMetadataEvent {
+                    video_id: LiveId(video_id),
+                    metadata_json,
+                });
                 self.call_event_handler(&e);
             }
             FromJavaMessage::VideoPlaybackCompleted { video_id } => {

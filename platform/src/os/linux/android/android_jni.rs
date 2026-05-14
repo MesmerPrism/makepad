@@ -175,6 +175,10 @@ pub enum FromJavaMessage {
         duration: u128,
         surface_texture: jni_sys::jobject,
     },
+    VideoPlaybackMetadata {
+        video_id: u64,
+        metadata_json: String,
+    },
     VideoPlaybackCompleted {
         video_id: u64,
     },
@@ -1022,6 +1026,24 @@ pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoPlaybackP
         video_height: video_height as u32,
         duration: duration as u128,
         surface_texture: global_ref,
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoPlaybackMetadata(
+    env: *mut jni_sys::JNIEnv,
+    _: jni_sys::jobject,
+    video_id: jni_sys::jlong,
+    metadata_json: jni_sys::jstring,
+) {
+    let metadata_json = if metadata_json.is_null() {
+        String::new()
+    } else {
+        jstring_to_string(env, metadata_json)
+    };
+    send_from_java_message(FromJavaMessage::VideoPlaybackMetadata {
+        video_id: video_id as u64,
+        metadata_json,
     });
 }
 

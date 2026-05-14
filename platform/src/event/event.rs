@@ -234,6 +234,7 @@ pub enum Event {
     NetworkResponses(NetworkResponsesEvent),
 
     VideoPlaybackPrepared(VideoPlaybackPreparedEvent),
+    VideoPlaybackMetadata(VideoPlaybackMetadataEvent),
     VideoTextureUpdated(VideoTextureUpdatedEvent),
     VideoPlaybackCompleted(VideoPlaybackCompletedEvent),
     VideoPlaybackResourcesReleased(VideoPlaybackResourcesReleasedEvent),
@@ -333,6 +334,7 @@ impl Event {
             63 => "VideoSeekableRanges",
             64 => "VideoBufferedRanges",
             65 => "VideoYuvTexturesReady",
+            68 => "VideoPlaybackMetadata",
             51 => "MouseLeave",
             52 => "Actions",
             53 => "BackPressed",
@@ -413,6 +415,7 @@ impl Event {
             Self::NetworkResponses(_) => 44,
 
             Self::VideoPlaybackPrepared(_) => 45,
+            Self::VideoPlaybackMetadata(_) => 68,
             Self::VideoTextureUpdated(_) => 46,
             Self::VideoPlaybackCompleted(_) => 47,
             Self::VideoDecodingError(_) => 48,

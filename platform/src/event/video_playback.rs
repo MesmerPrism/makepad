@@ -19,6 +19,12 @@ pub struct VideoPlaybackPreparedEvent {
     pub audio_tracks: Vec<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct VideoPlaybackMetadataEvent {
+    pub video_id: LiveId,
+    pub metadata_json: String,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VideoYuvMetadata {
     /// When true, the shader should use YUV textures instead of external RGB.

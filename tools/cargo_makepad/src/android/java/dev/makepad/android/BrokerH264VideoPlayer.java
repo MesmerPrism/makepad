@@ -273,7 +273,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         decoder.configure(format, mDecodeSurface, null, 0);
         decoder.start();
         requestDecoderLowLatency(decoder);
-        notifyPrepared(header.width, header.height);
+        notifyPrepared(header);
 
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         int nextPending = 0;
@@ -367,10 +367,12 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             throw new IllegalStateException("Broker stream metadata header is out of range: " + headerMetadataBytes);
         }
         JSONObject projectionMetadata = null;
+        String projectionMetadataJson = "";
         if (headerMetadataBytes > 0) {
             byte[] metadataBytes = new byte[headerMetadataBytes];
             input.readFully(metadataBytes);
             String metadataJson = new String(metadataBytes, StandardCharsets.UTF_8);
+            projectionMetadataJson = metadataJson;
             try {
                 projectionMetadata = new JSONObject(metadataJson);
             } catch (Exception ex) {
@@ -410,6 +412,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             height,
             packetCount,
             headerMetadataBytes,
+            projectionMetadataJson,
             projectionMetadata);
     }
 
@@ -469,17 +472,28 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         decoder.queueInputBuffer(inputIndex, 0, packet.payload.length, packet.ptsUs, flags);
     }
 
-    private void notifyPrepared(int width, int height) {
+    private void notifyPrepared(StreamHeader header) {
         Activity activity = mActivityReference.get();
+        String metadataJson = header.projectionMetadataJson != null
+            ? header.projectionMetadataJson
+            : "";
         if (activity != null) {
-            activity.runOnUiThread(() -> MakepadNative.onVideoPlaybackPrepared(
-                mVideoId,
-                width,
-                height,
-                0L,
-                BrokerH264VideoPlayer.this));
+            activity.runOnUiThread(() -> {
+                if (metadataJson.length() > 0) {
+                    MakepadNative.onVideoPlaybackMetadata(mVideoId, metadataJson);
+                }
+                MakepadNative.onVideoPlaybackPrepared(
+                    mVideoId,
+                    header.width,
+                    header.height,
+                    0L,
+                    BrokerH264VideoPlayer.this);
+            });
         } else {
-            MakepadNative.onVideoPlaybackPrepared(mVideoId, width, height, 0L, this);
+            if (metadataJson.length() > 0) {
+                MakepadNative.onVideoPlaybackMetadata(mVideoId, metadataJson);
+            }
+            MakepadNative.onVideoPlaybackPrepared(mVideoId, header.width, header.height, 0L, this);
         }
     }
 
@@ -825,6 +839,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         final int height;
         final int packetCount;
         final int headerMetadataBytes;
+        final String projectionMetadataJson;
         final JSONObject projectionMetadata;
 
         StreamHeader(
@@ -834,6 +849,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             int height,
             int packetCount,
             int headerMetadataBytes,
+            String projectionMetadataJson,
             JSONObject projectionMetadata) {
             this.schemaVersion = schemaVersion;
             this.codecId = codecId;
@@ -841,6 +857,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.height = Math.max(1, height);
             this.packetCount = packetCount;
             this.headerMetadataBytes = headerMetadataBytes;
+            this.projectionMetadataJson = projectionMetadataJson;
             this.projectionMetadata = projectionMetadata;
         }
     }
