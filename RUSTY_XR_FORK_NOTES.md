@@ -51,9 +51,13 @@ This branch currently carries:
   request headset-camera access on platforms where raw headset cameras are
   gated separately from the ordinary camera permission.
 - An Android-only broker H.264 video source that uses the platform WebSocket
-  command path, framed TCP H.264 packets, and MediaCodec `SurfaceTexture`
-  output so public examples can consume broker-managed synthetic or camera
-  streams through Makepad's existing external-video texture path.
+  command path, framed TCP H.264 packets, and Android MediaCodec so public
+  examples can consume broker-managed synthetic or camera streams. On GL paths
+  it can use Makepad's existing external-video texture handoff; on Quest
+  Vulkan/XR paths it can fall back to decoded CPU-YUV plane upload because no
+  GL external texture handle is available.
+- A video-source metadata event that forwards broker stream-header projection
+  metadata to app code before projection-stage rows are derived.
 - A small shader builtin, `xr_view_id()`, that exposes Makepad's existing
   backend multiview index to application shader code for XR per-eye texture
   selection without requiring app shaders to reference backend-specific
@@ -88,6 +92,26 @@ cargo check -p cargo-makepad
 cargo build -p cargo-makepad --release
 ```
 
+When Android Java bridge code changes, also compile the touched Java classes
+against the Android platform jar used by the target SDK. When generated Android
+templates or `cargo-makepad` packaging code changes, reinstall
+`cargo-makepad` from this checkout before rebuilding a Rusty XR APK; a
+downstream `Cargo.lock` pin alone does not update the packager binary.
+
 Quest smoke validation should start with a minimal Makepad Android/Vulkan
 surface before Rusty XR camera, broker, stream, or renderer measurements are
 interpreted.
+
+For broker H.264 validation, preserve `max_packets=0` as the live/unbounded
+stream request. Clamping it to one packet can still produce stream-header
+metadata but leaves MediaCodec without enough frames to prove decoded input
+parity. Treat CPU-YUV decoded cadence and zero-copy surface-texture transport
+as separate performance conclusions.
+
+The GL `SurfaceTexture` path remains useful when the renderer is actually
+OpenGL ES: Android MediaCodec and camera preview APIs naturally output to a
+`SurfaceTexture` backed by `GL_TEXTURE_EXTERNAL_OES`. That does not by itself
+solve the Quest Vulkan/XR path, where a GL texture handle is not a Vulkan image.
+If Rusty XR explores a video-only OpenGL ES receiver, treat that as a separate
+OpenXR+GL app architecture rather than as evidence that the current
+Makepad/Vulkan CPU-YUV bridge is a final performance path.

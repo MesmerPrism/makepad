@@ -42,6 +42,10 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
   depth provider, depth swapchain, depth image, or depth start calls.
 - Makepad `Video` widget camera-permission routing when headset raw-camera
   sources require a different runtime permission from ordinary app cameras.
+- Android broker H.264 video-source plumbing that stays generic: public command
+  and `RXYRVID1` stream framing, MediaCodec decode, stream-header metadata
+  events, and a CPU-YUV decoded handoff for Vulkan/XR paths without a GL
+  external texture handle.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 
@@ -67,6 +71,17 @@ cargo build -p cargo-makepad --release
 Do not claim Makepad has a clean repo-wide formatting gate from this branch.
 `cargo fmt --all --check` currently reaches unrelated vendored/generated and
 Makepad-wide issues after the CSG metadata fix.
+
+If Android Java bridge code or `cargo-makepad` generated-template code changes,
+run a touched-class Java compile against the Android target platform jar, then
+reinstall `cargo-makepad` from this checkout before rebuilding downstream APKs.
+The downstream Rust dependency lockfile does not update the installed packager.
+
+Broker H.264 stream semantics matter for validation: `max_packets=0` means
+live/unbounded, not one packet. A run that only proves stream-header metadata
+does not prove decoded source parity; require prepared decode state, CPU-YUV
+texture readiness or another explicit texture handoff, nonzero texture-update
+cadence, and zero decode errors before comparing projection stages.
 
 For Quest comparison work, keep the ladder ordered:
 
