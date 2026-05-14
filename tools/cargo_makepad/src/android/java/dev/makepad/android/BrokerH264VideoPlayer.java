@@ -2,6 +2,7 @@ package dev.makepad.android;
 
 import android.app.Activity;
 import android.graphics.SurfaceTexture;
+import android.media.Image;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
@@ -54,19 +55,21 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     @Override
     public void prepareVideoPlayback() {
         try {
-            mSurfaceTexture = new SurfaceTexture(mExternalTextureHandle);
-            mSurfaceTexture.setDefaultBufferSize(
-                Math.max(1, mConfig.preferredWidth),
-                Math.max(1, mConfig.preferredHeight));
+            if (usesExternalTexture()) {
+                mSurfaceTexture = new SurfaceTexture(mExternalTextureHandle);
+                mSurfaceTexture.setDefaultBufferSize(
+                    Math.max(1, mConfig.preferredWidth),
+                    Math.max(1, mConfig.preferredHeight));
 
-            mHandlerThread = new android.os.HandlerThread("BrokerH264SurfaceTexture");
-            mHandlerThread.start();
-            mGlHandler = new android.os.Handler(mHandlerThread.getLooper());
-            mSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
-                mAvailableFrames.incrementAndGet();
-            }, mGlHandler);
+                mHandlerThread = new android.os.HandlerThread("BrokerH264SurfaceTexture");
+                mHandlerThread.start();
+                mGlHandler = new android.os.Handler(mHandlerThread.getLooper());
+                mSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
+                    mAvailableFrames.incrementAndGet();
+                }, mGlHandler);
 
-            mDecodeSurface = new Surface(mSurfaceTexture);
+                mDecodeSurface = new Surface(mSurfaceTexture);
+            }
             mIsPrepared = true;
             if (mAutoplay) {
                 beginPlayback();
@@ -146,6 +149,10 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
     private boolean shouldStartBrokerStream() {
         return !"existing-stream".equals(normalizeSourceMode(mConfig.sourceMode));
+    }
+
+    private boolean usesExternalTexture() {
+        return mExternalTextureHandle > 0;
     }
 
     private JSONObject sendStartCommand() throws Exception {
@@ -267,6 +274,14 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1);
         } catch (Exception ignored) {
         }
+        if (!usesExternalTexture()) {
+            try {
+                format.setInteger(
+                    MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible);
+            } catch (Exception ignored) {
+            }
+        }
 
         MediaCodec decoder = MediaCodec.createDecoderByType("video/avc");
         mDecoder = decoder;
@@ -331,10 +346,21 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
             boolean codecConfig = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
             boolean eos = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
-            decoder.releaseOutputBuffer(outputIndex, !codecConfig && !eos);
+            boolean renderToSurface = usesExternalTexture() && !codecConfig && !eos;
             if (!codecConfig && !eos) {
+                if (!usesExternalTexture()) {
+                    Image image = decoder.getOutputImage(outputIndex);
+                    if (image != null) {
+                        try {
+                            emitYuvFrame(image, info.presentationTimeUs);
+                        } finally {
+                            image.close();
+                        }
+                    }
+                }
                 decodedFrameCount++;
             }
+            decoder.releaseOutputBuffer(outputIndex, renderToSurface);
             outputEosSeen = eos;
         }
 
@@ -472,11 +498,45 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         decoder.queueInputBuffer(inputIndex, 0, packet.payload.length, packet.ptsUs, flags);
     }
 
+    private void emitYuvFrame(Image image, long ptsUs) {
+        Image.Plane[] planes = image.getPlanes();
+        if (planes == null || planes.length < 3) {
+            return;
+        }
+        int width = Math.max(1, image.getWidth());
+        int height = Math.max(1, image.getHeight());
+        int chromaWidth = (width + 1) / 2;
+        int chromaHeight = (height + 1) / 2;
+        byte[] y = copyPlane(planes[0], width, height);
+        byte[] u = copyPlane(planes[1], chromaWidth, chromaHeight);
+        byte[] v = copyPlane(planes[2], chromaWidth, chromaHeight);
+        MakepadNative.onVideoYuvFrame(mVideoId, width, height, ptsUs / 1000L, y, u, v);
+    }
+
+    private static byte[] copyPlane(Image.Plane plane, int width, int height) {
+        ByteBuffer buffer = plane.getBuffer().duplicate();
+        int rowStride = Math.max(1, plane.getRowStride());
+        int pixelStride = Math.max(1, plane.getPixelStride());
+        int base = buffer.position();
+        int limit = buffer.limit();
+        byte[] out = new byte[Math.max(0, width * height)];
+        int dst = 0;
+        for (int y = 0; y < height; y++) {
+            int row = base + y * rowStride;
+            for (int x = 0; x < width; x++) {
+                int src = row + x * pixelStride;
+                out[dst++] = src >= 0 && src < limit ? buffer.get(src) : 0;
+            }
+        }
+        return out;
+    }
+
     private void notifyPrepared(StreamHeader header) {
         Activity activity = mActivityReference.get();
         String metadataJson = header.projectionMetadataJson != null
             ? header.projectionMetadataJson
             : "";
+        VideoPlayer preparedSurface = usesExternalTexture() ? BrokerH264VideoPlayer.this : null;
         if (activity != null) {
             activity.runOnUiThread(() -> {
                 if (metadataJson.length() > 0) {
@@ -487,13 +547,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     header.width,
                     header.height,
                     0L,
-                    BrokerH264VideoPlayer.this);
+                    preparedSurface);
             });
         } else {
             if (metadataJson.length() > 0) {
                 MakepadNative.onVideoPlaybackMetadata(mVideoId, metadataJson);
             }
-            MakepadNative.onVideoPlaybackPrepared(mVideoId, header.width, header.height, 0L, this);
+            MakepadNative.onVideoPlaybackPrepared(mVideoId, header.width, header.height, 0L, preparedSurface);
         }
     }
 

@@ -1076,9 +1076,11 @@ impl Cx {
                     audio_tracks: vec!["audio".to_string()],
                 });
 
-                self.os
-                    .video_surfaces
-                    .insert(LiveId(video_id), surface_texture);
+                if !surface_texture.is_null() {
+                    self.os
+                        .video_surfaces
+                        .insert(LiveId(video_id), surface_texture);
+                }
                 self.call_event_handler(&e);
             }
             FromJavaMessage::VideoPlaybackMetadata {
@@ -1090,6 +1092,52 @@ impl Cx {
                     metadata_json,
                 });
                 self.call_event_handler(&e);
+            }
+            FromJavaMessage::VideoYuvFrame {
+                video_id,
+                width,
+                height,
+                position_ms,
+                y,
+                u,
+                v,
+            } => {
+                let live_id = LiveId(video_id);
+                if let Some(config) = self.os.video_configs.get(&live_id).cloned() {
+                    replace_r8_plane_texture(
+                        &mut self.textures,
+                        config.tex_y_id,
+                        width.max(1) as usize,
+                        height.max(1) as usize,
+                        y,
+                    );
+                    replace_r8_plane_texture(
+                        &mut self.textures,
+                        config.tex_u_id,
+                        width.div_ceil(2).max(1) as usize,
+                        height.div_ceil(2).max(1) as usize,
+                        u,
+                    );
+                    replace_r8_plane_texture(
+                        &mut self.textures,
+                        config.tex_v_id,
+                        width.div_ceil(2).max(1) as usize,
+                        height.div_ceil(2).max(1) as usize,
+                        v,
+                    );
+                    self.call_event_handler(&Event::VideoTextureUpdated(
+                        VideoTextureUpdatedEvent {
+                            video_id: live_id,
+                            current_position_ms: position_ms,
+                            yuv: crate::event::video_playback::VideoYuvMetadata {
+                                enabled: true,
+                                matrix: 1.0,
+                                biplanar: false,
+                                rotation_steps: 0.0,
+                            },
+                        },
+                    ));
+                }
             }
             FromJavaMessage::VideoPlaybackCompleted { video_id } => {
                 let e = Event::VideoPlaybackCompleted(VideoPlaybackCompletedEvent {
@@ -3235,6 +3283,40 @@ pub(crate) struct AndroidSoftwarePlayer {
     pub tex_u_id: TextureId,
     pub tex_v_id: TextureId,
     pub yuv_matrix: f32,
+}
+
+fn replace_r8_plane_texture(
+    textures: &mut crate::texture::CxTexturePool,
+    texture_id: TextureId,
+    width: usize,
+    height: usize,
+    data: Vec<u8>,
+) {
+    let texture = &mut textures[texture_id];
+    match &mut texture.format {
+        TextureFormat::VecRu8 {
+            width: texture_width,
+            height: texture_height,
+            data: texture_data,
+            updated,
+            ..
+        } => {
+            *texture_width = width;
+            *texture_height = height;
+            *texture_data = Some(data);
+            *updated = updated.clone().update(None);
+        }
+        TextureFormat::VideoYuvPlane => {
+            texture.format = TextureFormat::VecRu8 {
+                width,
+                height,
+                data: Some(data),
+                unpack_row_length: None,
+                updated: TextureUpdated::Full,
+            };
+        }
+        _ => {}
+    }
 }
 
 pub struct CxOs {

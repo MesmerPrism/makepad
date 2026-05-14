@@ -179,6 +179,15 @@ pub enum FromJavaMessage {
         video_id: u64,
         metadata_json: String,
     },
+    VideoYuvFrame {
+        video_id: u64,
+        width: u32,
+        height: u32,
+        position_ms: u128,
+        y: Vec<u8>,
+        u: Vec<u8>,
+        v: Vec<u8>,
+    },
     VideoPlaybackCompleted {
         video_id: u64,
     },
@@ -1018,7 +1027,11 @@ pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoPlaybackP
 ) {
     let env = attach_jni_env();
 
-    let global_ref = (**env).NewGlobalRef.unwrap()(env, surface_texture);
+    let global_ref = if surface_texture.is_null() {
+        std::ptr::null_mut()
+    } else {
+        (**env).NewGlobalRef.unwrap()(env, surface_texture)
+    };
 
     send_from_java_message(FromJavaMessage::VideoPlaybackPrepared {
         video_id: video_id as u64,
@@ -1044,6 +1057,32 @@ pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoPlaybackM
     send_from_java_message(FromJavaMessage::VideoPlaybackMetadata {
         video_id: video_id as u64,
         metadata_json,
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoYuvFrame(
+    env: *mut jni_sys::JNIEnv,
+    _: jni_sys::jobject,
+    video_id: jni_sys::jlong,
+    width: jni_sys::jint,
+    height: jni_sys::jint,
+    position_ms: jni_sys::jlong,
+    y: jni_sys::jbyteArray,
+    u: jni_sys::jbyteArray,
+    v: jni_sys::jbyteArray,
+) {
+    if y.is_null() || u.is_null() || v.is_null() {
+        return;
+    }
+    send_from_java_message(FromJavaMessage::VideoYuvFrame {
+        video_id: video_id as u64,
+        width: width.max(0) as u32,
+        height: height.max(0) as u32,
+        position_ms: position_ms.max(0) as u128,
+        y: java_byte_array_to_vec(env, y),
+        u: java_byte_array_to_vec(env, u),
+        v: java_byte_array_to_vec(env, v),
     });
 }
 
