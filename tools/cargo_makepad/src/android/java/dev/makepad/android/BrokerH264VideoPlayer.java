@@ -366,19 +366,51 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         if (headerMetadataBytes < 0 || headerMetadataBytes > MAX_STREAM_HEADER_METADATA_BYTES) {
             throw new IllegalStateException("Broker stream metadata header is out of range: " + headerMetadataBytes);
         }
+        JSONObject projectionMetadata = null;
         if (headerMetadataBytes > 0) {
-            byte[] ignored = new byte[headerMetadataBytes];
-            input.readFully(ignored);
+            byte[] metadataBytes = new byte[headerMetadataBytes];
+            input.readFully(metadataBytes);
+            String metadataJson = new String(metadataBytes, StandardCharsets.UTF_8);
+            try {
+                projectionMetadata = new JSONObject(metadataJson);
+            } catch (Exception ex) {
+                Log.w(TAG, String.format(
+                    Locale.US,
+                    "Broker H.264 stream header metadata parse failed videoId=%d bytes=%d error=%s",
+                    mVideoId,
+                    headerMetadataBytes,
+                    safeMessage(ex)));
+            }
         }
+
+        boolean metadataReady = projectionMetadata != null &&
+            projectionMetadata.optBoolean("projectionMetadataReady", false);
+        String metadataCameraId = projectionMetadata != null
+            ? projectionMetadata.optString("cameraId", "")
+            : "";
+        String metadataSource = projectionMetadata != null
+            ? projectionMetadata.optString("source", "")
+            : "";
         Log.i(TAG, String.format(
             Locale.US,
-            "Broker H.264 stream header videoId=%d schema=%d width=%d height=%d packets=%d",
+            "Broker H.264 stream header videoId=%d schema=%d width=%d height=%d packets=%d metadataBytes=%d metadataReady=%s cameraId=%s source=%s",
             mVideoId,
             schemaVersion,
             width,
             height,
-            packetCount));
-        return new StreamHeader(schemaVersion, codecId, width, height, packetCount);
+            packetCount,
+            headerMetadataBytes,
+            metadataReady,
+            metadataCameraId,
+            metadataSource));
+        return new StreamHeader(
+            schemaVersion,
+            codecId,
+            width,
+            height,
+            packetCount,
+            headerMetadataBytes,
+            projectionMetadata);
     }
 
     private boolean shouldReadMorePrimerPackets(StreamHeader header, List<Packet> pending, int packetsRead) {
@@ -792,13 +824,24 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         final int width;
         final int height;
         final int packetCount;
+        final int headerMetadataBytes;
+        final JSONObject projectionMetadata;
 
-        StreamHeader(int schemaVersion, int codecId, int width, int height, int packetCount) {
+        StreamHeader(
+            int schemaVersion,
+            int codecId,
+            int width,
+            int height,
+            int packetCount,
+            int headerMetadataBytes,
+            JSONObject projectionMetadata) {
             this.schemaVersion = schemaVersion;
             this.codecId = codecId;
             this.width = Math.max(1, width);
             this.height = Math.max(1, height);
             this.packetCount = packetCount;
+            this.headerMetadataBytes = headerMetadataBytes;
+            this.projectionMetadata = projectionMetadata;
         }
     }
 
