@@ -754,6 +754,14 @@ impl Cx {
                             VideoDecodingErrorEvent { video_id, error },
                         ));
                     }
+                    VideoSource::BrokerH264(..) => {
+                        let error =
+                            "VideoSource::BrokerH264 is only supported on Android".to_string();
+                        crate::error!("{}", error);
+                        self.call_event_handler(&Event::VideoDecodingError(
+                            VideoDecodingErrorEvent { video_id, error },
+                        ));
+                    }
                     VideoSource::PlaybackSession(..) | VideoSource::Session(..) => {
                         let error = "VideoSource::Session is not supported on web".to_string();
                         crate::error!("{}", error);

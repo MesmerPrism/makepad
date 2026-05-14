@@ -2412,6 +2412,50 @@ public class MakepadActivity
         mVideoPlaybackHandler.post(runnable);
     }
 
+    public void prepareBrokerH264VideoPlayback(
+            long videoId,
+            String brokerHost,
+            int brokerPort,
+            int streamPort,
+            String sourceMode,
+            String syntheticPattern,
+            int preferredWidth,
+            int preferredHeight,
+            int captureMs,
+            int maxPackets,
+            int bitrateBps,
+            int commandTimeoutMs,
+            int streamTimeoutMs,
+            int decodeTimeoutMs,
+            int externalTextureHandle,
+            boolean autoplay,
+            boolean shouldLoop,
+            boolean liveStream) {
+        BrokerH264VideoPlayer.Config config = new BrokerH264VideoPlayer.Config(
+            brokerHost,
+            brokerPort,
+            streamPort,
+            sourceMode,
+            syntheticPattern,
+            preferredWidth,
+            preferredHeight,
+            captureMs,
+            maxPackets,
+            bitrateBps,
+            commandTimeoutMs,
+            streamTimeoutMs,
+            decodeTimeoutMs,
+            liveStream);
+        VideoPlayer videoPlayer = new BrokerH264VideoPlayer(this, videoId, config);
+        videoPlayer.setExternalTextureHandle(externalTextureHandle);
+        videoPlayer.setAutoplay(autoplay);
+        videoPlayer.setShouldLoop(shouldLoop);
+        VideoPlayerRunnable runnable = new VideoPlayerRunnable(videoPlayer);
+
+        mVideoPlayerRunnables.put(videoId, runnable);
+        mVideoPlaybackHandler.post(runnable);
+    }
+
     public void beginVideoPlayback(long videoId) {
         VideoPlayerRunnable runnable = mVideoPlayerRunnables.get(videoId);
         if(runnable != null) {

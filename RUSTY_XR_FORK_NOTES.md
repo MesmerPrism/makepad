@@ -50,6 +50,10 @@ This branch currently carries:
 - A `Video` widget camera-permission option so camera playback can explicitly
   request headset-camera access on platforms where raw headset cameras are
   gated separately from the ordinary camera permission.
+- An Android-only broker H.264 video source that uses the platform WebSocket
+  command path, framed TCP H.264 packets, and MediaCodec `SurfaceTexture`
+  output so public examples can consume broker-managed synthetic or camera
+  streams through Makepad's existing external-video texture path.
 - A small shader builtin, `xr_view_id()`, that exposes Makepad's existing
   backend multiview index to application shader code for XR per-eye texture
   selection without requiring app shaders to reference backend-specific

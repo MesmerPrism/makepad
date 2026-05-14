@@ -792,6 +792,15 @@ impl X11Cx {
                         ));
                         continue;
                     }
+                    if let VideoSource::BrokerH264(..) = source {
+                        let error =
+                            "VideoSource::BrokerH264 is only supported on Android".to_string();
+                        crate::error!("{}", error);
+                        cx.call_event_handler(&Event::VideoDecodingError(
+                            VideoDecodingErrorEvent { video_id, error },
+                        ));
+                        continue;
+                    }
                     // Try GStreamer first, fall back to software rav1d
                     let force_software_env =
                         std::env::var_os("MAKEPAD_FORCE_SOFTWARE_VIDEO").is_some();

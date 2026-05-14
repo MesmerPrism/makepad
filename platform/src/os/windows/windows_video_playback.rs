@@ -597,6 +597,10 @@ impl WindowsVideoPlayer {
                 error!("VIDEO: Camera source not supported on Windows");
                 (vec![0], None)
             }
+            VideoSource::BrokerH264(..) => {
+                error!("VIDEO: Broker H.264 source is only supported on Android");
+                (vec![0], None)
+            }
             VideoSource::PlaybackSession(..) | VideoSource::Session(..) => {
                 error!("VIDEO: session sources are handled by the software video player");
                 (vec![0], None)

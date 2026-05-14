@@ -732,6 +732,7 @@ fn compile_java(
         makepad_java_classes_dir.join("MakepadWebSocketReader.java"),
         makepad_java_classes_dir.join("ByteArrayMediaDataSource.java"),
         makepad_java_classes_dir.join("VideoPlayer.java"),
+        makepad_java_classes_dir.join("BrokerH264VideoPlayer.java"),
         makepad_java_classes_dir.join("VideoPlayerRunnable.java"),
         makepad_java_classes_dir.join("H264Encoder.java"),
         build_paths.java_file.clone(),

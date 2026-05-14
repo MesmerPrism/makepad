@@ -1793,6 +1793,18 @@ pub unsafe fn to_java_prepare_video_playback(
     autoplay: bool,
     should_loop: bool,
 ) {
+    if let VideoSource::BrokerH264(config) = source {
+        to_java_prepare_broker_h264_video_playback(
+            env,
+            video_id,
+            config,
+            external_texture_handle,
+            autoplay,
+            should_loop,
+        );
+        return;
+    }
+
     let video_source = match source {
         VideoSource::InMemory(data) => {
             let source = &*data;
@@ -1817,6 +1829,7 @@ pub unsafe fn to_java_prepare_video_playback(
             crate::error!("VIDEO: Camera source not supported on Android");
             return;
         }
+        VideoSource::BrokerH264(..) => unreachable!(),
         VideoSource::PlaybackSession(..) | VideoSource::Session(..) => {
             crate::error!("VIDEO: session sources are handled by the software video player");
             return;
@@ -1836,6 +1849,51 @@ pub unsafe fn to_java_prepare_video_playback(
     );
 
     (**env).DeleteLocalRef.unwrap()(env, video_source);
+}
+
+unsafe fn to_java_prepare_broker_h264_video_playback(
+    env: *mut jni_sys::JNIEnv,
+    video_id: LiveId,
+    source: crate::event::video_playback::BrokerH264VideoSource,
+    external_texture_handle: u32,
+    autoplay: bool,
+    should_loop: bool,
+) {
+    let broker_host = CString::new(source.broker_host).unwrap();
+    let source_mode = CString::new(source.source_mode).unwrap();
+    let synthetic_pattern = CString::new(source.synthetic_pattern).unwrap();
+    let broker_host = ((**env).NewStringUTF.unwrap())(env, broker_host.as_ptr());
+    let source_mode = ((**env).NewStringUTF.unwrap())(env, source_mode.as_ptr());
+    let synthetic_pattern = ((**env).NewStringUTF.unwrap())(env, synthetic_pattern.as_ptr());
+
+    ndk_utils::call_void_method!(
+        env,
+        get_activity(),
+        "prepareBrokerH264VideoPlayback",
+        "(JLjava/lang/String;IILjava/lang/String;Ljava/lang/String;IIIIIIIIIZZZ)V",
+        video_id.get_value() as jni_sys::jlong,
+        broker_host,
+        source.broker_port as jni_sys::jint,
+        source.stream_port as jni_sys::jint,
+        source_mode,
+        synthetic_pattern,
+        source.preferred_width as jni_sys::jint,
+        source.preferred_height as jni_sys::jint,
+        source.capture_ms as jni_sys::jint,
+        source.max_packets as jni_sys::jint,
+        source.bitrate_bps as jni_sys::jint,
+        source.command_timeout_ms as jni_sys::jint,
+        source.stream_timeout_ms as jni_sys::jint,
+        source.decode_timeout_ms as jni_sys::jint,
+        external_texture_handle as jni_sys::jint,
+        autoplay as jni_sys::jboolean as std::ffi::c_uint,
+        should_loop as jni_sys::jboolean as std::ffi::c_uint,
+        source.live_stream as jni_sys::jboolean as std::ffi::c_uint
+    );
+
+    (**env).DeleteLocalRef.unwrap()(env, broker_host);
+    (**env).DeleteLocalRef.unwrap()(env, source_mode);
+    (**env).DeleteLocalRef.unwrap()(env, synthetic_pattern);
 }
 
 pub unsafe fn to_java_update_tex_image(

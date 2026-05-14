@@ -226,23 +226,23 @@ public class VideoPlayer {
         mSource = source;
     }
 
-    private long mVideoId;
+    protected long mVideoId;
 
     // player
     private MediaPlayer mMediaPlayer;
-    private boolean mIsPrepared = false; 
-    private boolean mIsDecoding = false;
+    protected boolean mIsPrepared = false;
+    protected boolean mIsDecoding = false;
     private Object mSource;
-    private int mExternalTextureHandle;
-    private SurfaceTexture mSurfaceTexture;
-    private AtomicInteger mAvailableFrames = new AtomicInteger(0);
-    private Handler mGlHandler;
-    private HandlerThread mHandlerThread;
+    protected int mExternalTextureHandle;
+    protected SurfaceTexture mSurfaceTexture;
+    protected AtomicInteger mAvailableFrames = new AtomicInteger(0);
+    protected Handler mGlHandler;
+    protected HandlerThread mHandlerThread;
 
     // playback
-    private boolean mAutoplay = false;
-    private boolean mShouldLoop = false;
+    protected boolean mAutoplay = false;
+    protected boolean mShouldLoop = false;
     
     // context
-    private WeakReference<Activity> mActivityReference;
+    protected WeakReference<Activity> mActivityReference;
 }

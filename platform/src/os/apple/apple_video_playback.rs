@@ -162,6 +162,13 @@ impl AppleVideoPlayer {
                 let _: () = msg_send![ns_string, release];
                 (url, None)
             }
+            VideoSource::BrokerH264(..) => {
+                error!("VIDEO: Broker H.264 source is only supported on Android");
+                let ns_string = Self::to_nsstring("about:blank");
+                let url: ObjcId = msg_send![class!(NSURL), URLWithString: ns_string];
+                let _: () = msg_send![ns_string, release];
+                (url, None)
+            }
             VideoSource::PlaybackSession(..) | VideoSource::Session(..) => {
                 error!("VIDEO: session sources are handled by the software video player");
                 let ns_string = Self::to_nsstring("about:blank");

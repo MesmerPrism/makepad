@@ -68,11 +68,51 @@ pub enum CameraPreviewMode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct BrokerH264VideoSource {
+    pub broker_host: String,
+    pub broker_port: u16,
+    pub stream_port: u16,
+    pub source_mode: String,
+    pub synthetic_pattern: String,
+    pub preferred_width: u32,
+    pub preferred_height: u32,
+    pub capture_ms: u32,
+    pub max_packets: u32,
+    pub bitrate_bps: u32,
+    pub command_timeout_ms: u32,
+    pub stream_timeout_ms: u32,
+    pub decode_timeout_ms: u32,
+    pub live_stream: bool,
+}
+
+impl Default for BrokerH264VideoSource {
+    fn default() -> Self {
+        Self {
+            broker_host: "127.0.0.1".to_string(),
+            broker_port: 8765,
+            stream_port: 8879,
+            source_mode: "broker-synthetic".to_string(),
+            synthetic_pattern: "diagnostic-grid".to_string(),
+            preferred_width: 1280,
+            preferred_height: 1280,
+            capture_ms: 900,
+            max_packets: 32,
+            bitrate_bps: 2_000_000,
+            command_timeout_ms: 10_000,
+            stream_timeout_ms: 20_000,
+            decode_timeout_ms: 5_000,
+            live_stream: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum VideoSource {
     InMemory(Rc<Vec<u8>>),
     Network(String),
     Filesystem(String),
     Camera(VideoInputId, VideoFormatId),
+    BrokerH264(BrokerH264VideoSource),
     PlaybackSession(MediaPlaybackSessionId),
     Session(VideoFrameSessionId),
 }
@@ -80,6 +120,17 @@ pub enum VideoSource {
 impl VideoSource {
     pub fn is_session(&self) -> bool {
         matches!(self, Self::PlaybackSession(..) | Self::Session(..))
+    }
+
+    pub fn supports_software_fallback(&self) -> bool {
+        matches!(
+            self,
+            Self::InMemory(..)
+                | Self::Network(..)
+                | Self::Filesystem(..)
+                | Self::PlaybackSession(..)
+                | Self::Session(..)
+        )
     }
 }
 

@@ -1110,6 +1110,14 @@ impl Cx {
                 let force_native = force_native_video();
                 if !force_native && !self.os.software_video_players.contains_key(&live_id) {
                     if let Some(config) = self.os.video_configs.get(&live_id).cloned() {
+                        if !config.source.supports_software_fallback() {
+                            let e = Event::VideoDecodingError(VideoDecodingErrorEvent {
+                                video_id: live_id,
+                                error,
+                            });
+                            self.call_event_handler(&e);
+                            return;
+                        }
                         crate::log!(
                             "VIDEO: Android native decode failed for {}, falling back to software video: {}",
                             live_id.0,
@@ -2584,7 +2592,9 @@ impl Cx {
                     );
 
                     let force_software_env = force_software_video();
-                    let force_software = force_software_env || source.is_session();
+                    let force_software = (force_software_env
+                        && source.supports_software_fallback())
+                        || source.is_session();
                     if force_software {
                         if force_software_env {
                             crate::log!(
@@ -2619,6 +2629,11 @@ impl Cx {
                             },
                         ));
                         continue;
+                    }
+                    if force_software_env {
+                        crate::log!(
+                            "VIDEO: MAKEPAD_FORCE_SOFTWARE_VIDEO ignored for native-only video source"
+                        );
                     }
                     // Notify widget so it can bind textures to shader slots
                     // (needed if native decode fails and we fall back to software)
