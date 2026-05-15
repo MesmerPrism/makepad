@@ -219,11 +219,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         params.put("capture_ms", mConfig.captureMs);
         params.put("max_packets", mConfig.maxPackets);
         params.put("bitrate_bps", mConfig.bitrateBps);
+        params.put("frame_rate_hz", mConfig.frameRateHz);
         params.put("live_stream", mConfig.liveStream);
         if ("broker-synthetic".equals(sourceMode)) {
             params.put("source_mode", "synthetic_surface");
             params.put("synthetic_pattern", normalizeSyntheticPattern(mConfig.syntheticPattern));
         }
+        params.put("camera_id", mConfig.cameraId);
 
         JSONObject command = new JSONObject();
         command.put("type", "command");
@@ -826,11 +828,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         final int streamPort;
         final String sourceMode;
         final String syntheticPattern;
+        final String cameraId;
         final int preferredWidth;
         final int preferredHeight;
         final int captureMs;
         final int maxPackets;
         final int bitrateBps;
+        final int frameRateHz;
         final int commandTimeoutMs;
         final int streamTimeoutMs;
         final int decodeTimeoutMs;
@@ -842,11 +846,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             int streamPort,
             String sourceMode,
             String syntheticPattern,
+            String cameraId,
             int preferredWidth,
             int preferredHeight,
             int captureMs,
             int maxPackets,
             int bitrateBps,
+            int frameRateHz,
             int commandTimeoutMs,
             int streamTimeoutMs,
             int decodeTimeoutMs,
@@ -858,11 +864,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.streamPort = clamp(streamPort, 1, 65535);
             this.sourceMode = normalizeSourceMode(sourceMode);
             this.syntheticPattern = normalizeSyntheticPattern(syntheticPattern);
+            this.cameraId = cameraId != null ? cameraId.trim() : "";
             this.preferredWidth = clamp(preferredWidth, 16, 4096);
             this.preferredHeight = clamp(preferredHeight, 16, 4096);
             this.captureMs = clamp(captureMs, 100, 120000);
             this.maxPackets = clamp(maxPackets, 0, MAX_STREAM_PACKETS);
             this.bitrateBps = clamp(bitrateBps, 100000, 20000000);
+            this.frameRateHz = clamp(frameRateHz, 1, 120);
             this.commandTimeoutMs = clamp(commandTimeoutMs, 500, 60000);
             this.streamTimeoutMs = clamp(streamTimeoutMs, 500, 120000);
             this.decodeTimeoutMs = clamp(decodeTimeoutMs, 500, 60000);
@@ -876,11 +884,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 8879,
                 "broker-synthetic",
                 "diagnostic-grid",
+                "",
                 1280,
                 1280,
                 900,
                 32,
                 2000000,
+                30,
                 10000,
                 20000,
                 5000,

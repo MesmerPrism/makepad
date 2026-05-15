@@ -55,7 +55,8 @@ This branch currently carries:
   examples can consume broker-managed synthetic or camera streams. On GL paths
   it can use Makepad's existing external-video texture handoff; on Quest
   Vulkan/XR paths it can fall back to decoded CPU-YUV plane upload because no
-  GL external texture handle is available.
+  GL external texture handle is available. The source descriptor can carry a
+  requested camera ID and source frame rate for broker-camera runs.
 - A video-source metadata event that forwards broker stream-header projection
   metadata to app code before projection-stage rows are derived.
 - A small shader builtin, `xr_view_id()`, that exposes Makepad's existing
