@@ -302,6 +302,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int decodedFrameCount = 0;
         int outputFormatChangedCount = 0;
         int yuvFrameEmitCount = 0;
+        long yuvCopyTimeMs = 0L;
         long progressStartMs = SystemClock.elapsedRealtime();
         long lastProgressMs = progressStartMs;
         long deadline = SystemClock.elapsedRealtimeNanos() +
@@ -352,6 +353,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     inputQueuedCount,
                     decodedFrameCount,
                     yuvFrameEmitCount,
+                    yuvCopyTimeMs,
                     outputFormatChangedCount,
                     inputEosQueued,
                     outputEosSeen);
@@ -373,7 +375,11 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     Image image = decoder.getOutputImage(outputIndex);
                     if (image != null) {
                         try {
+                            long copyStartMs = SystemClock.elapsedRealtime();
                             emitYuvFrame(image, info.presentationTimeUs);
+                            yuvCopyTimeMs += Math.max(
+                                0L,
+                                SystemClock.elapsedRealtime() - copyStartMs);
                             yuvFrameEmitCount++;
                         } finally {
                             image.close();
@@ -392,6 +398,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 inputQueuedCount,
                 decodedFrameCount,
                 yuvFrameEmitCount,
+                yuvCopyTimeMs,
                 outputFormatChangedCount,
                 inputEosQueued,
                 outputEosSeen);
@@ -404,6 +411,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             inputQueuedCount,
             decodedFrameCount,
             yuvFrameEmitCount,
+            yuvCopyTimeMs,
             outputFormatChangedCount,
             inputEosQueued,
             outputEosSeen);
@@ -421,6 +429,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int inputQueuedCount,
         int decodedFrameCount,
         int yuvFrameEmitCount,
+        long yuvCopyTimeMs,
         int outputFormatChangedCount,
         boolean inputEosQueued,
         boolean outputEosSeen) {
@@ -435,6 +444,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             inputQueuedCount,
             decodedFrameCount,
             yuvFrameEmitCount,
+            yuvCopyTimeMs,
             outputFormatChangedCount,
             inputEosQueued,
             outputEosSeen);
@@ -448,14 +458,18 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int inputQueuedCount,
         int decodedFrameCount,
         int yuvFrameEmitCount,
+        long yuvCopyTimeMs,
         int outputFormatChangedCount,
         boolean inputEosQueued,
         boolean outputEosSeen) {
         long elapsedMs = Math.max(1L, SystemClock.elapsedRealtime() - progressStartMs);
         double elapsedSeconds = elapsedMs / 1000.0;
+        double averageYuvCopyMs = yuvFrameEmitCount > 0
+            ? yuvCopyTimeMs / (double) yuvFrameEmitCount
+            : 0.0;
         Log.i(TAG, String.format(
             Locale.US,
-            "Broker H.264 playback progress videoId=%d phase=%s status=ok sourceMode=%s streamPort=%d cameraId=%s preferredWidth=%d preferredHeight=%d requestedFrameRateHz=%d packetsRead=%d inputQueuedCount=%d decodedFrameCount=%d yuvFrameEmitCount=%d outputFormatChangedCount=%d inputEosQueued=%s outputEosSeen=%s elapsedMs=%d packetReadRateHz=%.2f inputQueueRateHz=%.2f decodedFrameRateHz=%.2f yuvFrameEmitRateHz=%.2f",
+            "Broker H.264 playback progress videoId=%d phase=%s status=ok sourceMode=%s streamPort=%d cameraId=%s preferredWidth=%d preferredHeight=%d requestedFrameRateHz=%d packetsRead=%d inputQueuedCount=%d decodedFrameCount=%d yuvFrameEmitCount=%d yuvCopyTimeMs=%d yuvCopyAvgMs=%.2f outputFormatChangedCount=%d inputEosQueued=%s outputEosSeen=%s elapsedMs=%d packetReadRateHz=%.2f inputQueueRateHz=%.2f decodedFrameRateHz=%.2f yuvFrameEmitRateHz=%.2f",
             mVideoId,
             phase,
             normalizeSourceMode(mConfig.sourceMode),
@@ -468,6 +482,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             inputQueuedCount,
             decodedFrameCount,
             yuvFrameEmitCount,
+            yuvCopyTimeMs,
+            averageYuvCopyMs,
             outputFormatChangedCount,
             inputEosQueued,
             outputEosSeen,
@@ -629,6 +645,29 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int base = buffer.position();
         int limit = buffer.limit();
         byte[] out = new byte[Math.max(0, width * height)];
+
+        if (pixelStride == 1) {
+            if (rowStride == width && base + out.length <= limit) {
+                buffer.position(base);
+                buffer.get(out, 0, out.length);
+                return out;
+            }
+
+            int dst = 0;
+            for (int y = 0; y < height; y++) {
+                int row = base + y * rowStride;
+                int available = row >= 0 && row < limit
+                    ? Math.min(width, limit - row)
+                    : 0;
+                if (available > 0) {
+                    buffer.position(row);
+                    buffer.get(out, dst, available);
+                }
+                dst += width;
+            }
+            return out;
+        }
+
         int dst = 0;
         for (int y = 0; y < height; y++) {
             int row = base + y * rowStride;
