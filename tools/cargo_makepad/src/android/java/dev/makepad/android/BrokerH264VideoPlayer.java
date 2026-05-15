@@ -37,6 +37,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private static final int MAX_STREAM_HEADER_METADATA_BYTES = 256 * 1024;
     private static final int MAX_STREAM_PACKETS = 2400;
     private static final int DEQUEUE_TIMEOUT_US = 10000;
+    private static final long PROGRESS_LOG_INTERVAL_MS = 2000L;
 
     private final Config mConfig;
     private final AtomicBoolean mStarted = new AtomicBoolean(false);
@@ -297,7 +298,12 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         long lastPtsUs = 0L;
         boolean inputEosQueued = false;
         boolean outputEosSeen = false;
+        int inputQueuedCount = 0;
         int decodedFrameCount = 0;
+        int outputFormatChangedCount = 0;
+        int yuvFrameEmitCount = 0;
+        long progressStartMs = SystemClock.elapsedRealtime();
+        long lastProgressMs = progressStartMs;
         long deadline = SystemClock.elapsedRealtimeNanos() +
             (long) Math.max(1, mConfig.decodeTimeoutMs + mConfig.streamTimeoutMs + mConfig.captureMs) * 1_000_000L;
 
@@ -322,6 +328,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     }
                     if (packet != null) {
                         queuePacket(decoder, inputIndex, packet, hasCompleteCsd);
+                        inputQueuedCount++;
                         lastPtsUs = packet.ptsUs;
                     } else {
                         decoder.queueInputBuffer(
@@ -337,9 +344,21 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
             int outputIndex = decoder.dequeueOutputBuffer(info, DEQUEUE_TIMEOUT_US);
             if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                lastProgressMs = maybeLogProgress(
+                    "progress",
+                    progressStartMs,
+                    lastProgressMs,
+                    packetsRead,
+                    inputQueuedCount,
+                    decodedFrameCount,
+                    yuvFrameEmitCount,
+                    outputFormatChangedCount,
+                    inputEosQueued,
+                    outputEosSeen);
                 continue;
             }
             if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                outputFormatChangedCount++;
                 continue;
             }
             if (outputIndex < 0) {
@@ -355,6 +374,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     if (image != null) {
                         try {
                             emitYuvFrame(image, info.presentationTimeUs);
+                            yuvFrameEmitCount++;
                         } finally {
                             image.close();
                         }
@@ -364,11 +384,98 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             }
             decoder.releaseOutputBuffer(outputIndex, renderToSurface);
             outputEosSeen = eos;
+            lastProgressMs = maybeLogProgress(
+                "progress",
+                progressStartMs,
+                lastProgressMs,
+                packetsRead,
+                inputQueuedCount,
+                decodedFrameCount,
+                yuvFrameEmitCount,
+                outputFormatChangedCount,
+                inputEosQueued,
+                outputEosSeen);
         }
+
+        logProgress(
+            "complete",
+            progressStartMs,
+            packetsRead,
+            inputQueuedCount,
+            decodedFrameCount,
+            yuvFrameEmitCount,
+            outputFormatChangedCount,
+            inputEosQueued,
+            outputEosSeen);
 
         if (decodedFrameCount == 0 && mRunning) {
             throw new IllegalStateException("Broker H.264 decoder produced no output frames.");
         }
+    }
+
+    private long maybeLogProgress(
+        String phase,
+        long progressStartMs,
+        long lastProgressMs,
+        int packetsRead,
+        int inputQueuedCount,
+        int decodedFrameCount,
+        int yuvFrameEmitCount,
+        int outputFormatChangedCount,
+        boolean inputEosQueued,
+        boolean outputEosSeen) {
+        long nowMs = SystemClock.elapsedRealtime();
+        if (nowMs - lastProgressMs < PROGRESS_LOG_INTERVAL_MS) {
+            return lastProgressMs;
+        }
+        logProgress(
+            phase,
+            progressStartMs,
+            packetsRead,
+            inputQueuedCount,
+            decodedFrameCount,
+            yuvFrameEmitCount,
+            outputFormatChangedCount,
+            inputEosQueued,
+            outputEosSeen);
+        return nowMs;
+    }
+
+    private void logProgress(
+        String phase,
+        long progressStartMs,
+        int packetsRead,
+        int inputQueuedCount,
+        int decodedFrameCount,
+        int yuvFrameEmitCount,
+        int outputFormatChangedCount,
+        boolean inputEosQueued,
+        boolean outputEosSeen) {
+        long elapsedMs = Math.max(1L, SystemClock.elapsedRealtime() - progressStartMs);
+        double elapsedSeconds = elapsedMs / 1000.0;
+        Log.i(TAG, String.format(
+            Locale.US,
+            "Broker H.264 playback progress videoId=%d phase=%s status=ok sourceMode=%s streamPort=%d cameraId=%s preferredWidth=%d preferredHeight=%d requestedFrameRateHz=%d packetsRead=%d inputQueuedCount=%d decodedFrameCount=%d yuvFrameEmitCount=%d outputFormatChangedCount=%d inputEosQueued=%s outputEosSeen=%s elapsedMs=%d packetReadRateHz=%.2f inputQueueRateHz=%.2f decodedFrameRateHz=%.2f yuvFrameEmitRateHz=%.2f",
+            mVideoId,
+            phase,
+            normalizeSourceMode(mConfig.sourceMode),
+            mConfig.streamPort,
+            mConfig.cameraId,
+            mConfig.preferredWidth,
+            mConfig.preferredHeight,
+            mConfig.frameRateHz,
+            packetsRead,
+            inputQueuedCount,
+            decodedFrameCount,
+            yuvFrameEmitCount,
+            outputFormatChangedCount,
+            inputEosQueued,
+            outputEosSeen,
+            elapsedMs,
+            packetsRead / elapsedSeconds,
+            inputQueuedCount / elapsedSeconds,
+            decodedFrameCount / elapsedSeconds,
+            yuvFrameEmitCount / elapsedSeconds));
     }
 
     private StreamHeader readHeader(DataInputStream input) throws Exception {
