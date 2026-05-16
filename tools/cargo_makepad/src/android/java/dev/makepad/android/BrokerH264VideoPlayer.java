@@ -305,8 +305,12 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         long yuvCopyTimeMs = 0L;
         long progressStartMs = SystemClock.elapsedRealtime();
         long lastProgressMs = progressStartMs;
-        long deadline = SystemClock.elapsedRealtimeNanos() +
-            (long) Math.max(1, mConfig.decodeTimeoutMs + mConfig.streamTimeoutMs + mConfig.captureMs) * 1_000_000L;
+        long deadline = mConfig.isUnboundedLiveStream()
+            ? Long.MAX_VALUE
+            : SystemClock.elapsedRealtimeNanos() +
+                (long) Math.max(
+                    1,
+                    mConfig.decodeTimeoutMs + mConfig.streamTimeoutMs + mConfig.captureMs) * 1_000_000L;
 
         while (mRunning && !outputEosSeen && SystemClock.elapsedRealtimeNanos() < deadline) {
             if (!inputEosQueued) {
@@ -1013,7 +1017,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.cameraId = cameraId != null ? cameraId.trim() : "";
             this.preferredWidth = clamp(preferredWidth, 16, 4096);
             this.preferredHeight = clamp(preferredHeight, 16, 4096);
-            this.captureMs = clamp(captureMs, 100, 120000);
+            this.captureMs = captureMs <= 0 ? 0 : clamp(captureMs, 100, 120000);
             this.maxPackets = clamp(maxPackets, 0, MAX_STREAM_PACKETS);
             this.bitrateBps = clamp(bitrateBps, 100000, 20000000);
             this.frameRateHz = clamp(frameRateHz, 1, 120);
@@ -1021,6 +1025,10 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.streamTimeoutMs = clamp(streamTimeoutMs, 500, 120000);
             this.decodeTimeoutMs = clamp(decodeTimeoutMs, 500, 60000);
             this.liveStream = liveStream;
+        }
+
+        boolean isUnboundedLiveStream() {
+            return liveStream && captureMs == 0 && maxPackets == 0;
         }
 
         static Config defaults() {
