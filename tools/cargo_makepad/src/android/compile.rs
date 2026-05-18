@@ -14,35 +14,35 @@ use std::{
 fn aapt_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
     sdk_dir
         .join(BUILD_TOOLS_DIR)
-        .join(urls.build_tools_version)
-        .join("aapt")
+        .join(resolve_build_tools_version(sdk_dir, urls))
+        .join(host_executable_name("aapt"))
 }
 
 fn d8_jar_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
     sdk_dir
         .join(BUILD_TOOLS_DIR)
-        .join(urls.build_tools_version)
+        .join(resolve_build_tools_version(sdk_dir, urls))
         .join("lib/d8.jar")
 }
 
 fn apksigner_jar_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
     sdk_dir
         .join(BUILD_TOOLS_DIR)
-        .join(urls.build_tools_version)
+        .join(resolve_build_tools_version(sdk_dir, urls))
         .join("lib/apksigner.jar")
 }
 
 fn zipalign_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
     sdk_dir
         .join(BUILD_TOOLS_DIR)
-        .join(urls.build_tools_version)
-        .join("zipalign")
+        .join(resolve_build_tools_version(sdk_dir, urls))
+        .join(host_executable_name("zipalign"))
 }
 
 fn android_jar_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
     sdk_dir
         .join(PLATFORMS_DIR)
-        .join(urls.platform)
+        .join(resolve_android_platform(sdk_dir, urls))
         .join("android.jar")
 }
 
@@ -62,6 +62,299 @@ struct BuildPaths {
 pub struct BuildResult {
     dst_apk: PathBuf,
     java_url: String,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedAndroidSdk {
+    platform: String,
+    platform_api: usize,
+    build_tools_version: String,
+    compiler_api: usize,
+    java_home: PathBuf,
+    ndk_prebuilt_root: PathBuf,
+}
+
+fn host_executable_name(name: &str) -> String {
+    if cfg!(target_os = "windows") {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    }
+}
+
+fn java_tool_path(java_home: &Path, name: &str) -> PathBuf {
+    java_home.join("bin").join(host_executable_name(name))
+}
+
+fn env_non_empty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn dotted_version_sort_key(version: &str) -> Vec<u64> {
+    version
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
+fn android_platform_api(platform: &str) -> Option<usize> {
+    platform.strip_prefix("android-").and_then(|tail| {
+        tail.chars()
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>()
+            .parse::<usize>()
+            .ok()
+    })
+}
+
+fn installed_android_platforms(sdk_dir: &Path) -> Vec<(usize, String)> {
+    let platforms_dir = sdk_dir.join(PLATFORMS_DIR);
+    let Ok(entries) = fs::read_dir(platforms_dir) else {
+        return Vec::new();
+    };
+    let mut platforms = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().join("android.jar").is_file())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            android_platform_api(&name).map(|api| (api, name))
+        })
+        .collect::<Vec<_>>();
+    platforms.sort_by(|(api_a, name_a), (api_b, name_b)| {
+        api_b.cmp(api_a).then_with(|| name_b.cmp(name_a))
+    });
+    platforms
+}
+
+fn installed_build_tools_versions(sdk_dir: &Path) -> Vec<String> {
+    let build_tools_dir = sdk_dir.join(BUILD_TOOLS_DIR);
+    let Ok(entries) = fs::read_dir(build_tools_dir) else {
+        return Vec::new();
+    };
+    let mut versions = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    versions.sort_by(|a, b| dotted_version_sort_key(b).cmp(&dotted_version_sort_key(a)));
+    versions
+}
+
+fn resolve_android_platform(sdk_dir: &Path, urls: &AndroidSDKUrls) -> String {
+    env_non_empty("ANDROID_PLATFORM")
+        .or_else(|| {
+            env_non_empty("ANDROID_SDK_VERSION").map(|version| format!("android-{version}"))
+        })
+        .or_else(|| {
+            installed_android_platforms(sdk_dir)
+                .into_iter()
+                .next()
+                .map(|(_, name)| name)
+        })
+        .unwrap_or_else(|| urls.platform.to_string())
+}
+
+fn resolve_platform_api(sdk_dir: &Path, urls: &AndroidSDKUrls) -> usize {
+    android_platform_api(&resolve_android_platform(sdk_dir, urls)).unwrap_or(urls.sdk_version)
+}
+
+fn resolve_build_tools_version(sdk_dir: &Path, urls: &AndroidSDKUrls) -> String {
+    env_non_empty("ANDROID_BUILD_TOOLS_VERSION")
+        .or_else(|| installed_build_tools_versions(sdk_dir).into_iter().next())
+        .unwrap_or_else(|| urls.build_tools_version.to_string())
+}
+
+fn resolve_java_home(sdk_dir: &Path, _host_os: HostOs) -> PathBuf {
+    if let Some(java_home) = env_non_empty("JAVA_HOME").map(PathBuf::from) {
+        if java_tool_path(&java_home, "java").is_file()
+            && java_tool_path(&java_home, "javac").is_file()
+        {
+            return java_home;
+        }
+    }
+    sdk_dir.join("openjdk")
+}
+
+fn available_clang_api_levels(
+    ndk_prebuilt_root: &Path,
+    host_os: HostOs,
+    android_target: &AndroidTarget,
+) -> Vec<usize> {
+    let bin_dir = ndk_prebuilt_root.join("bin");
+    let Ok(entries) = fs::read_dir(bin_dir) else {
+        return Vec::new();
+    };
+    let prefix = android_target.clang();
+    let suffix = match host_os {
+        HostOs::WindowsX64 => "-clang.cmd",
+        HostOs::MacosX64 | HostOs::MacosAarch64 | HostOs::LinuxX64 => "-clang",
+        _ => "-clang",
+    };
+    let mut levels = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .filter_map(|name| {
+            let tail = name.strip_prefix(prefix)?.strip_suffix(suffix)?;
+            tail.parse::<usize>().ok()
+        })
+        .collect::<Vec<_>>();
+    levels.sort_by(|a, b| b.cmp(a));
+    levels.dedup();
+    levels
+}
+
+fn resolve_compiler_api_level(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    urls: &AndroidSDKUrls,
+    ndk_prebuilt_root: &Path,
+    android_target: &AndroidTarget,
+) -> Result<usize, String> {
+    let levels = available_clang_api_levels(ndk_prebuilt_root, host_os, android_target);
+    if levels.is_empty() {
+        return Err(format!(
+            "No API-level clang wrappers found in {:?} for {}",
+            ndk_prebuilt_root.join("bin"),
+            android_target.clang()
+        ));
+    }
+    if let Some(api) = env_non_empty("ANDROID_API_LEVEL")
+        .or_else(|| env_non_empty("ANDROID_SDK_VERSION"))
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        if levels.contains(&api) {
+            return Ok(api);
+        }
+        return Err(format!(
+            "Requested Android API level {api} has no {}{api}-clang wrapper in {:?}; available API levels: {:?}",
+            android_target.clang(),
+            ndk_prebuilt_root.join("bin"),
+            levels
+        ));
+    }
+    let platform_api = resolve_platform_api(sdk_dir, urls);
+    levels
+        .iter()
+        .copied()
+        .find(|api| *api <= platform_api)
+        .or_else(|| levels.first().copied())
+        .ok_or_else(|| "No compatible Android compiler API level found".to_string())
+}
+
+fn preflight_android_sdk(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    urls: &AndroidSDKUrls,
+    android_targets: &[AndroidTarget],
+) -> Result<ResolvedAndroidSdk, String> {
+    let platform = resolve_android_platform(sdk_dir, urls);
+    let platform_api = android_platform_api(&platform).ok_or_else(|| {
+        format!("Android platform name does not contain an API level: {platform}")
+    })?;
+    let android_jar = sdk_dir
+        .join(PLATFORMS_DIR)
+        .join(&platform)
+        .join("android.jar");
+    if !android_jar.is_file() {
+        return Err(format!(
+            "Android platform {platform} was selected, but android.jar is missing at {:?}",
+            android_jar
+        ));
+    }
+
+    let build_tools_version = resolve_build_tools_version(sdk_dir, urls);
+    let build_tools_dir = sdk_dir.join(BUILD_TOOLS_DIR).join(&build_tools_version);
+    for tool in ["aapt", "zipalign"] {
+        let path = build_tools_dir.join(host_executable_name(tool));
+        if !path.is_file() {
+            return Err(format!(
+                "Android build-tools {build_tools_version} was selected, but {tool} is missing at {:?}",
+                path
+            ));
+        }
+    }
+    for jar in ["lib/d8.jar", "lib/apksigner.jar"] {
+        let path = build_tools_dir.join(jar);
+        if !path.is_file() {
+            return Err(format!(
+                "Android build-tools {build_tools_version} was selected, but {jar} is missing at {:?}",
+                path
+            ));
+        }
+    }
+
+    let java_home = resolve_java_home(sdk_dir, host_os);
+    for tool in ["java", "javac"] {
+        let path = java_tool_path(&java_home, tool);
+        if !path.is_file() {
+            return Err(format!(
+                "Java tool {tool} not found at {:?}. Set JAVA_HOME or install Makepad-managed openjdk under the selected SDK.",
+                path
+            ));
+        }
+    }
+
+    let (_ndk_version, ndk_prebuilt_root) =
+        resolve_ndk_prebuilt_root(sdk_dir, host_os, urls.ndk_version_full)?;
+    let Some(first_target) = android_targets.first() else {
+        return Err("No Android targets selected".to_string());
+    };
+    let compiler_api =
+        resolve_compiler_api_level(sdk_dir, host_os, urls, &ndk_prebuilt_root, first_target)?;
+    for target in android_targets {
+        let path = ndk_prebuilt_root.join("bin").join(clang_tool_name(
+            target,
+            compiler_api,
+            host_os,
+            false,
+        ));
+        if !path.is_file() {
+            return Err(format!(
+                "Android compiler for target {} API {} not found at {:?}",
+                target.toolchain(),
+                compiler_api,
+                path
+            ));
+        }
+    }
+
+    println!(
+        "Resolved Android SDK: platform={} platformApi={} buildTools={} compilerApi={} javaHome={} ndkPrebuilt={}",
+        platform,
+        platform_api,
+        build_tools_version,
+        compiler_api,
+        java_home.display(),
+        ndk_prebuilt_root.display()
+    );
+
+    Ok(ResolvedAndroidSdk {
+        platform,
+        platform_api,
+        build_tools_version,
+        compiler_api,
+        java_home,
+        ndk_prebuilt_root,
+    })
+}
+
+fn clang_tool_name(
+    android_target: &AndroidTarget,
+    api_level: usize,
+    host_os: HostOs,
+    cxx: bool,
+) -> String {
+    let suffix = if cxx { "clang++" } else { "clang" };
+    let base = format!("{}{}-{suffix}", android_target.clang(), api_level);
+    match host_os {
+        HostOs::WindowsX64 => format!("{base}.cmd"),
+        HostOs::MacosX64 | HostOs::MacosAarch64 | HostOs::LinuxX64 => base,
+        _ => base,
+    }
 }
 
 const SMALL_FONT_REPLACEMENTS: [(&str, &str); 5] = [
@@ -397,20 +690,26 @@ fn rust_build(
         .unwrap() // ndk root
         .to_path_buf();
     for android_target in android_targets {
-        let clang_filename = format!("{}{}-clang", android_target.clang(), urls.sdk_version);
-        let clangpp_filename = format!("{}{}-clang++", android_target.clang(), urls.sdk_version);
+        let compiler_api =
+            resolve_compiler_api_level(sdk_dir, host_os, urls, &ndk_prebuilt_root, android_target)?;
 
         let bin_name = |bin_filename: &str, windows_extension: &str| match host_os {
             HostOs::WindowsX64 => format!("{bin_filename}.{windows_extension}"),
             HostOs::MacosX64 | HostOs::MacosAarch64 | HostOs::LinuxX64 => bin_filename.to_string(),
             _ => panic!(),
         };
-        let full_clang_path = ndk_prebuilt_root
-            .join("bin")
-            .join(bin_name(&clang_filename, "cmd"));
-        let full_clangpp_path = ndk_prebuilt_root
-            .join("bin")
-            .join(bin_name(&clangpp_filename, "cmd"));
+        let full_clang_path = ndk_prebuilt_root.join("bin").join(clang_tool_name(
+            android_target,
+            compiler_api,
+            host_os,
+            false,
+        ));
+        let full_clangpp_path = ndk_prebuilt_root.join("bin").join(clang_tool_name(
+            android_target,
+            compiler_api,
+            host_os,
+            true,
+        ));
         let full_llvm_ar_path = ndk_prebuilt_root
             .join("bin")
             .join(bin_name("llvm-ar", "exe"));
@@ -454,8 +753,13 @@ fn rust_build(
                 .filter(|value| !value.is_empty())
         };
 
-        let android_sdk_version = urls.sdk_version.to_string();
-        let java_home = sdk_dir.join("openjdk").to_string_lossy().to_string();
+        let android_sdk_version = resolve_platform_api(sdk_dir, urls).to_string();
+        let android_api_level = compiler_api.to_string();
+        let java_home = resolve_java_home(sdk_dir, host_os)
+            .to_string_lossy()
+            .to_string();
+        let build_tools_version = resolve_build_tools_version(sdk_dir, urls);
+        let android_platform = resolve_android_platform(sdk_dir, urls);
         let mut env: Vec<(String, String)> = vec![
             (
                 android_target.linker_env_var().to_string(),
@@ -471,14 +775,14 @@ fn rust_build(
             ),
             (
                 "ANDROID_BUILD_TOOLS_VERSION".to_string(),
-                urls.build_tools_version.to_string(),
+                build_tools_version,
             ),
-            ("ANDROID_PLATFORM".to_string(), urls.platform.to_string()),
+            ("ANDROID_PLATFORM".to_string(), android_platform),
             (
                 "ANDROID_SDK_VERSION".to_string(),
                 android_sdk_version.clone(),
             ),
-            ("ANDROID_API_LEVEL".to_string(), android_sdk_version),
+            ("ANDROID_API_LEVEL".to_string(), android_api_level),
             (
                 "ANDROID_SDK_EXTENSION".to_string(),
                 urls.sdk_extension.to_string(),
@@ -575,6 +879,7 @@ fn cargo_target_dir(cwd: &Path) -> PathBuf {
 }
 
 fn prepare_build(
+    sdk_dir: &Path,
     build_crate: &str,
     java_url: &str,
     app_label: &str,
@@ -635,7 +940,7 @@ fn prepare_build(
         app_label,
         "MakepadApp",
         java_url,
-        urls.sdk_version,
+        resolve_platform_api(sdk_dir, urls),
         has_android_icon,
     );
     let manifest_file = tmp_dir.join("AndroidManifest.xml");
@@ -672,10 +977,11 @@ fn prepare_build(
 
 fn build_r_class(
     sdk_dir: &Path,
+    host_os: HostOs,
     build_paths: &BuildPaths,
     urls: &AndroidSDKUrls,
 ) -> Result<(), String> {
-    let java_home = sdk_dir.join("openjdk");
+    let java_home = resolve_java_home(sdk_dir, host_os);
     let cwd = std::env::current_dir().unwrap();
 
     shell_env(
@@ -705,12 +1011,13 @@ fn build_r_class(
 
 fn compile_java(
     sdk_dir: &Path,
+    host_os: HostOs,
     build_paths: &BuildPaths,
     urls: &AndroidSDKUrls,
 ) -> Result<(), String> {
     let makepad_package_path = "dev/makepad/android";
     let cargo_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let java_home = sdk_dir.join("openjdk");
+    let java_home = resolve_java_home(sdk_dir, host_os);
     let cwd = std::env::current_dir().unwrap();
     let javac_stamp = build_paths.java_out_dir.join("javac.inputs");
 
@@ -803,7 +1110,7 @@ fn compile_java(
     shell_env(
         &[("JAVA_HOME", (java_home.to_str().unwrap()))],
         &cwd,
-        java_home.join("bin/javac").to_str().unwrap(),
+        java_tool_path(&java_home, "javac").to_str().unwrap(),
         &javac_args,
     )?;
     write_text(&javac_stamp, &java_inputs_hash)?;
@@ -813,10 +1120,11 @@ fn compile_java(
 
 fn build_dex(
     sdk_dir: &Path,
+    host_os: HostOs,
     build_paths: &BuildPaths,
     urls: &AndroidSDKUrls,
 ) -> Result<(), String> {
-    let java_home = sdk_dir.join("openjdk");
+    let java_home = resolve_java_home(sdk_dir, host_os);
     let cwd = std::env::current_dir().unwrap();
 
     let mut class_files: Vec<PathBuf> = ls(&build_paths.java_out_dir)?
@@ -857,7 +1165,7 @@ fn build_dex(
     shell_env_cap(
         &[("JAVA_HOME", (java_home.to_str().unwrap()))],
         &cwd,
-        java_home.join("bin/java").to_str().unwrap(),
+        java_tool_path(&java_home, "java").to_str().unwrap(),
         &args,
     )?;
 
@@ -866,11 +1174,12 @@ fn build_dex(
 
 fn build_unaligned_apk(
     sdk_dir: &Path,
+    host_os: HostOs,
     build_paths: &BuildPaths,
     urls: &AndroidSDKUrls,
 ) -> Result<(), String> {
     let cwd = std::env::current_dir().unwrap();
-    let java_home = sdk_dir.join("openjdk");
+    let java_home = resolve_java_home(sdk_dir, host_os);
 
     shell_env(
         &[("JAVA_HOME", (java_home.to_str().unwrap()))],
@@ -985,6 +1294,8 @@ fn bundle_ndk_shared_deps(
 ) -> Result<(), String> {
     let (_ndk_version, ndk_prebuilt_root) =
         resolve_ndk_prebuilt_root(sdk_dir, host_os, urls.ndk_version_full)?;
+    let compiler_api =
+        resolve_compiler_api_level(sdk_dir, host_os, urls, &ndk_prebuilt_root, android_target)?;
 
     // Path to llvm-readelf shipped with the NDK.
     let readelf_path = ndk_bin_path(&ndk_prebuilt_root, host_os, "llvm-readelf");
@@ -1035,7 +1346,7 @@ fn bundle_ndk_shared_deps(
         // Extra guard: if the same filename also exists in the API-level
         // subdirectory it is an OS-provided stub and should NOT be bundled.
         let api_level_stub = sysroot_lib_dir
-            .join(urls.sdk_version.to_string())
+            .join(compiler_api.to_string())
             .join(lib_name);
         if api_level_stub.exists() {
             continue;
@@ -1497,15 +1808,20 @@ fn build_zipaligned_apk(
     Ok(())
 }
 
-fn sign_apk(sdk_dir: &Path, build_paths: &BuildPaths, urls: &AndroidSDKUrls) -> Result<(), String> {
+fn sign_apk(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    build_paths: &BuildPaths,
+    urls: &AndroidSDKUrls,
+) -> Result<(), String> {
     let cwd = std::env::current_dir().unwrap();
     let cargo_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let java_home = sdk_dir.join("openjdk");
+    let java_home = resolve_java_home(sdk_dir, host_os);
 
     shell_env_cap(
         &[("JAVA_HOME", (java_home.to_str().unwrap()))],
         &cwd,
-        java_home.join("bin/java").to_str().unwrap(),
+        java_tool_path(&java_home, "java").to_str().unwrap(),
         &[
             "-jar",
             (apksigner_jar_path(sdk_dir, urls).to_str().unwrap()),
@@ -1560,6 +1876,17 @@ pub fn build(
         }
     }
 
+    let resolved_sdk = preflight_android_sdk(sdk_dir, host_os, urls, android_targets)?;
+    std::env::set_var("ANDROID_PLATFORM", &resolved_sdk.platform);
+    std::env::set_var("ANDROID_SDK_VERSION", resolved_sdk.platform_api.to_string());
+    std::env::set_var("ANDROID_API_LEVEL", resolved_sdk.compiler_api.to_string());
+    std::env::set_var(
+        "ANDROID_BUILD_TOOLS_VERSION",
+        &resolved_sdk.build_tools_version,
+    );
+    std::env::set_var("JAVA_HOME", &resolved_sdk.java_home);
+    std::env::set_var("ANDROID_NDK_PREBUILT_ROOT", &resolved_sdk.ndk_prebuilt_root);
+
     rust_build(
         sdk_dir,
         host_os,
@@ -1569,13 +1896,13 @@ pub fn build(
         variant,
         urls,
     )?;
-    let build_paths = prepare_build(build_crate, &java_url, &app_label, variant, urls)?;
+    let build_paths = prepare_build(sdk_dir, build_crate, &java_url, &app_label, variant, urls)?;
 
     println!("Building APK");
-    build_r_class(sdk_dir, &build_paths, urls)?;
-    compile_java(sdk_dir, &build_paths, urls)?;
-    build_dex(sdk_dir, &build_paths, urls)?;
-    build_unaligned_apk(sdk_dir, &build_paths, urls)?;
+    build_r_class(sdk_dir, host_os, &build_paths, urls)?;
+    compile_java(sdk_dir, host_os, &build_paths, urls)?;
+    build_dex(sdk_dir, host_os, &build_paths, urls)?;
+    build_unaligned_apk(sdk_dir, host_os, &build_paths, urls)?;
     let build_dir = add_rust_library(
         sdk_dir,
         host_os,
@@ -1597,7 +1924,7 @@ pub fn build(
         urls,
     )?;
     build_zipaligned_apk(sdk_dir, &build_paths, urls)?;
-    sign_apk(sdk_dir, &build_paths, urls)?;
+    sign_apk(sdk_dir, host_os, &build_paths, urls)?;
 
     println!("APK Build completed");
     Ok(BuildResult {
@@ -1993,33 +2320,33 @@ default via 192.168.0.1 dev wlan0 proto dhcp src 192.168.0.42 metric 303\n\
     }
 }
 
-pub fn java(sdk_dir: &Path, _host_os: HostOs, args: &[String]) -> Result<(), String> {
+pub fn java(sdk_dir: &Path, host_os: HostOs, args: &[String]) -> Result<(), String> {
     let mut args_out = Vec::new();
     for arg in args {
         args_out.push(arg.as_ref());
     }
     let cwd = std::env::current_dir().unwrap();
-    let java_home = sdk_dir.join("openjdk");
+    let java_home = resolve_java_home(sdk_dir, host_os);
     shell_env(
         &[("JAVA_HOME", (java_home.to_str().unwrap()))],
         &cwd,
-        java_home.join("bin/java").to_str().unwrap(),
+        java_tool_path(&java_home, "java").to_str().unwrap(),
         &args_out,
     )?;
     Ok(())
 }
 
-pub fn javac(sdk_dir: &Path, _host_os: HostOs, args: &[String]) -> Result<(), String> {
+pub fn javac(sdk_dir: &Path, host_os: HostOs, args: &[String]) -> Result<(), String> {
     let mut args_out = Vec::new();
     for arg in args {
         args_out.push(arg.as_ref());
     }
     let cwd = std::env::current_dir().unwrap();
-    let java_home = sdk_dir.join("openjdk");
+    let java_home = resolve_java_home(sdk_dir, host_os);
     shell_env(
         &[("JAVA_HOME", (java_home.to_str().unwrap()))],
         &cwd,
-        java_home.join("bin/javac").to_str().unwrap(),
+        java_tool_path(&java_home, "javac").to_str().unwrap(),
         &args_out,
     )?;
     Ok(())

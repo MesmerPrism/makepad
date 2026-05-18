@@ -56,6 +56,19 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     @Override
     public void prepareVideoPlayback() {
         try {
+            Log.i(TAG, String.format(
+                Locale.US,
+                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s preferredWidth=%d preferredHeight=%d syntheticProjectionProfile=%s",
+                mVideoId,
+                normalizeSourceMode(mConfig.sourceMode),
+                mConfig.streamPort,
+                mConfig.cameraId,
+                mConfig.liveStream,
+                mAutoplay,
+                usesExternalTexture(),
+                mConfig.preferredWidth,
+                mConfig.preferredHeight,
+                normalizeSyntheticProjectionProfile(mConfig.syntheticProjectionProfile)));
             if (usesExternalTexture()) {
                 mSurfaceTexture = new SurfaceTexture(mExternalTextureHandle);
                 mSurfaceTexture.setDefaultBufferSize(
@@ -72,7 +85,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 mDecodeSurface = new Surface(mSurfaceTexture);
             }
             mIsPrepared = true;
-            if (mAutoplay) {
+            if (mAutoplay || mConfig.liveStream) {
                 beginPlayback();
             }
         } catch (Exception ex) {
@@ -85,6 +98,14 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         if (!mIsPrepared || !mStarted.compareAndSet(false, true)) {
             return;
         }
+        Log.i(TAG, String.format(
+            Locale.US,
+            "Broker H.264 begin videoId=%d sourceMode=%s streamPort=%d liveStream=%s externalTexture=%s",
+            mVideoId,
+            normalizeSourceMode(mConfig.sourceMode),
+            mConfig.streamPort,
+            mConfig.liveStream,
+            usesExternalTexture()));
         mRunning = true;
         mDecodeThread = new Thread(this::runDecode, "MakepadBrokerH264Decode");
         mDecodeThread.start();
@@ -217,6 +238,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         params.put("host_port", mConfig.streamPort);
         params.put("preferred_width", mConfig.preferredWidth);
         params.put("preferred_height", mConfig.preferredHeight);
+        params.put("content_width", mConfig.preferredWidth);
+        params.put("content_height", mConfig.preferredHeight);
+        params.put(
+            "desired_display_aspect_ratio",
+            mConfig.preferredHeight > 0
+                ? (double) mConfig.preferredWidth / (double) mConfig.preferredHeight
+                : 1.0);
         params.put("capture_ms", mConfig.captureMs);
         params.put("max_packets", mConfig.maxPackets);
         params.put("bitrate_bps", mConfig.bitrateBps);
@@ -225,6 +253,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         if ("broker-synthetic".equals(sourceMode)) {
             params.put("source_mode", "synthetic_surface");
             params.put("synthetic_pattern", normalizeSyntheticPattern(mConfig.syntheticPattern));
+            params.put(
+                "synthetic_projection_profile",
+                normalizeSyntheticProjectionProfile(mConfig.syntheticProjectionProfile));
         }
         params.put("camera_id", mConfig.cameraId);
 
@@ -958,6 +989,25 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         return "diagnostic-grid";
     }
 
+    private static String normalizeSyntheticProjectionProfile(String value) {
+        if (value == null || value.trim().length() == 0) {
+            return "head-anchored-virtual-camera";
+        }
+        String normalized = value.trim().toLowerCase(Locale.US).replace('_', '-');
+        if ("camera-matched".equals(normalized) || "camera-matched-synthetic".equals(normalized)) {
+            return "camera-matched";
+        }
+        if ("full-frame".equals(normalized) ||
+                "full-frame-diagnostic".equals(normalized) ||
+                "projection-space-diagnostic".equals(normalized)) {
+            return "full-frame-diagnostic";
+        }
+        if ("head-anchored-virtual-camera".equals(normalized)) {
+            return "head-anchored-virtual-camera";
+        }
+        return "head-anchored-virtual-camera";
+    }
+
     private static void closeQuietly(Socket socket) {
         if (socket != null) {
             try {
@@ -978,6 +1028,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         final int streamPort;
         final String sourceMode;
         final String syntheticPattern;
+        final String syntheticProjectionProfile;
         final String cameraId;
         final int preferredWidth;
         final int preferredHeight;
@@ -996,6 +1047,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             int streamPort,
             String sourceMode,
             String syntheticPattern,
+            String syntheticProjectionProfile,
             String cameraId,
             int preferredWidth,
             int preferredHeight,
@@ -1014,6 +1066,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.streamPort = clamp(streamPort, 1, 65535);
             this.sourceMode = normalizeSourceMode(sourceMode);
             this.syntheticPattern = normalizeSyntheticPattern(syntheticPattern);
+            this.syntheticProjectionProfile = normalizeSyntheticProjectionProfile(syntheticProjectionProfile);
             this.cameraId = cameraId != null ? cameraId.trim() : "";
             this.preferredWidth = clamp(preferredWidth, 16, 4096);
             this.preferredHeight = clamp(preferredHeight, 16, 4096);
@@ -1038,6 +1091,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 8879,
                 "broker-synthetic",
                 "diagnostic-grid",
+                "head-anchored-virtual-camera",
                 "",
                 1280,
                 1280,
