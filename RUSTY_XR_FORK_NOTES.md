@@ -28,6 +28,10 @@ device logs, local SDK caches, or private validation artifacts into this branch.
 
 This branch currently carries:
 
+- Host/profile-aware Android packaging resolution. The packager preflights the
+  selected SDK path and resolves installed platform, build-tools, Java tools,
+  host NDK prebuilt, clang API level, and host executable names before the
+  Android package build proceeds.
 - Android packaging fixes for the tested Windows-to-Quest build lane.
 - Dependent Rust shared-library bundling for Android APK output.
 - Windows path normalization for generated Android wrapper inputs.
@@ -73,6 +77,11 @@ This branch currently carries:
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.
+
+Installer defaults are separate from packaging defaults. The current
+Makepad-managed Android-33/ext4 payload constants should stay internally
+coherent until intentionally upgraded as a set; do not partially bump SDK URLs,
+platform names, build-tools versions, directory names, or NDK version.
 
 Keep future changes reviewable as independent Makepad fixes. Portability,
 packaging, workspace metadata, and renderer-correctness fixes should be shaped
