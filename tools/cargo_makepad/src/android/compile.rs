@@ -1037,6 +1037,7 @@ fn compile_java(
         makepad_java_classes_dir.join("MakepadSocketStream.java"),
         makepad_java_classes_dir.join("MakepadWebSocket.java"),
         makepad_java_classes_dir.join("MakepadWebSocketReader.java"),
+        makepad_java_classes_dir.join("MediaProjectionStreamService.java"),
         makepad_java_classes_dir.join("ByteArrayMediaDataSource.java"),
         makepad_java_classes_dir.join("VideoPlayer.java"),
         makepad_java_classes_dir.join("BrokerH264VideoPlayer.java"),
@@ -1675,21 +1676,26 @@ fn add_resources(
         ];
         for remove in remove {
             assets_to_add.retain(|v| !v.contains(remove));
-            rm(&dst_dir.join(remove))?;
+            let remove_path = dst_dir.join(remove);
+            if remove_path.is_file() {
+                rm(&remove_path)?;
+            }
         }
     }
 
-    let mut aapt_args = vec!["add", build_paths.dst_unaligned_apk.to_str().unwrap()];
-    for asset in &assets_to_add {
-        aapt_args.push(asset);
-    }
+    if !assets_to_add.is_empty() {
+        let mut aapt_args = vec!["add", build_paths.dst_unaligned_apk.to_str().unwrap()];
+        for asset in &assets_to_add {
+            aapt_args.push(asset);
+        }
 
-    shell_env_cap(
-        &[],
-        &build_paths.out_dir,
-        aapt_path(sdk_dir, urls).to_str().unwrap(),
-        &aapt_args,
-    )?;
+        shell_env_cap(
+            &[],
+            &build_paths.out_dir,
+            aapt_path(sdk_dir, urls).to_str().unwrap(),
+            &aapt_args,
+        )?;
+    }
 
     Ok(())
 }

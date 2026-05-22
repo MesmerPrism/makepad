@@ -128,6 +128,8 @@ impl AndroidVariant {
                 <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
                 <uses-permission android:name="android.permission.INTERNET" />
                 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+                <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+                <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
                 <uses-permission android:name="android.permission.RECORD_AUDIO"/>
                 <uses-permission android:name="android.permission.CAMERA"/>
                 <uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
@@ -196,6 +198,11 @@ impl AndroidVariant {
                             <category android:name="com.oculus.intent.category.VR" />
                         </intent-filter>
                     </activity>
+
+                    <service
+                        android:name="dev.makepad.android.MediaProjectionStreamService"
+                        android:exported="false"
+                        android:foregroundServiceType="mediaProjection" />
                 </application>
                                                                                     
                 <queries>
