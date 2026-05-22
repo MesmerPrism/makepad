@@ -38,6 +38,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private static final int MAX_STREAM_PACKETS = 2400;
     private static final int DEQUEUE_TIMEOUT_US = 10000;
     private static final long PROGRESS_LOG_INTERVAL_MS = 2000L;
+    private static final String DEFAULT_CAMERA_PROJECTION_GEOMETRY_PROFILE = "full-frame-diagnostic";
+    private static final String CAMERA_PROJECTION_GEOMETRY_PROFILE = "camera-projection";
 
     private final Config mConfig;
     private final AtomicBoolean mStarted = new AtomicBoolean(false);
@@ -56,11 +58,14 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     @Override
     public void prepareVideoPlayback() {
         try {
+            String sourceMode = normalizeSourceMode(mConfig.sourceMode);
+            String projectionGeometryProfile =
+                projectionGeometryProfileForSource(sourceMode, mConfig.syntheticProjectionProfile);
             Log.i(TAG, String.format(
                 Locale.US,
-                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s preferredWidth=%d preferredHeight=%d syntheticProjectionProfile=%s",
+                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s syntheticProjectionProfile=%s",
                 mVideoId,
-                normalizeSourceMode(mConfig.sourceMode),
+                sourceMode,
                 mConfig.streamPort,
                 mConfig.cameraId,
                 mConfig.liveStream,
@@ -68,7 +73,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 usesExternalTexture(),
                 mConfig.preferredWidth,
                 mConfig.preferredHeight,
-                normalizeSyntheticProjectionProfile(mConfig.syntheticProjectionProfile)));
+                projectionGeometryProfile,
+                mConfig.syntheticProjectionProfile));
             if (usesExternalTexture()) {
                 mSurfaceTexture = new SurfaceTexture(mExternalTextureHandle);
                 mSurfaceTexture.setDefaultBufferSize(
@@ -233,6 +239,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
     private JSONObject startCommandJson() throws Exception {
         String sourceMode = normalizeSourceMode(mConfig.sourceMode);
+        String projectionGeometryProfile =
+            projectionGeometryProfileForSource(sourceMode, mConfig.syntheticProjectionProfile);
         JSONObject params = new JSONObject();
         params.put("device_port", mConfig.streamPort);
         params.put("host_port", mConfig.streamPort);
@@ -250,6 +258,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         params.put("bitrate_bps", mConfig.bitrateBps);
         params.put("frame_rate_hz", mConfig.frameRateHz);
         params.put("live_stream", mConfig.liveStream);
+        params.put("projection_geometry_profile", projectionGeometryProfile);
+        params.put("projectionGeometryProfile", projectionGeometryProfile);
         if ("broker-synthetic".equals(sourceMode)) {
             params.put("source_mode", "synthetic_surface");
             params.put("synthetic_pattern", normalizeSyntheticPattern(mConfig.syntheticPattern));
@@ -1008,6 +1018,32 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         return "head-anchored-virtual-camera";
     }
 
+    private static String normalizeCameraProjectionGeometryProfile(String value) {
+        if (value == null || value.trim().length() == 0) {
+            return DEFAULT_CAMERA_PROJECTION_GEOMETRY_PROFILE;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US).replace('_', '-');
+        if ("full-frame".equals(normalized) ||
+                DEFAULT_CAMERA_PROJECTION_GEOMETRY_PROFILE.equals(normalized) ||
+                "projection-space-diagnostic".equals(normalized)) {
+            return DEFAULT_CAMERA_PROJECTION_GEOMETRY_PROFILE;
+        }
+        if (CAMERA_PROJECTION_GEOMETRY_PROFILE.equals(normalized) ||
+                "camera-footprint".equals(normalized) ||
+                "camera-projection-footprint".equals(normalized)) {
+            return CAMERA_PROJECTION_GEOMETRY_PROFILE;
+        }
+        throw new IllegalArgumentException(
+            "Unsupported broker camera projection geometry profile: " + value);
+    }
+
+    private static String projectionGeometryProfileForSource(String sourceMode, String value) {
+        if ("broker-camera".equals(normalizeSourceMode(sourceMode))) {
+            return normalizeCameraProjectionGeometryProfile(value);
+        }
+        return normalizeSyntheticProjectionProfile(value);
+    }
+
     private static void closeQuietly(Socket socket) {
         if (socket != null) {
             try {
@@ -1066,7 +1102,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.streamPort = clamp(streamPort, 1, 65535);
             this.sourceMode = normalizeSourceMode(sourceMode);
             this.syntheticPattern = normalizeSyntheticPattern(syntheticPattern);
-            this.syntheticProjectionProfile = normalizeSyntheticProjectionProfile(syntheticProjectionProfile);
+            this.syntheticProjectionProfile = "broker-camera".equals(this.sourceMode)
+                ? normalizeCameraProjectionGeometryProfile(syntheticProjectionProfile)
+                : normalizeSyntheticProjectionProfile(syntheticProjectionProfile);
             this.cameraId = cameraId != null ? cameraId.trim() : "";
             this.preferredWidth = clamp(preferredWidth, 16, 4096);
             this.preferredHeight = clamp(preferredHeight, 16, 4096);
