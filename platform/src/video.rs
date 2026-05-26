@@ -1069,6 +1069,14 @@ impl CameraFrameLatest {
         Some(&self.frame)
     }
 
+    pub fn take_pending_or_latest_mut(&mut self) -> Option<&mut CameraFrameOwned> {
+        if !self.has_pending && !self.prime_pending_from_latest() {
+            return None;
+        }
+        self.has_pending = false;
+        Some(&mut self.frame)
+    }
+
     pub fn pending_frame(&self) -> Option<&CameraFrameOwned> {
         if self.has_pending {
             Some(&self.frame)

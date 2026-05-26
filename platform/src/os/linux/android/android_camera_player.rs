@@ -303,7 +303,7 @@ impl AndroidCameraPlayer {
         let Some(frame) = self
             .i420_frames
             .as_mut()
-            .and_then(CameraFrameLatest::take_pending_or_latest)
+            .and_then(|frames| frames.take_pending_or_latest_mut())
         else {
             return false;
         };
@@ -316,26 +316,26 @@ impl AndroidCameraPlayer {
         let height = frame.height as u32;
 
         if self.texture_mode == AndroidCameraTextureMode::CpuYuv {
-            replace_r8_plane_texture(
+            swap_r8_plane_texture(
                 textures,
                 self.tex_y_id,
                 width as usize,
                 height as usize,
-                &frame.planes[0].bytes,
+                &mut frame.planes[0].bytes,
             );
-            replace_r8_plane_texture(
+            swap_r8_plane_texture(
                 textures,
                 self.tex_u_id,
                 width.div_ceil(2) as usize,
                 height.div_ceil(2) as usize,
-                &frame.planes[1].bytes,
+                &mut frame.planes[1].bytes,
             );
-            replace_r8_plane_texture(
+            swap_r8_plane_texture(
                 textures,
                 self.tex_v_id,
                 width.div_ceil(2) as usize,
                 height.div_ceil(2) as usize,
-                &frame.planes[2].bytes,
+                &mut frame.planes[2].bytes,
             );
         } else {
             let Some(gl) = gl else {
@@ -381,12 +381,12 @@ impl Drop for AndroidCameraPlayer {
     }
 }
 
-fn replace_r8_plane_texture(
+fn swap_r8_plane_texture(
     textures: &mut CxTexturePool,
     texture_id: TextureId,
     width: usize,
     height: usize,
-    data: &[u8],
+    data: &mut Vec<u8>,
 ) {
     let texture = &mut textures[texture_id];
     match &mut texture.format {
@@ -400,15 +400,16 @@ fn replace_r8_plane_texture(
             *texture_width = width;
             *texture_height = height;
             let texture_data = texture_data.get_or_insert_with(Vec::new);
-            texture_data.clear();
-            texture_data.extend_from_slice(data);
+            std::mem::swap(texture_data, data);
             *updated = updated.clone().update(None);
         }
         TextureFormat::VideoYuvPlane => {
+            let mut plane_data = Vec::new();
+            std::mem::swap(&mut plane_data, data);
             texture.format = TextureFormat::VecRu8 {
                 width,
                 height,
-                data: Some(data.to_vec()),
+                data: Some(plane_data),
                 unpack_row_length: None,
                 updated: TextureUpdated::Full,
             };
