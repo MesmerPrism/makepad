@@ -15,7 +15,7 @@ use {
     },
     std::{
         sync::{Arc, Mutex},
-        time::Instant,
+        time::{Instant, SystemTime, UNIX_EPOCH},
     },
 };
 
@@ -48,6 +48,7 @@ pub struct AndroidCameraPlayer {
     created_at: Instant,
     warned_waiting_for_first_frame: bool,
     logged_first_hardware_buffer_consume: bool,
+    cpu_yuv_upload_seq: u64,
 }
 
 impl AndroidCameraPlayer {
@@ -91,8 +92,31 @@ impl AndroidCameraPlayer {
 
         let frame_cb = i420_frames.as_ref().map(|frames| {
             let frame_ring = frames.ring();
+            let video_id_value = video_id.0;
             Box::new(move |frame_ref: CameraFrameRef<'_>| {
-                let _ = frame_ring.publish_i420_copy(frame_ref);
+                let frame_timestamp_ns = frame_ref.timestamp_ns;
+                let width = frame_ref.width;
+                let height = frame_ref.height;
+                let capture_time_ms = diagnostic_time_ms();
+                match frame_ring.publish_i420_copy_with_seq(frame_ref) {
+                    Some(camera_frame_seq) => crate::log!(
+                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv videoId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} width={} height={} layout=I420",
+                        video_id_value,
+                        camera_frame_seq,
+                        frame_timestamp_ns,
+                        capture_time_ms,
+                        width,
+                        height,
+                    ),
+                    None => crate::log!(
+                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv videoId={} cameraTimestampNs={} captureTimeMs={} width={} height={} layout=I420",
+                        video_id_value,
+                        frame_timestamp_ns,
+                        capture_time_ms,
+                        width,
+                        height,
+                    ),
+                }
             }) as CameraFrameInputFn
         });
         let hardware_buffer_cb = hardware_buffer_frame.as_ref().map(|latest| {
@@ -146,6 +170,7 @@ impl AndroidCameraPlayer {
             created_at: Instant::now(),
             warned_waiting_for_first_frame: false,
             logged_first_hardware_buffer_consume: false,
+            cpu_yuv_upload_seq: 0,
         }
     }
 
@@ -197,8 +222,31 @@ impl AndroidCameraPlayer {
 
         let frames = CameraFrameLatest::new(4);
         let frame_ring = frames.ring();
+        let video_id_value = self.video_id.0;
         let frame_cb = Box::new(move |frame_ref: CameraFrameRef<'_>| {
-            let _ = frame_ring.publish_i420_copy(frame_ref);
+            let frame_timestamp_ns = frame_ref.timestamp_ns;
+            let width = frame_ref.width;
+            let height = frame_ref.height;
+            let capture_time_ms = diagnostic_time_ms();
+            match frame_ring.publish_i420_copy_with_seq(frame_ref) {
+                Some(camera_frame_seq) => crate::log!(
+                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv-fallback videoId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} width={} height={} layout=I420",
+                    video_id_value,
+                    camera_frame_seq,
+                    frame_timestamp_ns,
+                    capture_time_ms,
+                    width,
+                    height,
+                ),
+                None => crate::log!(
+                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv-fallback videoId={} cameraTimestampNs={} captureTimeMs={} width={} height={} layout=I420",
+                    video_id_value,
+                    frame_timestamp_ns,
+                    capture_time_ms,
+                    width,
+                    height,
+                ),
+            }
         }) as CameraFrameInputFn;
 
         {
@@ -218,6 +266,7 @@ impl AndroidCameraPlayer {
         self.hardware_buffer_frame = None;
         self.warned_waiting_for_first_frame = false;
         self.logged_first_hardware_buffer_consume = false;
+        self.cpu_yuv_upload_seq = 0;
         crate::warning!(
             "Android headset camera player: falling back to cpu-yuv video_id={} size={}x{}",
             self.video_id.0,
@@ -326,6 +375,11 @@ impl AndroidCameraPlayer {
         let height = frame.height as u32;
 
         if self.texture_mode == AndroidCameraTextureMode::CpuYuv {
+            let frame_seq = frame.sequence;
+            let frame_timestamp_ns = frame.timestamp_ns;
+            let y_bytes = frame.planes[0].bytes.len();
+            let u_bytes = frame.planes[1].bytes.len();
+            let v_bytes = frame.planes[2].bytes.len();
             swap_r8_plane_texture(
                 textures,
                 self.tex_y_id,
@@ -346,6 +400,21 @@ impl AndroidCameraPlayer {
                 width.div_ceil(2) as usize,
                 height.div_ceil(2) as usize,
                 &mut frame.planes[2].bytes,
+            );
+            self.cpu_yuv_upload_seq = self.cpu_yuv_upload_seq.saturating_add(1);
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=cpu-yuv-upload status=ok path=cpu-yuv videoId={} uploadSeq={} cameraFrameSeq={} cameraTimestampNs={} uploadTimeMs={} width={} height={} yBytes={} uBytes={} vBytes={} totalBytes={}",
+                self.video_id.0,
+                self.cpu_yuv_upload_seq,
+                frame_seq,
+                frame_timestamp_ns,
+                diagnostic_time_ms(),
+                width,
+                height,
+                y_bytes,
+                u_bytes,
+                v_bytes,
+                y_bytes + u_bytes + v_bytes,
             );
         } else {
             let Some(gl) = gl else {
@@ -383,6 +452,13 @@ impl AndroidCameraPlayer {
             cam.lock().unwrap().unregister_preview(self.video_id);
         }
     }
+}
+
+fn diagnostic_time_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 impl Drop for AndroidCameraPlayer {

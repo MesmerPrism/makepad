@@ -380,6 +380,7 @@ impl CxOpenXrSession {
             display_refresh_rate_request_hz: options.display_refresh_rate_hz,
             last_predicted_display_time: None,
             last_end_frame_result: None,
+            end_frame_sequence: 0,
             inputs,
         };
         openxr_session.request_configured_display_refresh_rate(xr);

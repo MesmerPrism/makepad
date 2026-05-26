@@ -30,7 +30,7 @@ use {
     },
     std::ptr,
     std::sync::mpsc,
-    std::time::Instant,
+    std::time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(use_vulkan)]
@@ -880,6 +880,7 @@ pub struct CxOpenXrSession {
     pub display_refresh_rate_request_hz: Option<f32>,
     last_predicted_display_time: Option<XrTime>,
     last_end_frame_result: Option<XrResult>,
+    end_frame_sequence: u64,
 }
 
 #[derive(SerBin, DeBin)]
@@ -909,6 +910,11 @@ impl CxOpenXrSession {
             }
         });
         (active_refresh_rate_hz, effective_frame_time_ms)
+    }
+
+    fn next_end_frame_sequence(&mut self) -> u64 {
+        self.end_frame_sequence = self.end_frame_sequence.saturating_add(1);
+        self.end_frame_sequence
     }
 
     fn query_active_display_refresh_rate(
@@ -1778,6 +1784,16 @@ impl CxOpenXrFrame {
         };
 
         let result = unsafe { (xr.xrEndFrame)(session.handle, &fei) };
+        let end_frame_sequence = session.next_end_frame_sequence();
+        crate::log!(
+            "RUSTY_XR_MAKEPAD_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=xr-end-frame status=submitted renderPath=makepad-xr xrFrameSeq={} shouldRender=true submitTimeMs={} predictedDisplayTimeNs={} predictedDisplayPeriodNs={} resultCode={} layerCount={}",
+            end_frame_sequence,
+            diagnostic_time_ms(),
+            self.frame_state.predicted_display_time.as_nanos(),
+            self.frame_state.predicted_display_period.as_nanos(),
+            result.0,
+            layer_count,
+        );
         let result_changed = session.last_end_frame_result != Some(result);
         if result != XrResult::SUCCESS || result_changed || session.debug_end_frame_logs < 4 {
             crate::log!(
@@ -1809,6 +1825,16 @@ impl CxOpenXrSkippedFrame {
         };
 
         let result = unsafe { (xr.xrEndFrame)(session.handle, &fei) };
+        let end_frame_sequence = session.next_end_frame_sequence();
+        crate::log!(
+            "RUSTY_XR_MAKEPAD_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=xr-end-frame status=submitted renderPath=makepad-xr xrFrameSeq={} shouldRender=false skippedShouldRenderCount={} submitTimeMs={} predictedDisplayTimeNs={} predictedDisplayPeriodNs={} resultCode={} layerCount=0",
+            end_frame_sequence,
+            self.skipped_should_render_count,
+            diagnostic_time_ms(),
+            self.frame_state.predicted_display_time.as_nanos(),
+            self.frame_state.predicted_display_period.as_nanos(),
+            result.0,
+        );
         let result_changed = session.last_end_frame_result != Some(result);
         if result != XrResult::SUCCESS || result_changed || session.debug_end_frame_logs < 4 {
             crate::log!(
@@ -1823,6 +1849,13 @@ impl CxOpenXrSkippedFrame {
         session.last_end_frame_result = Some(result);
         result.log_error("xrEndFrame skipped should_render=false");
     }
+}
+
+fn diagnostic_time_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 #[derive(Clone, Copy)]

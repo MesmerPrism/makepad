@@ -701,6 +701,7 @@ pub struct CameraFramePlaneOwned {
 
 #[derive(Default)]
 pub struct CameraFrameOwned {
+    pub sequence: u64,
     pub timestamp_ns: u64,
     pub width: usize,
     pub height: usize,
@@ -712,6 +713,7 @@ pub struct CameraFrameOwned {
 
 impl CameraFrameOwned {
     pub fn reset(&mut self) {
+        self.sequence = 0;
         self.timestamp_ns = 0;
         self.width = 0;
         self.height = 0;
@@ -726,6 +728,7 @@ impl CameraFrameOwned {
     }
 
     pub fn copy_from_ref(&mut self, src: CameraFrameRef<'_>) {
+        self.sequence = 0;
         self.timestamp_ns = src.timestamp_ns;
         self.width = src.width;
         self.height = src.height;
@@ -970,17 +973,22 @@ impl CameraFrameRing {
     }
 
     pub fn publish_i420_copy(&self, frame_ref: CameraFrameRef<'_>) -> bool {
+        self.publish_i420_copy_with_seq(frame_ref).is_some()
+    }
+
+    pub fn publish_i420_copy_with_seq(&self, frame_ref: CameraFrameRef<'_>) -> Option<u64> {
         if frame_ref.layout != CameraFrameLayout::I420 || frame_ref.plane_count < 3 {
-            return false;
+            return None;
         }
-        self.publish_with(frame_ref, |slot, src| {
+        self.publish_with_seq(frame_ref, |slot, src| {
             slot.copy_from_ref(src);
             true
         })
     }
 
     pub fn publish_i420_converted(&self, frame_ref: CameraFrameRef<'_>) -> bool {
-        self.publish_with(frame_ref, |slot, src| slot.convert_to_i420(src))
+        self.publish_with_seq(frame_ref, |slot, src| slot.convert_to_i420(src))
+            .is_some()
     }
 
     fn take_latest(&self, last_seen_seq: &mut u64, out: &mut CameraFrameOwned) -> bool {
@@ -1006,23 +1014,26 @@ impl CameraFrameRing {
         true
     }
 
-    fn publish_with(
+    fn publish_with_seq(
         &self,
         frame_ref: CameraFrameRef<'_>,
         write_frame: impl FnOnce(&mut CameraFrameOwned, CameraFrameRef<'_>) -> bool,
-    ) -> bool {
-        let idx = self.next_write_slot.fetch_add(1, Ordering::Relaxed) % self.slots.len();
+    ) -> Option<u64> {
+        let write_index = self.next_write_slot.fetch_add(1, Ordering::Relaxed);
+        let idx = write_index % self.slots.len();
         let mut slot = match self.slots[idx].try_lock() {
             Ok(slot) => slot,
-            Err(_) => return false,
+            Err(_) => return None,
         };
 
         if !write_frame(&mut slot, frame_ref) {
-            return false;
+            return None;
         }
 
-        self.latest_seq.fetch_add(1, Ordering::Release);
-        true
+        let seq = write_index as u64 + 1;
+        slot.sequence = seq;
+        self.latest_seq.fetch_max(seq, Ordering::Release);
+        Some(seq)
     }
 }
 
