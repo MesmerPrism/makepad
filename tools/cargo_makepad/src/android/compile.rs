@@ -1471,7 +1471,7 @@ fn bundle_local_shared_deps(
                 build_paths,
             )?;
 
-            println!("  Bundled local shared dep: {lib_name} (for {abi})");
+            eprintln!("  Bundled local shared dep: {lib_name} (for {abi})");
             pending.push(candidate);
         }
     }
@@ -1904,7 +1904,7 @@ pub fn build(
     )?;
     let build_paths = prepare_build(sdk_dir, build_crate, &java_url, &app_label, variant, urls)?;
 
-    println!("Building APK");
+    eprintln!("Building APK");
     build_r_class(sdk_dir, host_os, &build_paths, urls)?;
     compile_java(sdk_dir, host_os, &build_paths, urls)?;
     build_dex(sdk_dir, host_os, &build_paths, urls)?;
@@ -1932,7 +1932,7 @@ pub fn build(
     build_zipaligned_apk(sdk_dir, &build_paths, urls)?;
     sign_apk(sdk_dir, host_os, &build_paths, urls)?;
 
-    println!("APK Build completed");
+    eprintln!("APK Build completed");
     Ok(BuildResult {
         dst_apk: build_paths.dst_apk,
         java_url,

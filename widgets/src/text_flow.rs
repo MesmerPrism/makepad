@@ -789,10 +789,10 @@ pub struct TextFlow {
     #[rust]
     last_rate_time: f64,
     /// Number of chars over which to fade (default 50)
-    #[live(50.0)]
+    #[live(50.0_f32)]
     pub fade_chars: f32,
     /// Minimum animation speed in chars per second
-    #[live(100.0)]
+    #[live(100.0_f32)]
     pub min_fade_speed: f32,
 }
 
