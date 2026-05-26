@@ -1,5 +1,5 @@
 use super::sdk::{AndroidSDKUrls, BUILD_TOOLS_DIR, PLATFORMS_DIR};
-use crate::android::{AndroidConfig, AndroidTarget, AndroidVariant, HostOs};
+use crate::android::{AndroidConfig, AndroidTarget, AndroidVariant, HostOs, ManifestArgs};
 use crate::makepad_shell::*;
 use crate::utils::*;
 use std::{
@@ -208,7 +208,6 @@ fn available_clang_api_levels(
 }
 
 fn resolve_compiler_api_level(
-    sdk_dir: &Path,
     host_os: HostOs,
     urls: &AndroidSDKUrls,
     ndk_prebuilt_root: &Path,
@@ -236,13 +235,17 @@ fn resolve_compiler_api_level(
             levels
         ));
     }
-    let platform_api = resolve_platform_api(sdk_dir, urls);
-    levels
-        .iter()
-        .copied()
-        .find(|api| *api <= platform_api)
-        .or_else(|| levels.first().copied())
-        .ok_or_else(|| "No compatible Android compiler API level found".to_string())
+    if levels.contains(&urls.sdk_version) {
+        return Ok(urls.sdk_version);
+    }
+    Err(format!(
+        "Configured Android min SDK {} has no {}{}-clang wrapper in {:?}; available API levels: {:?}",
+        urls.sdk_version,
+        android_target.clang(),
+        urls.sdk_version,
+        ndk_prebuilt_root.join("bin"),
+        levels
+    ))
 }
 
 fn preflight_android_sdk(
@@ -303,8 +306,7 @@ fn preflight_android_sdk(
     let Some(first_target) = android_targets.first() else {
         return Err("No Android targets selected".to_string());
     };
-    let compiler_api =
-        resolve_compiler_api_level(sdk_dir, host_os, urls, &ndk_prebuilt_root, first_target)?;
+    let compiler_api = resolve_compiler_api_level(host_os, urls, &ndk_prebuilt_root, first_target)?;
     for target in android_targets {
         let path = ndk_prebuilt_root.join("bin").join(clang_tool_name(
             target,
@@ -691,7 +693,7 @@ fn rust_build(
         .to_path_buf();
     for android_target in android_targets {
         let compiler_api =
-            resolve_compiler_api_level(sdk_dir, host_os, urls, &ndk_prebuilt_root, android_target)?;
+            resolve_compiler_api_level(host_os, urls, &ndk_prebuilt_root, android_target)?;
 
         let bin_name = |bin_filename: &str, windows_extension: &str| match host_os {
             HostOs::WindowsX64 => format!("{bin_filename}.{windows_extension}"),
@@ -878,17 +880,89 @@ fn cargo_target_dir(cwd: &Path) -> PathBuf {
     }
 }
 
-fn prepare_build(
-    sdk_dir: &Path,
+struct ResolvedPackagingInputs {
+    java_url: String,
+    app_label: String,
+    version_code: u32,
+    version_name: String,
+    min_sdk_version_override: Option<usize>,
+}
+
+fn resolve_packaging_inputs(
     build_crate: &str,
-    java_url: &str,
-    app_label: &str,
-    variant: &AndroidVariant,
+    binary_name: &str,
+    package_name_flag: Option<String>,
+    app_label_flag: Option<String>,
+    version_code_flag: Option<VersionCodeStrategy>,
+    version_name_flag: Option<String>,
+    min_sdk_version_flag: Option<usize>,
     urls: &AndroidSDKUrls,
-) -> Result<BuildPaths, String> {
+) -> Result<ResolvedPackagingInputs, String> {
+    let underscore_binary_name = binary_name.replace('-', "_");
+    let metadata = read_android_package_metadata(build_crate);
+
+    let java_url = package_name_flag
+        .or(metadata.identifier.clone())
+        .unwrap_or_else(|| format!("dev.makepad.{underscore_binary_name}"));
+    let app_label = app_label_flag
+        .or(metadata.product_name.clone())
+        .unwrap_or_else(|| {
+            let mut chars = underscore_binary_name.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        });
+
+    let version_code = version_code_flag
+        .or(metadata.version_code)
+        .unwrap_or(VersionCodeStrategy::Explicit(1))
+        .resolve();
+    let version_name = version_name_flag
+        .or(metadata.version_name_override.clone())
+        .or(metadata.package_version.clone())
+        .unwrap_or_else(|| "1.0".to_string());
+
+    let min_sdk_version_override = min_sdk_version_flag.or(metadata.min_sdk_version);
+    if let Some(min_sdk_version) = min_sdk_version_override {
+        if min_sdk_version < urls.sdk_version {
+            return Err(format!(
+                "min_sdk_version = {min_sdk_version} is below cargo-makepad's current Android floor of {}",
+                urls.sdk_version
+            ));
+        }
+        if min_sdk_version > urls.target_sdk_version {
+            return Err(format!(
+                "min_sdk_version = {min_sdk_version} cannot exceed targetSdkVersion = {}",
+                urls.target_sdk_version
+            ));
+        }
+    }
+
+    Ok(ResolvedPackagingInputs {
+        java_url,
+        app_label,
+        version_code,
+        version_name,
+        min_sdk_version_override,
+    })
+}
+
+struct PrepareBuildOpts<'a> {
+    build_crate: &'a str,
+    java_url: &'a str,
+    app_label: &'a str,
+    variant: &'a AndroidVariant,
+    urls: &'a AndroidSDKUrls,
+    version_code: u32,
+    version_name: &'a str,
+    debuggable: bool,
+}
+
+fn prepare_build(opts: &PrepareBuildOpts<'_>) -> Result<BuildPaths, String> {
     let cwd = std::env::current_dir().unwrap();
     let target_dir = cargo_target_dir(&cwd);
-    let underscore_build_crate = build_crate.replace('-', "_");
+    let underscore_build_crate = opts.build_crate.replace('-', "_");
 
     let tmp_dir = target_dir
         .join("makepad-android-apk")
@@ -913,7 +987,7 @@ fn prepare_build(
     let cargo_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     cp_all(&cargo_manifest_dir.join("src/android/res"), &res_dir, false)?;
 
-    let build_crate_dir = get_crate_dir(build_crate)?;
+    let build_crate_dir = get_crate_dir(opts.build_crate)?;
     let app_android_res = build_crate_dir.join("resources/android/res");
     if app_android_res.is_dir() {
         cp_all(&app_android_res, &res_dir, false)?;
@@ -936,26 +1010,31 @@ fn prepare_build(
         );
     }
 
-    let manifest_xml = variant.manifest_xml(
-        app_label,
-        "MakepadApp",
-        java_url,
-        resolve_platform_api(sdk_dir, urls),
-        has_android_icon,
-    );
+    let manifest_args = ManifestArgs {
+        label: opts.app_label,
+        class_name: "MakepadApp",
+        url: opts.java_url,
+        sdk_version: opts.urls.sdk_version,
+        target_sdk_version: opts.urls.target_sdk_version,
+        has_icon: has_android_icon,
+        version_code: opts.version_code,
+        version_name: opts.version_name,
+        debuggable: opts.debuggable,
+    };
+    let manifest_xml = opts.variant.manifest_xml(&manifest_args);
     let manifest_file = tmp_dir.join("AndroidManifest.xml");
     write_text(&manifest_file, &manifest_xml)?;
 
-    let main_java = main_java(java_url);
-    let java_path = java_url.replace('.', "/");
+    let main_java = main_java(opts.java_url);
+    let java_path = opts.java_url.replace('.', "/");
     let java_file = tmp_dir.join(&java_path).join("MakepadApp.java");
     write_text(&java_file, &main_java)?;
 
-    let xr_java = xr_java(java_url);
+    let xr_java = xr_java(opts.java_url);
     let xr_file = tmp_dir.join(&java_path).join("MakepadAppXr.java");
     write_text(&xr_file, &xr_java)?;
 
-    let apk_filename = to_snakecase(app_label);
+    let apk_filename = to_snakecase(opts.app_label);
     let dst_unaligned_apk = out_dir.join(format!("{apk_filename}.unaligned.apk"));
     let dst_apk = out_dir.join(format!("{apk_filename}.apk"));
 
@@ -1296,7 +1375,7 @@ fn bundle_ndk_shared_deps(
     let (_ndk_version, ndk_prebuilt_root) =
         resolve_ndk_prebuilt_root(sdk_dir, host_os, urls.ndk_version_full)?;
     let compiler_api =
-        resolve_compiler_api_level(sdk_dir, host_os, urls, &ndk_prebuilt_root, android_target)?;
+        resolve_compiler_api_level(host_os, urls, &ndk_prebuilt_root, android_target)?;
 
     // Path to llvm-readelf shipped with the NDK.
     let readelf_path = ndk_bin_path(&ndk_prebuilt_root, host_os, "llvm-readelf");
@@ -1851,6 +1930,9 @@ pub fn build(
     host_os: HostOs,
     package_name: Option<String>,
     app_label: Option<String>,
+    version_code: Option<VersionCodeStrategy>,
+    version_name: Option<String>,
+    min_sdk_version: Option<usize>,
     args: &[String],
     android_targets: &[AndroidTarget],
     variant: &AndroidVariant,
@@ -1860,21 +1942,23 @@ pub fn build(
     let build_crate = get_build_crate_from_args(args)?;
     let binary_name =
         get_package_binary_name(build_crate).unwrap_or_else(|| build_crate.to_string());
-    let underscore_binary_name = binary_name.replace('-', "_");
     let underscore_build_crate = build_crate.replace('-', "_");
 
-    let java_url = package_name.unwrap_or_else(|| format!("dev.makepad.{underscore_binary_name}"));
-    // When the caller didn't pass --app-label, fall back to the binary name with the
-    // first letter capitalized so the launcher icon doesn't show a lowercased crate
-    // name. The package name (java_url) stays lowercase since Android package IDs
-    // conventionally are.
-    let app_label = app_label.unwrap_or_else(|| {
-        let mut chars = underscore_binary_name.chars();
-        match chars.next() {
-            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-            None => String::new(),
-        }
-    });
+    let resolved = resolve_packaging_inputs(
+        build_crate,
+        &binary_name,
+        package_name,
+        app_label,
+        version_code,
+        version_name,
+        min_sdk_version,
+        urls,
+    )?;
+    let mut effective_urls = *urls;
+    if let Some(min_sdk_version) = resolved.min_sdk_version_override {
+        effective_urls.sdk_version = min_sdk_version;
+    }
+    let urls = &effective_urls;
 
     if let Some(icon) = resolve_app_icon_env(build_crate)? {
         for (var, value) in APP_ICON_ENV_VARS.iter().zip(icon.iter()) {
@@ -1902,9 +1986,29 @@ pub fn build(
         variant,
         urls,
     )?;
-    let build_paths = prepare_build(sdk_dir, build_crate, &java_url, &app_label, variant, urls)?;
+    let debuggable = get_profile_from_args(args) != "release";
+    let prep_opts = PrepareBuildOpts {
+        build_crate,
+        java_url: &resolved.java_url,
+        app_label: &resolved.app_label,
+        variant,
+        urls,
+        version_code: resolved.version_code,
+        version_name: &resolved.version_name,
+        debuggable,
+    };
+    let build_paths = prepare_build(&prep_opts)?;
 
-    eprintln!("Building APK");
+    eprintln!(
+        "Building APK (package={}, label={}, versionCode={}, versionName={}, minSdkVersion={}, targetSdkVersion={}, debuggable={})",
+        resolved.java_url,
+        resolved.app_label,
+        resolved.version_code,
+        resolved.version_name,
+        urls.sdk_version,
+        urls.target_sdk_version,
+        debuggable
+    );
     build_r_class(sdk_dir, host_os, &build_paths, urls)?;
     compile_java(sdk_dir, host_os, &build_paths, urls)?;
     build_dex(sdk_dir, host_os, &build_paths, urls)?;
@@ -1935,7 +2039,7 @@ pub fn build(
     eprintln!("APK Build completed");
     Ok(BuildResult {
         dst_apk: build_paths.dst_apk,
-        java_url,
+        java_url: resolved.java_url,
     })
 }
 
@@ -1944,6 +2048,9 @@ pub fn run(
     host_os: HostOs,
     package_name: Option<String>,
     app_label: Option<String>,
+    version_code: Option<VersionCodeStrategy>,
+    version_name: Option<String>,
+    min_sdk_version: Option<usize>,
     args: &[String],
     targets: &[AndroidTarget],
     android_variant: &AndroidVariant,
@@ -1957,6 +2064,9 @@ pub fn run(
         host_os,
         package_name,
         app_label,
+        version_code,
+        version_name,
+        min_sdk_version,
         args,
         targets,
         android_variant,

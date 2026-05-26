@@ -9,8 +9,10 @@ use std::{
 
 use crate::{android::*, makepad_shell::*};
 
+#[derive(Clone, Copy)]
 pub struct AndroidSDKUrls {
     pub sdk_version: usize,
+    pub target_sdk_version: usize,
     pub sdk_extension: &'static str,
     pub platform: &'static str,
     pub build_tools_version: &'static str,
@@ -33,6 +35,7 @@ pub const PLATFORMS_DIR: &str = "platforms";
 
 pub const ANDROID_SDK_URLS_33: AndroidSDKUrls = AndroidSDKUrls {
     sdk_version: 33,
+    target_sdk_version: 33,
     build_tools_version: "33.0.1",
     sdk_extension: "ext4",
     platform: "android-33-ext4",

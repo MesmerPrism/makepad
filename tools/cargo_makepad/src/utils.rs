@@ -4,7 +4,71 @@ use std::{
     collections::HashMap,
     env,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
+
+#[derive(Debug, Clone)]
+pub enum VersionCodeStrategy {
+    Explicit(u32),
+    Auto,
+}
+
+impl VersionCodeStrategy {
+    pub fn resolve(&self) -> u32 {
+        match self {
+            Self::Explicit(v) => *v,
+            Self::Auto => generate_auto_version_code(),
+        }
+    }
+}
+
+pub fn parse_version_code_flag(value: &str) -> Result<VersionCodeStrategy, String> {
+    if value.eq_ignore_ascii_case("auto") {
+        return Ok(VersionCodeStrategy::Auto);
+    }
+    value
+        .parse::<u32>()
+        .map(VersionCodeStrategy::Explicit)
+        .map_err(|_| {
+            format!("--version-code must be a non-negative integer or `auto`, got {value:?}")
+        })
+}
+
+pub fn generate_auto_version_code() -> u32 {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (year, month, day, hour) = unix_to_utc_ymdh(secs);
+    let value =
+        (year as u64) * 1_000_000 + (month as u64) * 10_000 + (day as u64) * 100 + (hour as u64);
+    value as u32
+}
+
+fn unix_to_utc_ymdh(secs: u64) -> (u32, u32, u32, u32) {
+    let days_since_epoch = (secs / 86_400) as i64;
+    let hour = ((secs % 86_400) / 3_600) as u32;
+
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 {
+        z / 146_097
+    } else {
+        (z - 146_096) / 146_097
+    };
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 {
+        mp as u32 + 3
+    } else {
+        mp as u32 - 9
+    };
+    let year = if month <= 2 { year + 1 } else { year };
+    (year as u32, month, day, hour)
+}
 
 pub fn extract_dependency_paths(line: &str) -> Option<(String, Option<PathBuf>)> {
     let dependency_output_start = line.find(|c: char| c.is_alphanumeric())?;
@@ -174,6 +238,143 @@ pub fn get_profile_from_args(args: &[String]) -> String {
         }
     }
     return "debug".to_string();
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct AndroidPackageMetadata {
+    pub identifier: Option<String>,
+    pub product_name: Option<String>,
+    pub package_version: Option<String>,
+    pub version_code: Option<VersionCodeStrategy>,
+    pub version_name_override: Option<String>,
+    pub min_sdk_version: Option<usize>,
+}
+
+pub fn read_android_package_metadata(build_crate: &str) -> AndroidPackageMetadata {
+    let mut out = AndroidPackageMetadata::default();
+    let Ok(crate_dir) = get_crate_dir(build_crate) else {
+        return out;
+    };
+    let Ok(cargo_toml) = std::fs::read_to_string(crate_dir.join("Cargo.toml")) else {
+        return out;
+    };
+    let Ok(toml) = parse_toml(&cargo_toml) else {
+        return out;
+    };
+
+    if let Some(Toml::Str(value, _)) = toml.get("package.version") {
+        out.package_version = Some(value.clone());
+    }
+    if let Some(Toml::Str(value, _)) = toml.get("package.metadata.packager.identifier") {
+        out.identifier = Some(value.clone());
+    }
+    if let Some(Toml::Str(value, _)) = toml.get("package.metadata.packager.product_name") {
+        out.product_name = Some(value.clone());
+    }
+    match toml.get("package.metadata.makepad.android.version_code") {
+        Some(Toml::Num(value, _)) if *value >= 0.0 && *value <= u32::MAX as f64 => {
+            out.version_code = Some(VersionCodeStrategy::Explicit(*value as u32));
+        }
+        Some(Toml::Str(value, _)) if value.eq_ignore_ascii_case("auto") => {
+            out.version_code = Some(VersionCodeStrategy::Auto);
+        }
+        Some(Toml::Str(value, _)) => {
+            eprintln!(
+                "warning: ignoring [package.metadata.makepad.android].version_code = \"{value}\"; expected a non-negative integer or \"auto\""
+            );
+        }
+        _ => {}
+    }
+    if let Some(Toml::Str(value, _)) = toml.get("package.metadata.makepad.android.version_name") {
+        out.version_name_override = Some(value.clone());
+    }
+    if let Some(Toml::Num(value, _)) = toml.get("package.metadata.makepad.android.min_sdk_version")
+    {
+        if *value >= 1.0 && *value <= 100.0 && value.fract() == 0.0 {
+            out.min_sdk_version = Some(*value as usize);
+        } else {
+            eprintln!(
+                "warning: ignoring [package.metadata.makepad.android].min_sdk_version = {value}; expected a positive integer API level"
+            );
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod android_package_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn version_code_flag_accepts_int_and_auto() {
+        assert!(matches!(
+            parse_version_code_flag("42"),
+            Ok(VersionCodeStrategy::Explicit(42))
+        ));
+        assert!(matches!(
+            parse_version_code_flag("auto"),
+            Ok(VersionCodeStrategy::Auto)
+        ));
+        assert!(matches!(
+            parse_version_code_flag("AUTO"),
+            Ok(VersionCodeStrategy::Auto)
+        ));
+        assert!(parse_version_code_flag("nope").is_err());
+    }
+
+    #[test]
+    fn unix_epoch_is_1970_01_01() {
+        assert_eq!(unix_to_utc_ymdh(0), (1970, 1, 1, 0));
+    }
+
+    #[test]
+    fn auto_version_code_fits_play_store_cap() {
+        let value = generate_auto_version_code();
+        assert!(value <= 2_100_000_000);
+        assert!(value > 1_900_000_000);
+    }
+
+    #[test]
+    fn package_metadata_shape_parses_expected_paths() {
+        let toml = parse_toml(
+            r#"
+[package]
+name = "demo"
+version = "1.2.3"
+
+[package.metadata.packager]
+identifier = "dev.makepad.demo"
+product_name = "Demo"
+
+[package.metadata.makepad.android]
+version_code = "auto"
+version_name = "1.2.3-test"
+min_sdk_version = 33
+"#,
+        )
+        .expect("parse");
+
+        assert!(matches!(
+            toml.get("package.metadata.packager.identifier"),
+            Some(Toml::Str(value, _)) if value == "dev.makepad.demo"
+        ));
+        assert!(matches!(
+            toml.get("package.metadata.packager.product_name"),
+            Some(Toml::Str(value, _)) if value == "Demo"
+        ));
+        assert!(matches!(
+            toml.get("package.metadata.makepad.android.version_code"),
+            Some(Toml::Str(value, _)) if value.eq_ignore_ascii_case("auto")
+        ));
+        assert!(matches!(
+            toml.get("package.metadata.makepad.android.version_name"),
+            Some(Toml::Str(value, _)) if value == "1.2.3-test"
+        ));
+        assert!(matches!(
+            toml.get("package.metadata.makepad.android.min_sdk_version"),
+            Some(Toml::Num(value, _)) if (*value - 33.0).abs() < f64::EPSILON
+        ));
+    }
 }
 
 pub const APP_ICON_COUNT: usize = 7;

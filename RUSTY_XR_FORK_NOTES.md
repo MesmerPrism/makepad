@@ -32,6 +32,10 @@ This branch currently carries:
   selected SDK path and resolves installed platform, build-tools, Java tools,
   host NDK prebuilt, clang API level, and host executable names before the
   Android package build proceeds.
+- Android manifest/package input reconciliation from upstream Makepad:
+  generated manifests now separate min SDK from target SDK and can derive
+  package id, label, version code, version name, and min SDK from generic Cargo
+  metadata or explicit Android command-line flags.
 - Android packaging fixes for the tested Windows-to-Quest build lane.
 - Dependent Rust shared-library bundling for Android APK output.
 - Windows path normalization for generated Android wrapper inputs.

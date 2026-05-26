@@ -21,6 +21,19 @@ pub struct AndroidConfig {
     pub small_fonts: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct ManifestArgs<'a> {
+    pub label: &'a str,
+    pub class_name: &'a str,
+    pub url: &'a str,
+    pub sdk_version: usize,
+    pub target_sdk_version: usize,
+    pub has_icon: bool,
+    pub version_code: u32,
+    pub version_name: &'a str,
+    pub debuggable: bool,
+}
+
 impl AndroidVariant {
     fn from_str(opt: &str) -> Result<Self, String> {
         for opt in opt.split(",") {
@@ -35,34 +48,41 @@ impl AndroidVariant {
         ));
     }
 
-    fn manifest_xml(
-        &self,
-        label: &str,
-        class_name: &str,
-        url: &str,
-        sdk_version: usize,
-        has_icon: bool,
-    ) -> String {
-        let icon_attr = if has_icon {
+    fn manifest_xml(&self, args: &ManifestArgs<'_>) -> String {
+        let ManifestArgs {
+            label,
+            class_name,
+            url,
+            sdk_version,
+            target_sdk_version,
+            has_icon,
+            version_code,
+            version_name,
+            debuggable,
+        } = args;
+        let icon_attr = if *has_icon {
             "\n                    android:icon=\"@mipmap/ic_launcher\""
         } else {
             ""
         };
+        let debuggable_str = if *debuggable { "true" } else { "false" };
 
         match self {
             Self::Default => format!(
                 r#"<?xml version="1.0" encoding="utf-8"?>
                 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
                 xmlns:tools="http://schemas.android.com/tools"
-                package="{url}">
+                package="{url}"
+                android:versionCode="{version_code}"
+                android:versionName="{version_name}">
                 <application
                     android:label="{label}"{icon_attr}
                     android:theme="@style/MakepadAppTheme"
                     android:allowBackup="true"
                     android:supportsRtl="true"
-                    android:debuggable="true"
+                    android:debuggable="{debuggable_str}"
                     android:largeHeap="true"
-                    tools:targetApi="{sdk_version}">
+                    tools:targetApi="{target_sdk_version}">
                     <meta-data android:name="android.max_aspect" android:value="2.1" />
                     <activity
                     android:name=".{class_name}"
@@ -77,7 +97,7 @@ impl AndroidVariant {
                     </intent-filter>
                     </activity>
                 </application>
-                <uses-sdk android:targetSdkVersion="{sdk_version}" />
+                <uses-sdk android:minSdkVersion="{sdk_version}" android:targetSdkVersion="{target_sdk_version}" />
                 <uses-feature android:glEsVersion="0x00020000" android:required="true"/>
                 <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
                 <uses-feature android:name="android.software.midi" android:required="true"/>
@@ -110,12 +130,12 @@ impl AndroidVariant {
                     xmlns:android="http://schemas.android.com/apk/res/android"
                     xmlns:tools="http://schemas.android.com/tools"
                     package="{url}"
-                    android:versionCode="1"
-                    android:versionName="1.0"
+                    android:versionCode="{version_code}"
+                    android:versionName="{version_name}"
                     android:installLocation="auto"
                 >      
                                                                 
-                <uses-sdk android:targetSdkVersion="{sdk_version}" />
+                <uses-sdk android:minSdkVersion="{sdk_version}" android:targetSdkVersion="{target_sdk_version}" />
                 <uses-feature android:glEsVersion="0x00030001" android:required="true"/>
                 <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true"/>
                 <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="true"/>
@@ -147,9 +167,9 @@ impl AndroidVariant {
                     android:allowBackup="false"
                     android:extractNativeLibs="true"
                     android:supportsRtl="true"
-                    android:debuggable="true"
+                    android:debuggable="{debuggable_str}"
                     android:largeHeap="true"
-                    tools:targetApi="{sdk_version}">
+                    tools:targetApi="{target_sdk_version}">
                     <meta-data
                         android:name="com.samsung.android.vr.application.mode"
                         android:value="vr_only" />
@@ -441,6 +461,9 @@ Common options:\n\
   --abi=aarch64|x86_64|armv7|i686|all   (default: aarch64)\n\
   --package-name=<id>\n\
   --app-label=<label>\n\
+  --version-code=<int|auto>\n\
+  --version-name=<str>\n\
+  --min-sdk-version=<api>\n\
   --small-fonts\n\
   --no-icon\n\
   --sdk-path=<path>\n\
@@ -489,6 +512,9 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
     let mut sdk_path = None;
     let mut package_name = None;
     let mut app_label = None;
+    let mut version_code = None;
+    let mut version_name = None;
+    let mut min_sdk_version = None;
     let mut devices = Vec::new();
     let mut variant = AndroidVariant::Default;
     let mut targets = vec![AndroidTarget::aarch64];
@@ -509,6 +535,14 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
             package_name = Some(opt.to_string());
         } else if let Some(opt) = v.strip_prefix("--app-label=") {
             app_label = Some(opt.to_string());
+        } else if let Some(opt) = v.strip_prefix("--version-code=") {
+            version_code = Some(crate::utils::parse_version_code_flag(opt)?);
+        } else if let Some(opt) = v.strip_prefix("--version-name=") {
+            version_name = Some(opt.to_string());
+        } else if let Some(opt) = v.strip_prefix("--min-sdk-version=") {
+            min_sdk_version = Some(opt.parse::<usize>().map_err(|_| {
+                format!("--min-sdk-version must be a positive integer API level, got {opt:?}")
+            })?);
         } else if let Some(opt) = v.strip_prefix("--abi=") {
             targets = AndroidTarget::from_str(opt)?;
         } else if let Some(d) = v.strip_prefix("--devices=") {
@@ -585,6 +619,9 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
                 host_os,
                 package_name,
                 app_label,
+                version_code,
+                version_name,
+                min_sdk_version,
                 &args[1..],
                 &targets,
                 &variant,
@@ -600,6 +637,9 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
                 host_os,
                 package_name,
                 app_label,
+                version_code,
+                version_name,
+                min_sdk_version,
                 &args[1..],
                 &targets,
                 &variant,
@@ -618,22 +658,39 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::AndroidVariant;
+    use super::{AndroidVariant, ManifestArgs};
+
+    fn test_manifest_args<'a>(label: &'a str, url: &'a str) -> ManifestArgs<'a> {
+        ManifestArgs {
+            label,
+            class_name: "MakepadApp",
+            url,
+            sdk_version: 26,
+            target_sdk_version: 33,
+            has_icon: true,
+            version_code: 7,
+            version_name: "1.2.3",
+            debuggable: true,
+        }
+    }
 
     #[test]
     fn default_manifest_uses_splash_and_app_themes() {
         let xml =
-            AndroidVariant::Default.manifest_xml("App", "MakepadApp", "dev.makepad.app", 33, true);
+            AndroidVariant::Default.manifest_xml(&test_manifest_args("App", "dev.makepad.app"));
         assert!(xml.contains("android:theme=\"@style/MakepadAppTheme\""));
         assert!(xml.contains("android:theme=\"@style/MakepadLaunchTheme\""));
         assert!(xml.contains("android.permission.CAMERA"));
         assert!(xml.contains("android:launchMode=\"singleTask\""));
+        assert!(xml.contains("android:minSdkVersion=\"26\""));
+        assert!(xml.contains("android:targetSdkVersion=\"33\""));
+        assert!(xml.contains("android:versionCode=\"7\""));
+        assert!(xml.contains("android:versionName=\"1.2.3\""));
     }
 
     #[test]
     fn quest_manifest_uses_splash_and_app_themes() {
-        let xml =
-            AndroidVariant::Quest.manifest_xml("App", "MakepadApp", "dev.makepad.app", 33, true);
+        let xml = AndroidVariant::Quest.manifest_xml(&test_manifest_args("App", "dev.makepad.app"));
         assert!(xml.contains("android:theme=\"@style/MakepadAppTheme\""));
         assert!(xml.contains("android:theme=\"@style/MakepadLaunchTheme\""));
         assert!(xml.contains("android.permission.CAMERA"));
@@ -652,5 +709,9 @@ mod tests {
         assert!(xml.contains("com.oculus.vr.focusaware"));
         assert!(xml.contains("com.oculus.intent.category.VR"));
         assert!(xml.contains("android:value=\"vr_only\""));
+        assert!(xml.contains("android:minSdkVersion=\"26\""));
+        assert!(xml.contains("android:targetSdkVersion=\"33\""));
+        assert!(xml.contains("android:versionCode=\"7\""));
+        assert!(xml.contains("android:versionName=\"1.2.3\""));
     }
 }
