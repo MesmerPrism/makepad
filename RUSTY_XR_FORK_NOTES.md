@@ -71,6 +71,9 @@ This branch currently carries:
   `AHardwareBuffer`/YCbCr resource shape and the current separate
   sampled-image plus sampler descriptor binding shape before any combined
   image-sampler shader/resource fix is attempted.
+- A reflected Vulkan shader-resource interface from Naga/WGSL lowering, used
+  to construct descriptor layouts from the shader-declared resource shape and
+  to log the current video texture/sampler interface before changing it.
 - App-visible XR event-state fields for the active per-eye OpenXR local-space
   pose/FOV, so public examples can compute display-eye projection mappings from
   runtime view state instead of hard-coded display constants.

@@ -15,6 +15,7 @@ use crate::{
             XrVulkanDeviceCreateInfoKHR, XrVulkanGraphicsDeviceGetInfoKHR,
             XrVulkanInstanceCreateInfoKHR,
         },
+        vulkan_naga::{CxVulkanShaderBinary, CxVulkanShaderDescriptorKind},
     },
     texture::{TextureCategory, TextureFormat, TextureId, TexturePixel, TextureUpdated},
 };
@@ -32,6 +33,58 @@ extern "C" {
 const XR_FRAGMENT_DENSITY_MAP_FORMAT: vk::Format = vk::Format::R8G8_UNORM;
 const XR_MAX_FRAMES_IN_FLIGHT: u32 = 3;
 const XR_MAX_FRAMES_IN_FLIGHT_LIMIT: u32 = 8;
+
+fn vulkan_descriptor_type_for_shader_kind(
+    kind: CxVulkanShaderDescriptorKind,
+) -> Option<vk::DescriptorType> {
+    match kind {
+        CxVulkanShaderDescriptorKind::UniformBuffer => Some(vk::DescriptorType::UNIFORM_BUFFER),
+        CxVulkanShaderDescriptorKind::StorageBuffer => Some(vk::DescriptorType::STORAGE_BUFFER),
+        CxVulkanShaderDescriptorKind::SampledImage
+        | CxVulkanShaderDescriptorKind::DepthImage
+        | CxVulkanShaderDescriptorKind::ExternalImage => Some(vk::DescriptorType::SAMPLED_IMAGE),
+        CxVulkanShaderDescriptorKind::StorageImage => Some(vk::DescriptorType::STORAGE_IMAGE),
+        CxVulkanShaderDescriptorKind::Sampler | CxVulkanShaderDescriptorKind::ComparisonSampler => {
+            Some(vk::DescriptorType::SAMPLER)
+        }
+        CxVulkanShaderDescriptorKind::OtherHandle => None,
+    }
+}
+
+fn vulkan_descriptor_type_name(descriptor_type: vk::DescriptorType) -> &'static str {
+    match descriptor_type {
+        vk::DescriptorType::SAMPLER => "SAMPLER",
+        vk::DescriptorType::COMBINED_IMAGE_SAMPLER => "COMBINED_IMAGE_SAMPLER",
+        vk::DescriptorType::SAMPLED_IMAGE => "SAMPLED_IMAGE",
+        vk::DescriptorType::STORAGE_IMAGE => "STORAGE_IMAGE",
+        vk::DescriptorType::UNIFORM_BUFFER => "UNIFORM_BUFFER",
+        vk::DescriptorType::STORAGE_BUFFER => "STORAGE_BUFFER",
+        _ => "OTHER",
+    }
+}
+
+fn reflected_vulkan_descriptor_type(
+    vk_shader: &CxVulkanShaderBinary,
+    binding: u32,
+    fallback: vk::DescriptorType,
+) -> vk::DescriptorType {
+    vk_shader
+        .resource_interface
+        .descriptor_kind(0, binding)
+        .and_then(vulkan_descriptor_type_for_shader_kind)
+        .unwrap_or(fallback)
+}
+
+fn reflected_shader_descriptor_kind_name(
+    vk_shader: &CxVulkanShaderBinary,
+    binding: u32,
+) -> &'static str {
+    vk_shader
+        .resource_interface
+        .descriptor_kind(0, binding)
+        .map(CxVulkanShaderDescriptorKind::stable_name)
+        .unwrap_or("missing")
+}
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -5829,8 +5882,13 @@ impl CxVulkan {
                 .get(slot)
                 .copied()
                 .unwrap_or(0);
-            texture_bindings.push(vk_shader.texture_binding_base + slot as u32);
-            let descriptor_type = vk::DescriptorType::SAMPLED_IMAGE;
+            let texture_binding = vk_shader.texture_binding_base + slot as u32;
+            texture_bindings.push(texture_binding);
+            let descriptor_type = reflected_vulkan_descriptor_type(
+                vk_shader,
+                texture_binding,
+                vk::DescriptorType::SAMPLED_IMAGE,
+            );
             texture_descriptor_types.push(descriptor_type);
 
             let image_info = vk::DescriptorImageInfo::default()
@@ -5839,15 +5897,25 @@ impl CxVulkan {
             if resource.sampler.is_some() && resource.ycbcr_conversion.is_some() {
                 let report_key = (packet.shader_index, slot, texture_key, sampler_index);
                 if self.reported_video_descriptor_shapes.insert(report_key) {
+                    let sampler_binding = vk_shader.sampler_binding_base + sampler_index as u32;
+                    let sampler_descriptor_type = reflected_vulkan_descriptor_type(
+                        vk_shader,
+                        sampler_binding,
+                        vk::DescriptorType::SAMPLER,
+                    );
                     crate::log!(
-                        "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_DESCRIPTOR_SHAPE schema=rusty.xr.makepad-vulkan-video-descriptor-shape.v1 shaderIndex={} slot={} textureKey={} textureType={:?} textureBinding={} textureDescriptorType=SAMPLED_IMAGE samplerIndex={} samplerBinding={} samplerDescriptorType=SAMPLER resourceSamplerOverride=true samplerYcbcrConversion=true combinedImageSampler=false shaderSampleLowering=textureSampleLevel_separate_texture_sampler",
+                        "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_DESCRIPTOR_SHAPE schema=rusty.xr.makepad-vulkan-video-descriptor-shape.v1 shaderIndex={} slot={} textureKey={} textureType={:?} textureBinding={} shaderTextureResourceKind={} textureDescriptorType={} samplerIndex={} samplerBinding={} shaderSamplerResourceKind={} samplerDescriptorType={} resourceSamplerOverride=true samplerYcbcrConversion=true combinedImageSampler=false shaderSampleLowering=textureSampleLevel_separate_texture_sampler",
                         packet.shader_index,
                         slot,
                         texture_key,
                         packet.texture_types.get(slot).copied(),
-                        vk_shader.texture_binding_base + slot as u32,
+                        texture_binding,
+                        reflected_shader_descriptor_kind_name(vk_shader, texture_binding),
+                        vulkan_descriptor_type_name(descriptor_type),
                         sampler_index,
-                        vk_shader.sampler_binding_base + sampler_index as u32,
+                        sampler_binding,
+                        reflected_shader_descriptor_kind_name(vk_shader, sampler_binding),
+                        vulkan_descriptor_type_name(sampler_descriptor_type),
                     );
                 }
             }
@@ -5860,7 +5928,8 @@ impl CxVulkan {
         let mut sampler_bindings = Vec::new();
         let mut sampler_infos = Vec::new();
         for (sampler_index, sampler) in pipeline_samplers.iter().enumerate() {
-            sampler_bindings.push(vk_shader.sampler_binding_base + sampler_index as u32);
+            let sampler_binding = vk_shader.sampler_binding_base + sampler_index as u32;
+            sampler_bindings.push(sampler_binding);
             let sampler = video_sampler_overrides
                 .get(&sampler_index)
                 .copied()
@@ -6033,12 +6102,24 @@ impl CxVulkan {
 
         let mut descriptor_bindings: Vec<(u32, vk::DescriptorType)> = Vec::new();
         for (_, idx) in &sh.mapping.uniform_buffer_bindings.bindings {
-            descriptor_bindings.push((*idx as u32, vk::DescriptorType::UNIFORM_BUFFER));
+            let binding = *idx as u32;
+            descriptor_bindings.push((
+                binding,
+                reflected_vulkan_descriptor_type(
+                    vk_shader,
+                    binding,
+                    vk::DescriptorType::UNIFORM_BUFFER,
+                ),
+            ));
         }
         if !sh.mapping.dyn_uniforms.inputs.is_empty() {
             descriptor_bindings.push((
                 vk_shader.dyn_uniform_binding,
-                vk::DescriptorType::UNIFORM_BUFFER,
+                reflected_vulkan_descriptor_type(
+                    vk_shader,
+                    vk_shader.dyn_uniform_binding,
+                    vk::DescriptorType::UNIFORM_BUFFER,
+                ),
             ));
         }
         if !sh.mapping.scope_uniforms.inputs.is_empty() {
@@ -6047,24 +6128,67 @@ impl CxVulkan {
                 .uniform_buffer_bindings
                 .scope_uniform_buffer_index
             {
-                descriptor_bindings.push((idx as u32, vk::DescriptorType::UNIFORM_BUFFER));
+                let binding = idx as u32;
+                descriptor_bindings.push((
+                    binding,
+                    reflected_vulkan_descriptor_type(
+                        vk_shader,
+                        binding,
+                        vk::DescriptorType::UNIFORM_BUFFER,
+                    ),
+                ));
             }
         }
-        for (slot, _) in sh.mapping.textures.iter().enumerate() {
-            descriptor_bindings.push((
-                vk_shader.texture_binding_base + slot as u32,
+        for (slot, texture) in sh.mapping.textures.iter().enumerate() {
+            let texture_binding = vk_shader.texture_binding_base + slot as u32;
+            let texture_descriptor_type = reflected_vulkan_descriptor_type(
+                vk_shader,
+                texture_binding,
                 vk::DescriptorType::SAMPLED_IMAGE,
-            ));
+            );
+            descriptor_bindings.push((texture_binding, texture_descriptor_type));
+            if texture.tex_type == TextureType::TextureVideo {
+                let sampler_index = sh
+                    .mapping
+                    .texture_sampler_indices
+                    .get(slot)
+                    .copied()
+                    .unwrap_or(0);
+                let sampler_binding = vk_shader.sampler_binding_base + sampler_index as u32;
+                let sampler_descriptor_type = reflected_vulkan_descriptor_type(
+                    vk_shader,
+                    sampler_binding,
+                    vk::DescriptorType::SAMPLER,
+                );
+                crate::log!(
+                    "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_SHADER_INTERFACE schema=rusty.xr.makepad-vulkan-video-shader-interface.v1 shaderIndex={} shaderVariant={} slot={} textureBinding={} shaderTextureResourceKind={} textureDescriptorType={} samplerIndex={} samplerBinding={} shaderSamplerResourceKind={} samplerDescriptorType={} combinedImageSamplerExpected=false wgslTextureType=texture_2d_f32 shaderSampleLowering=textureSampleLevel_separate_texture_sampler",
+                    shader_index,
+                    shader_variant,
+                    slot,
+                    texture_binding,
+                    reflected_shader_descriptor_kind_name(vk_shader, texture_binding),
+                    vulkan_descriptor_type_name(texture_descriptor_type),
+                    sampler_index,
+                    sampler_binding,
+                    reflected_shader_descriptor_kind_name(vk_shader, sampler_binding),
+                    vulkan_descriptor_type_name(sampler_descriptor_type),
+                );
+            }
         }
         for sampler_index in 0..sh.mapping.samplers.len() {
+            let binding = vk_shader.sampler_binding_base + sampler_index as u32;
             descriptor_bindings.push((
-                vk_shader.sampler_binding_base + sampler_index as u32,
-                vk::DescriptorType::SAMPLER,
+                binding,
+                reflected_vulkan_descriptor_type(vk_shader, binding, vk::DescriptorType::SAMPLER),
             ));
         }
         descriptor_bindings.push((
             vk_shader.xr_depth_binding,
-            vk::DescriptorType::SAMPLED_IMAGE,
+            reflected_vulkan_descriptor_type(
+                vk_shader,
+                vk_shader.xr_depth_binding,
+                vk::DescriptorType::SAMPLED_IMAGE,
+            ),
         ));
         descriptor_bindings.sort_by_key(|(binding, _)| *binding);
         descriptor_bindings.dedup_by_key(|(binding, _)| *binding);
