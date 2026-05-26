@@ -37,13 +37,16 @@ pub struct AndroidSDKUrls {
 
 pub const BUILD_TOOLS_DIR: &str = "build-tools";
 pub const PLATFORMS_DIR: &str = "platforms";
+pub const BUNDLETOOL_JAR_REL: &str = "bundletool/bundletool.jar";
+const URL_BUNDLETOOL: &str =
+    "https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar";
 
 pub const ANDROID_SDK_URLS_33: AndroidSDKUrls = AndroidSDKUrls {
     // Build against the Android-33-ext4 platform payload, but emit an API-26
     // native/minimum floor. API > 26 Java/native entry points must stay guarded
     // or dynamically resolved.
     sdk_version: 26,
-    target_sdk_version: 33,
+    target_sdk_version: 35,
     build_tools_version: "33.0.1",
     sdk_extension: "ext4",
     platform: "android-33-ext4",
@@ -75,21 +78,15 @@ fn url_file_name(url: &str) -> &str {
 
 pub fn rustup_toolchain_install(targets: &[AndroidTarget]) -> Result<(), String> {
     println!("Installing Rust toolchains for android");
-    println!("Installing nightly");
-    shell_env(
-        &[],
-        &std::env::current_dir().unwrap(),
-        "rustup",
-        &["install", "nightly"],
-    )?;
+    crate::utils::ensure_rust_toolchain_installed("stable")?;
     for target in targets {
         let toolchain = target.toolchain();
-        println!("Installing rust nightly for {}", toolchain);
+        println!("Adding rust stable target {}", toolchain);
         shell_env(
             &[],
             &std::env::current_dir().unwrap(),
             "rustup",
-            &["target", "add", toolchain, "--toolchain", "nightly"],
+            &["target", "add", toolchain, "--toolchain", "stable"],
         )?;
     }
     Ok(())
@@ -105,49 +102,58 @@ pub fn download_sdk(
     let src_dir = &sdk_dir.join("sources");
     mkdir(src_dir)?;
 
-    fn curl(step: usize, src_dir: &Path, url: &str) -> Result<(), String> {
+    fn curl(step: usize, total: usize, src_dir: &Path, url: &str) -> Result<(), String> {
         //let https = HttpsConnection::connect("https://makepad.dev","https");
-        println!("{step}/5: Downloading: {}", url);
+        println!("{step}/{total}: Downloading: {}", url);
         shell(
             src_dir,
             "curl",
             &[
                 url,
                 "-#",
+                "-L",
                 "--output",
                 src_dir.join(url_file_name(url)).to_str().unwrap(),
             ],
         )?;
         Ok(())
     }
-    curl(1, src_dir, urls.platform_dl)?;
+    let total = 6;
+    curl(1, total, src_dir, urls.platform_dl)?;
     match host_os {
         HostOs::WindowsX64 => {
-            curl(2, src_dir, urls.build_tools_windows)?;
-            curl(3, src_dir, urls.platform_tools_windows)?;
-            curl(4, src_dir, urls.ndk_windows)?;
-            curl(5, src_dir, URL_OPENJDK_17_0_2_WINDOWS_X64)?;
+            curl(2, total, src_dir, urls.build_tools_windows)?;
+            curl(3, total, src_dir, urls.platform_tools_windows)?;
+            curl(4, total, src_dir, urls.ndk_windows)?;
+            curl(5, total, src_dir, URL_OPENJDK_17_0_2_WINDOWS_X64)?;
         }
         HostOs::MacosX64 | HostOs::MacosAarch64 => {
-            curl(2, src_dir, urls.build_tools_macos)?;
-            curl(3, src_dir, urls.platform_tools_macos)?;
-            curl(4, src_dir, urls.ndk_macos)?;
+            curl(2, total, src_dir, urls.build_tools_macos)?;
+            curl(3, total, src_dir, urls.platform_tools_macos)?;
+            curl(4, total, src_dir, urls.ndk_macos)?;
             if host_os == HostOs::MacosX64 {
-                curl(5, src_dir, URL_OPENJDK_17_0_2_MACOS_X64)?;
+                curl(5, total, src_dir, URL_OPENJDK_17_0_2_MACOS_X64)?;
             } else {
-                curl(5, src_dir, URL_OPENJDK_17_0_2_MACOS_AARCH64)?;
+                curl(5, total, src_dir, URL_OPENJDK_17_0_2_MACOS_AARCH64)?;
             }
         }
         HostOs::LinuxX64 => {
-            curl(2, src_dir, urls.build_tools_linux)?;
-            curl(3, src_dir, urls.platform_tools_linux)?;
-            curl(4, src_dir, urls.ndk_linux)?;
-            curl(5, src_dir, URL_OPENJDK_17_0_2_LINUX_X64)?;
+            curl(2, total, src_dir, urls.build_tools_linux)?;
+            curl(3, total, src_dir, urls.platform_tools_linux)?;
+            curl(4, total, src_dir, urls.ndk_linux)?;
+            curl(5, total, src_dir, URL_OPENJDK_17_0_2_LINUX_X64)?;
         }
         HostOs::Unsupported => panic!(),
     }
+    curl(6, total, src_dir, URL_BUNDLETOOL)?;
     // alright lets parse the sdk_path option
     Ok(())
+}
+
+fn install_bundletool(sdk_dir: &Path) -> Result<(), String> {
+    let src = sdk_dir.join("sources").join(url_file_name(URL_BUNDLETOOL));
+    let dst = sdk_dir.join(BUNDLETOOL_JAR_REL);
+    cp(&src, &dst, false)
 }
 
 pub fn remove_sdk_sources(
@@ -450,6 +456,14 @@ pub fn expand_sdk(
                             "android-13",
                             &format!("{BUILD_TOOLS_DIR}/{ANDROID_BUILD_TOOLS_VERSION}"),
                             "aapt.exe",
+                        ),
+                        false,
+                    ),
+                    (
+                        &copy_map(
+                            "android-13",
+                            &format!("{BUILD_TOOLS_DIR}/{ANDROID_BUILD_TOOLS_VERSION}"),
+                            "aapt2.exe",
                         ),
                         false,
                     ),
@@ -792,6 +806,14 @@ pub fn expand_sdk(
                         &copy_map(
                             "android-13",
                             &format!("{BUILD_TOOLS_DIR}/{ANDROID_BUILD_TOOLS_VERSION}"),
+                            "aapt2",
+                        ),
+                        true,
+                    ),
+                    (
+                        &copy_map(
+                            "android-13",
+                            &format!("{BUILD_TOOLS_DIR}/{ANDROID_BUILD_TOOLS_VERSION}"),
                             "zipalign",
                         ),
                         true,
@@ -989,6 +1011,14 @@ pub fn expand_sdk(
                         &copy_map(
                             "android-13",
                             &format!("{BUILD_TOOLS_DIR}/{ANDROID_BUILD_TOOLS_VERSION}"),
+                            "aapt2",
+                        ),
+                        true,
+                    ),
+                    (
+                        &copy_map(
+                            "android-13",
+                            &format!("{BUILD_TOOLS_DIR}/{ANDROID_BUILD_TOOLS_VERSION}"),
                             "lib64/libc++.so",
                         ),
                         true,
@@ -1170,5 +1200,6 @@ pub fn expand_sdk(
         }
         HostOs::Unsupported => panic!(),
     }
+    install_bundletool(sdk_dir)?;
     Ok(())
 }

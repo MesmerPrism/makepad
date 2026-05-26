@@ -37,9 +37,14 @@ This branch currently carries:
   package id, label, version code, version name, and min SDK from generic Cargo
   metadata or explicit Android command-line flags.
 - Android API-floor cleanup from upstream Makepad: default generated builds now
-  use API 26 as the native/minimum SDK floor while keeping the current target
-  SDK at 33 for this branch. API-newer Java and native surfaces are guarded or
-  kept out of strong native linkage before the floor is lowered.
+  use API 26 as the native/minimum SDK floor. API-newer Java and native
+  surfaces are guarded or kept out of strong native linkage before the floor is
+  lowered.
+- Additional upstream `#1091` Android tooling alignment: Android Rust builds
+  now route through the stable Rust toolchain, generated manifests default to
+  target SDK 35, the Makepad-managed SDK can install bundletool, and app crates
+  may provide `resources/android/AndroidManifest.xml.template` for explicit
+  manifest customization.
 - Android packaging fixes for the tested Windows-to-Quest build lane.
 - Dependent Rust shared-library bundling for Android APK output.
 - Windows path normalization for generated Android wrapper inputs.

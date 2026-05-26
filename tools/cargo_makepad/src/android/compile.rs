@@ -656,6 +656,7 @@ fn rust_build(
     android_targets: &[AndroidTarget],
     variant: &AndroidVariant,
     urls: &AndroidSDKUrls,
+    prefer_dynamic: bool,
 ) -> Result<(), String> {
     let cwd = std::env::current_dir().unwrap();
     let target_root = cargo_target_root(&cwd);
@@ -725,7 +726,7 @@ fn rust_build(
 
         let base_args = &[
             "run",
-            "nightly",
+            "stable",
             "cargo",
             "rustc",
             "--lib",
@@ -741,8 +742,11 @@ fn rust_build(
 
         let target_arch_str = android_target.to_str();
         let cfg_flag = format!("--cfg android_target=\"{}\"", target_arch_str);
-        let rustflags =
-            compose_android_rustflags(std::env::var("RUSTFLAGS").ok().as_deref(), &cfg_flag);
+        let rustflags = compose_android_rustflags(
+            std::env::var("RUSTFLAGS").ok().as_deref(),
+            &cfg_flag,
+            prefer_dynamic,
+        );
 
         let makepad_env = if let AndroidVariant::Quest = variant {
             Some(match std::env::var("MAKEPAD") {
@@ -831,22 +835,28 @@ fn rust_build(
     Ok(())
 }
 
-fn compose_android_rustflags(existing: Option<&str>, cfg_flag: &str) -> String {
+fn compose_android_rustflags(
+    existing: Option<&str>,
+    cfg_flag: &str,
+    prefer_dynamic: bool,
+) -> String {
     let mut rustflags = existing.unwrap_or_default().trim().to_string();
-    let has_prefer_dynamic = rustflags
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .windows(2)
-        .any(|pair| pair == ["-C", "prefer-dynamic"])
-        || rustflags
+    if prefer_dynamic {
+        let has_prefer_dynamic = rustflags
             .split_whitespace()
-            .any(|token| token == "-Cprefer-dynamic");
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|pair| pair == ["-C", "prefer-dynamic"])
+            || rustflags
+                .split_whitespace()
+                .any(|token| token == "-Cprefer-dynamic");
 
-    if !has_prefer_dynamic {
-        if !rustflags.is_empty() {
-            rustflags.push(' ');
+        if !has_prefer_dynamic {
+            if !rustflags.is_empty() {
+                rustflags.push(' ');
+            }
+            rustflags.push_str("-C prefer-dynamic");
         }
-        rustflags.push_str("-C prefer-dynamic");
     }
     if !cfg_flag.trim().is_empty() {
         if !rustflags.is_empty() {
@@ -959,6 +969,19 @@ struct PrepareBuildOpts<'a> {
     debuggable: bool,
 }
 
+fn substitute_manifest_template(template: &str, args: &ManifestArgs<'_>) -> String {
+    let debuggable = if args.debuggable { "true" } else { "false" };
+    template
+        .replace("{label}", args.label)
+        .replace("{class_name}", args.class_name)
+        .replace("{package_id}", args.url)
+        .replace("{min_sdk_version}", &args.sdk_version.to_string())
+        .replace("{target_sdk_version}", &args.target_sdk_version.to_string())
+        .replace("{version_code}", &args.version_code.to_string())
+        .replace("{version_name}", args.version_name)
+        .replace("{debuggable}", debuggable)
+}
+
 fn prepare_build(opts: &PrepareBuildOpts<'_>) -> Result<BuildPaths, String> {
     let cwd = std::env::current_dir().unwrap();
     let target_dir = cargo_target_dir(&cwd);
@@ -1021,7 +1044,18 @@ fn prepare_build(opts: &PrepareBuildOpts<'_>) -> Result<BuildPaths, String> {
         version_name: opts.version_name,
         debuggable: opts.debuggable,
     };
-    let manifest_xml = opts.variant.manifest_xml(&manifest_args);
+    let custom_template = build_crate_dir.join("resources/android/AndroidManifest.xml.template");
+    let manifest_xml = if custom_template.is_file() {
+        let template = fs::read_to_string(&custom_template)
+            .map_err(|e| format!("Can't read {:?}: {e}", custom_template))?;
+        println!(
+            "Using custom AndroidManifest template: {}",
+            custom_template.display()
+        );
+        substitute_manifest_template(&template, &manifest_args)
+    } else {
+        opts.variant.manifest_xml(&manifest_args)
+    };
     let manifest_file = tmp_dir.join("AndroidManifest.xml");
     write_text(&manifest_file, &manifest_xml)?;
 
@@ -1985,6 +2019,7 @@ pub fn build(
         android_targets,
         variant,
         urls,
+        true,
     )?;
     let debuggable = get_profile_from_args(args) != "release";
     let prep_opts = PrepareBuildOpts {
@@ -2411,7 +2446,7 @@ default via 192.168.0.1 dev wlan0 proto dhcp src 192.168.0.42 metric 303\n\
     #[test]
     fn compose_android_rustflags_adds_prefer_dynamic() {
         assert_eq!(
-            compose_android_rustflags(None, "--cfg android_target=\"aarch64\""),
+            compose_android_rustflags(None, "--cfg android_target=\"aarch64\"", true),
             "-C prefer-dynamic --cfg android_target=\"aarch64\""
         );
     }
@@ -2419,7 +2454,11 @@ default via 192.168.0.1 dev wlan0 proto dhcp src 192.168.0.42 metric 303\n\
     #[test]
     fn compose_android_rustflags_preserves_existing_flags() {
         assert_eq!(
-            compose_android_rustflags(Some("-C debuginfo=1"), "--cfg android_target=\"aarch64\""),
+            compose_android_rustflags(
+                Some("-C debuginfo=1"),
+                "--cfg android_target=\"aarch64\"",
+                true,
+            ),
             "-C debuginfo=1 -C prefer-dynamic --cfg android_target=\"aarch64\""
         );
     }
@@ -2429,9 +2468,22 @@ default via 192.168.0.1 dev wlan0 proto dhcp src 192.168.0.42 metric 303\n\
         assert_eq!(
             compose_android_rustflags(
                 Some("-C prefer-dynamic -C debuginfo=1"),
-                "--cfg android_target=\"aarch64\""
+                "--cfg android_target=\"aarch64\"",
+                true,
             ),
             "-C prefer-dynamic -C debuginfo=1 --cfg android_target=\"aarch64\""
+        );
+    }
+
+    #[test]
+    fn compose_android_rustflags_can_skip_prefer_dynamic() {
+        assert_eq!(
+            compose_android_rustflags(
+                Some("-C debuginfo=1"),
+                "--cfg android_target=\"aarch64\"",
+                false
+            ),
+            "-C debuginfo=1 --cfg android_target=\"aarch64\""
         );
     }
 }

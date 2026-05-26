@@ -472,6 +472,12 @@ Common options:\n\
   --devices=<serial1,serial2,...>|all    (for run and adb-tcp)\n\
   --keep-sdk-sources\n\
 \n\
+Custom AndroidManifest:\n\
+  Drop a template at `<crate>/resources/android/AndroidManifest.xml.template` to\n\
+  override the built-in manifest. Tokens replaced: {package_id}, {label},\n\
+  {class_name}, {min_sdk_version}, {target_sdk_version}, {version_code},\n\
+  {version_name}, {debuggable}.\n\
+\n\
 Examples:\n\
   cargo makepad android --abi=aarch64 build -p my-app --release\n\
   cargo makepad android --abi=aarch64 run -p my-app --release\n\
@@ -666,7 +672,7 @@ mod tests {
             class_name: "MakepadApp",
             url,
             sdk_version: 26,
-            target_sdk_version: 33,
+            target_sdk_version: 35,
             has_icon: true,
             version_code: 7,
             version_name: "1.2.3",
@@ -683,7 +689,7 @@ mod tests {
         assert!(xml.contains("android.permission.CAMERA"));
         assert!(xml.contains("android:launchMode=\"singleTask\""));
         assert!(xml.contains("android:minSdkVersion=\"26\""));
-        assert!(xml.contains("android:targetSdkVersion=\"33\""));
+        assert!(xml.contains("android:targetSdkVersion=\"35\""));
         assert!(xml.contains("android:versionCode=\"7\""));
         assert!(xml.contains("android:versionName=\"1.2.3\""));
     }
@@ -710,7 +716,7 @@ mod tests {
         assert!(xml.contains("com.oculus.intent.category.VR"));
         assert!(xml.contains("android:value=\"vr_only\""));
         assert!(xml.contains("android:minSdkVersion=\"26\""));
-        assert!(xml.contains("android:targetSdkVersion=\"33\""));
+        assert!(xml.contains("android:targetSdkVersion=\"35\""));
         assert!(xml.contains("android:versionCode=\"7\""));
         assert!(xml.contains("android:versionName=\"1.2.3\""));
     }

@@ -7,6 +7,21 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+pub fn ensure_rust_toolchain_installed(channel: &str) -> Result<(), String> {
+    let cwd = std::env::current_dir().unwrap();
+    let installed = shell_env_cap(&[], &cwd, "rustup", &["toolchain", "list"])?;
+    let already_installed = installed.lines().any(|line| {
+        let name = line.split_whitespace().next().unwrap_or("");
+        name == channel || name.starts_with(&format!("{channel}-"))
+    });
+    if already_installed {
+        println!("Rust '{channel}' toolchain already installed; leaving it as-is.");
+        return Ok(());
+    }
+    println!("Installing Rust '{channel}' toolchain");
+    shell_env(&[], &cwd, "rustup", &["install", channel])
+}
+
 #[derive(Debug, Clone)]
 pub enum VersionCodeStrategy {
     Explicit(u32),
