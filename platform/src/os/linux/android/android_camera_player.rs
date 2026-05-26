@@ -43,6 +43,7 @@ pub struct AndroidCameraPlayer {
     yuv_rotation_steps: f32,
     i420_frames: Option<CameraFrameLatest>,
     hardware_buffer_frame: Option<Arc<Mutex<Option<AndroidCameraHardwareBufferFrame>>>>,
+    hardware_buffer_yuv_plane_import_disabled: bool,
     camera_access: Option<Arc<Mutex<AndroidCameraAccess>>>,
     created_at: Instant,
     warned_waiting_for_first_frame: bool,
@@ -140,6 +141,7 @@ impl AndroidCameraPlayer {
             yuv_rotation_steps,
             i420_frames,
             hardware_buffer_frame,
+            hardware_buffer_yuv_plane_import_disabled: false,
             camera_access: Some(camera_access),
             created_at: Instant::now(),
             warned_waiting_for_first_frame: false,
@@ -173,6 +175,14 @@ impl AndroidCameraPlayer {
 
     pub fn uses_hardware_buffer_texture(&self) -> bool {
         self.texture_mode == AndroidCameraTextureMode::HardwareBufferExternal
+    }
+
+    pub fn should_try_hardware_buffer_yuv_plane_import(&self) -> bool {
+        self.uses_hardware_buffer_texture() && !self.hardware_buffer_yuv_plane_import_disabled
+    }
+
+    pub fn disable_hardware_buffer_yuv_plane_import(&mut self) {
+        self.hardware_buffer_yuv_plane_import_disabled = true;
     }
 
     pub fn fallback_to_cpu_yuv(&mut self) -> Result<(), String> {

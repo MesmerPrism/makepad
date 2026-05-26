@@ -1735,6 +1735,13 @@ impl Cx {
             #[cfg(use_vulkan)]
             if player.uses_hardware_buffer_texture() {
                 if let Some(frame) = player.take_hardware_buffer_frame() {
+                    let try_yuv_plane_import = player.should_try_hardware_buffer_yuv_plane_import();
+                    let texture_id = player.texture_id();
+                    let tex_y_id = player.tex_y_id();
+                    let tex_u_id = player.tex_u_id();
+                    let tex_v_id = player.tex_v_id();
+                    let video_id = player.video_id.0;
+                    let mut disable_yuv_plane_import = false;
                     let update_result = self
                         .os
                         .vulkan
@@ -1744,30 +1751,39 @@ impl Cx {
                                 .to_string()
                         })
                         .and_then(|vk| {
-                            match vk.update_video_yuv_hardware_buffer_textures(
-                                player.tex_y_id(),
-                                player.tex_u_id(),
-                                player.tex_v_id(),
+                            if try_yuv_plane_import {
+                                match vk.update_video_yuv_hardware_buffer_textures(
+                                    tex_y_id,
+                                    tex_u_id,
+                                    tex_v_id,
+                                    frame.buffer,
+                                    frame.width,
+                                    frame.height,
+                                ) {
+                                    Ok(yuv) => return Ok(yuv),
+                                    Err(yuv_error) => {
+                                        disable_yuv_plane_import =
+                                            yuv_error.contains("undefined Vulkan format")
+                                                || yuv_error
+                                                    .contains("unsupported YUV Vulkan format");
+                                        crate::warning!(
+                                            "Android headset camera: YUV plane hardware-buffer import unavailable, falling back to external conversion video_id={} error={}",
+                                            video_id,
+                                            yuv_error,
+                                        );
+                                    }
+                                }
+                            }
+                            vk.update_video_external_hardware_buffer_texture(
+                                texture_id,
                                 frame.buffer,
                                 frame.width,
                                 frame.height,
-                            ) {
-                                Ok(yuv) => Ok(yuv),
-                                Err(yuv_error) => {
-                                    crate::warning!(
-                                        "Android headset camera: YUV plane hardware-buffer import unavailable, falling back to external conversion video_id={} error={}",
-                                        player.video_id.0,
-                                        yuv_error,
-                                    );
-                                    vk.update_video_external_hardware_buffer_texture(
-                                        player.texture_id(),
-                                        frame.buffer,
-                                        frame.width,
-                                        frame.height,
-                                    )
-                                }
-                            }
+                            )
                         });
+                    if disable_yuv_plane_import {
+                        player.disable_hardware_buffer_yuv_plane_import();
+                    }
                     match update_result {
                         Ok(mut yuv) => {
                             yuv.rotation_steps = player.yuv_rotation_steps();
