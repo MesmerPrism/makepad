@@ -703,6 +703,7 @@ pub struct CameraFramePlaneOwned {
 pub struct CameraFrameOwned {
     pub sequence: u64,
     pub timestamp_ns: u64,
+    pub acquire_time_ns: u64,
     pub width: usize,
     pub height: usize,
     pub layout: CameraFrameLayout,
@@ -715,6 +716,7 @@ impl CameraFrameOwned {
     pub fn reset(&mut self) {
         self.sequence = 0;
         self.timestamp_ns = 0;
+        self.acquire_time_ns = 0;
         self.width = 0;
         self.height = 0;
         self.layout = CameraFrameLayout::Unknown;
@@ -730,6 +732,7 @@ impl CameraFrameOwned {
     pub fn copy_from_ref(&mut self, src: CameraFrameRef<'_>) {
         self.sequence = 0;
         self.timestamp_ns = src.timestamp_ns;
+        self.acquire_time_ns = 0;
         self.width = src.width;
         self.height = src.height;
         self.layout = src.layout;
@@ -777,6 +780,7 @@ impl CameraFrameOwned {
         }
 
         self.timestamp_ns = src.timestamp_ns;
+        self.acquire_time_ns = 0;
         self.width = w;
         self.height = h;
         self.layout = CameraFrameLayout::I420;
@@ -982,6 +986,21 @@ impl CameraFrameRing {
         }
         self.publish_with_seq(frame_ref, |slot, src| {
             slot.copy_from_ref(src);
+            true
+        })
+    }
+
+    pub fn publish_i420_copy_with_seq_and_acquire_time_ns(
+        &self,
+        frame_ref: CameraFrameRef<'_>,
+        acquire_time_ns: u64,
+    ) -> Option<u64> {
+        if frame_ref.layout != CameraFrameLayout::I420 || frame_ref.plane_count < 3 {
+            return None;
+        }
+        self.publish_with_seq(frame_ref, |slot, src| {
+            slot.copy_from_ref(src);
+            slot.acquire_time_ns = acquire_time_ns;
             true
         })
     }

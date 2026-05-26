@@ -5,6 +5,10 @@ use crate::{
     draw_list::DrawListId,
     draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
     draw_shader::DrawShaderAttrFormat,
+    event::video_playback::{
+        VideoTextureDescriptorShape, VideoTextureResourcePath, VideoTextureUpdateMetadata,
+        VideoYuvMetadata,
+    },
     geometry::GeometryId,
     makepad_live_id::*,
     makepad_script::shader::TextureType,
@@ -4676,7 +4680,7 @@ impl CxVulkan {
         hardware_buffer: *mut ndk_sys::AHardwareBuffer,
         width: u32,
         height: u32,
-    ) -> Result<VulkanTextureResource, String> {
+    ) -> Result<(VulkanTextureResource, String, Option<u64>), String> {
         if hardware_buffer.is_null() {
             return Err("Android Vulkan camera import failed: null AHardwareBuffer".to_string());
         }
@@ -4711,11 +4715,12 @@ impl CxVulkan {
 
         if external_format == 0 {
             if vk_format != vk::Format::UNDEFINED {
-                return self.create_imported_hardware_buffer_texture_resource(
+                let resource = self.create_imported_hardware_buffer_texture_resource(
                     hardware_buffer,
                     width,
                     height,
-                );
+                )?;
+                return Ok((resource, format!("{vk_format:?}"), None));
             }
             return Err(
                 "Android Vulkan camera import failed: external-format camera buffer missing external format"
@@ -4877,22 +4882,26 @@ impl CxVulkan {
             external_format,
         );
 
-        Ok(VulkanTextureResource {
-            image,
-            memory,
-            view,
-            face_views: [vk::ImageView::null(); 6],
-            width: width.max(1),
-            height: height.max(1),
-            layers: 1,
-            is_cube: false,
-            format: vk::Format::UNDEFINED,
-            layout: vk::ImageLayout::GENERAL,
-            hardware_buffer: Some(hardware_buffer),
-            sampler: Some(sampler),
-            ycbcr_conversion: Some(ycbcr_conversion),
-            owns_image: true,
-        })
+        Ok((
+            VulkanTextureResource {
+                image,
+                memory,
+                view,
+                face_views: [vk::ImageView::null(); 6],
+                width: width.max(1),
+                height: height.max(1),
+                layers: 1,
+                is_cube: false,
+                format: vk::Format::UNDEFINED,
+                layout: vk::ImageLayout::GENERAL,
+                hardware_buffer: Some(hardware_buffer),
+                sampler: Some(sampler),
+                ycbcr_conversion: Some(ycbcr_conversion),
+                owns_image: true,
+            },
+            format!("{vk_format:?}"),
+            Some(external_format),
+        ))
     }
 
     fn imported_yuv_plane_layout(vk_format: vk::Format) -> Option<ImportedYuvPlaneLayout> {
@@ -4943,7 +4952,7 @@ impl CxVulkan {
         hardware_buffer: *mut ndk_sys::AHardwareBuffer,
         width: u32,
         height: u32,
-    ) -> Result<crate::event::video_playback::VideoYuvMetadata, String> {
+    ) -> Result<(VideoYuvMetadata, VideoTextureUpdateMetadata), String> {
         if hardware_buffer.is_null() {
             return Err("Android Vulkan camera import failed: null AHardwareBuffer".to_string());
         }
@@ -4963,12 +4972,23 @@ impl CxVulkan {
                 .get(&tex_u_key)
                 .map(|resource| resource.format == vk::Format::R8G8_UNORM)
                 .unwrap_or(false);
-            return Ok(crate::event::video_playback::VideoYuvMetadata {
-                enabled: true,
-                matrix: 1.0,
-                biplanar,
-                rotation_steps: 0.0,
-            });
+            let metadata = VideoTextureUpdateMetadata::default()
+                .with_resource(
+                    VideoTextureResourcePath::HardwareBufferYuvPlanes,
+                    VideoTextureDescriptorShape::ImportedYuvPlaneTextures,
+                    width,
+                    height,
+                )
+                .with_resource_reused(true);
+            return Ok((
+                VideoYuvMetadata {
+                    enabled: true,
+                    matrix: 1.0,
+                    biplanar,
+                    rotation_steps: 0.0,
+                },
+                metadata,
+            ));
         }
 
         let (vk_format, external_format, allocation_size, android_memory_type_bits) = {
@@ -5214,12 +5234,24 @@ impl CxVulkan {
         self.textures.insert(tex_u_key, u_resource);
         self.textures.insert(tex_v_key, v_resource);
 
-        Ok(crate::event::video_playback::VideoYuvMetadata {
-            enabled: true,
-            matrix: 1.0,
-            biplanar: plane_layout.biplanar,
-            rotation_steps: 0.0,
-        })
+        let metadata = VideoTextureUpdateMetadata::default()
+            .with_resource(
+                VideoTextureResourcePath::HardwareBufferYuvPlanes,
+                VideoTextureDescriptorShape::ImportedYuvPlaneTextures,
+                width,
+                height,
+            )
+            .with_vulkan_format(format!("{vk_format:?}"), Some(external_format))
+            .with_resource_reused(false);
+        Ok((
+            VideoYuvMetadata {
+                enabled: true,
+                matrix: 1.0,
+                biplanar: plane_layout.biplanar,
+                rotation_steps: 0.0,
+            },
+            metadata,
+        ))
     }
 
     pub fn update_video_external_hardware_buffer_texture(
@@ -5228,26 +5260,36 @@ impl CxVulkan {
         hardware_buffer: *mut ndk_sys::AHardwareBuffer,
         width: u32,
         height: u32,
-    ) -> Result<crate::event::video_playback::VideoYuvMetadata, String> {
+    ) -> Result<(VideoYuvMetadata, VideoTextureUpdateMetadata), String> {
         let texture_key = Self::texture_key(texture_id);
         let same_source = self
             .textures
             .get(&texture_key)
             .and_then(|resource| resource.hardware_buffer)
             == Some(hardware_buffer);
+        let mut metadata = VideoTextureUpdateMetadata::default()
+            .with_resource(
+                VideoTextureResourcePath::HardwareBufferExternal,
+                VideoTextureDescriptorShape::SampledImageAndSampler,
+                width,
+                height,
+            )
+            .with_resource_reused(same_source);
         if !same_source {
             if let Some(old_resource) = self.textures.remove(&texture_key) {
                 self.destroy_texture_resource(old_resource);
             }
-            let resource = self.create_imported_external_hardware_buffer_texture_resource(
-                hardware_buffer,
-                width,
-                height,
-            )?;
+            let (resource, vk_format, external_format) = self
+                .create_imported_external_hardware_buffer_texture_resource(
+                    hardware_buffer,
+                    width,
+                    height,
+                )?;
+            metadata = metadata.with_vulkan_format(vk_format, external_format);
             self.textures.insert(texture_key, resource);
         }
 
-        Ok(crate::event::video_playback::VideoYuvMetadata::disabled())
+        Ok((VideoYuvMetadata::disabled(), metadata))
     }
 
     pub fn update_video_rgba_hardware_buffer_texture(

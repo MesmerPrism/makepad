@@ -690,6 +690,7 @@ impl Cx {
                                         biplanar: player.yuv_biplanar() > 0.5,
                                         rotation_steps: 0.0,
                                     },
+                                    metadata: crate::event::video_playback::VideoTextureUpdateMetadata::default(),
                                 },
                             ));
                         }
@@ -746,6 +747,7 @@ impl Cx {
                                         biplanar: player.yuv_biplanar() > 0.5,
                                         rotation_steps: 0.0,
                                     },
+                                    metadata: crate::event::video_playback::VideoTextureUpdateMetadata::default(),
                                 },
                             ));
                         }

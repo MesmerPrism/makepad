@@ -227,6 +227,7 @@ impl Cx {
                                         biplanar: false,
                                         rotation_steps: 0.0,
                                     },
+                                    metadata: crate::event::video_playback::VideoTextureUpdateMetadata::default(),
                                 },
                             ));
                         }

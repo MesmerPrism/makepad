@@ -59,11 +59,146 @@ impl VideoYuvMetadata {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VideoTextureResourcePath {
+    #[default]
+    Unspecified,
+    CpuYuvPlanes,
+    HardwareBufferExternal,
+    HardwareBufferYuvPlanes,
+    SurfaceTextureExternal,
+    SoftwareYuvPlanes,
+}
+
+impl VideoTextureResourcePath {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::CpuYuvPlanes => "cpu-yuv-planes",
+            Self::HardwareBufferExternal => "hardware-buffer-external",
+            Self::HardwareBufferYuvPlanes => "hardware-buffer-yuv-planes",
+            Self::SurfaceTextureExternal => "surface-texture-external",
+            Self::SoftwareYuvPlanes => "software-yuv-planes",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VideoTextureDescriptorShape {
+    #[default]
+    Unspecified,
+    CpuYuvPlaneTextures,
+    ImportedYuvPlaneTextures,
+    SampledImageAndSampler,
+    SurfaceTextureExternalOes,
+}
+
+impl VideoTextureDescriptorShape {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::CpuYuvPlaneTextures => "cpu-yuv-plane-textures",
+            Self::ImportedYuvPlaneTextures => "imported-yuv-plane-textures",
+            Self::SampledImageAndSampler => "sampled-image-and-sampler",
+            Self::SurfaceTextureExternalOes => "surface-texture-external-oes",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VideoTextureUpdateMetadata {
+    pub resource_path: VideoTextureResourcePath,
+    pub descriptor_shape: VideoTextureDescriptorShape,
+    pub camera_frame_sequence: Option<u64>,
+    pub camera_timestamp_ns: Option<u64>,
+    pub acquire_time_ns: Option<u64>,
+    pub upload_sequence: Option<u64>,
+    pub upload_time_ns: Option<u64>,
+    pub import_sequence: Option<u64>,
+    pub import_time_ns: Option<u64>,
+    pub texture_update_sequence: Option<u64>,
+    pub width: u32,
+    pub height: u32,
+    pub vulkan_format: Option<String>,
+    pub vulkan_external_format: Option<u64>,
+    pub resource_reused: Option<bool>,
+    pub fallback_active: bool,
+    pub fallback_reason: Option<String>,
+}
+
+impl VideoTextureUpdateMetadata {
+    pub fn with_resource(
+        mut self,
+        resource_path: VideoTextureResourcePath,
+        descriptor_shape: VideoTextureDescriptorShape,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        self.resource_path = resource_path;
+        self.descriptor_shape = descriptor_shape;
+        self.width = width;
+        self.height = height;
+        self
+    }
+
+    pub fn with_camera_frame(
+        mut self,
+        sequence: u64,
+        timestamp_ns: u64,
+        acquire_time_ns: Option<u64>,
+    ) -> Self {
+        self.camera_frame_sequence = Some(sequence);
+        self.camera_timestamp_ns = Some(timestamp_ns);
+        self.acquire_time_ns = acquire_time_ns;
+        self
+    }
+
+    pub fn with_cpu_yuv_upload(mut self, upload_sequence: u64, upload_time_ns: u64) -> Self {
+        self.upload_sequence = Some(upload_sequence);
+        self.upload_time_ns = Some(upload_time_ns);
+        self.texture_update_sequence = Some(upload_sequence);
+        self
+    }
+
+    pub fn with_hardware_buffer_import(
+        mut self,
+        import_sequence: u64,
+        import_time_ns: u64,
+    ) -> Self {
+        self.import_sequence = Some(import_sequence);
+        self.import_time_ns = Some(import_time_ns);
+        self.texture_update_sequence = Some(import_sequence);
+        self
+    }
+
+    pub fn with_vulkan_format(
+        mut self,
+        vulkan_format: impl Into<String>,
+        external_format: Option<u64>,
+    ) -> Self {
+        self.vulkan_format = Some(vulkan_format.into());
+        self.vulkan_external_format = external_format;
+        self
+    }
+
+    pub fn with_resource_reused(mut self, resource_reused: bool) -> Self {
+        self.resource_reused = Some(resource_reused);
+        self
+    }
+
+    pub fn with_fallback(mut self, reason: impl Into<String>) -> Self {
+        self.fallback_active = true;
+        self.fallback_reason = Some(reason.into());
+        self
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct VideoTextureUpdatedEvent {
     pub video_id: LiveId,
     pub current_position_ms: u128,
     pub yuv: VideoYuvMetadata,
+    pub metadata: VideoTextureUpdateMetadata,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

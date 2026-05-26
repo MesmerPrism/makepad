@@ -52,6 +52,7 @@ use {
             VideoSource,
             //HttpRequest,
             //HttpMethod,
+            VideoTextureUpdateMetadata,
             VideoTextureUpdatedEvent,
             VideoYuvTexturesReady,
             VirtualKeyboardEvent,
@@ -1172,6 +1173,7 @@ impl Cx {
                                 biplanar: false,
                                 rotation_steps: 0.0,
                             },
+                            metadata: VideoTextureUpdateMetadata::default(),
                         },
                     ));
                 }
@@ -1651,6 +1653,7 @@ impl Cx {
                     biplanar: false,
                     rotation_steps: 0.0,
                 },
+                metadata: VideoTextureUpdateMetadata::default(),
             });
             self.call_event_handler(&e);
         }
@@ -1785,12 +1788,14 @@ impl Cx {
                         player.disable_hardware_buffer_yuv_plane_import();
                     }
                     match update_result {
-                        Ok(mut yuv) => {
+                        Ok((mut yuv, metadata)) => {
                             yuv.rotation_steps = player.yuv_rotation_steps();
+                            let metadata = player.hardware_buffer_update_metadata(metadata, &frame);
                             events.push(Event::VideoTextureUpdated(VideoTextureUpdatedEvent {
                                 video_id: player.video_id,
                                 current_position_ms: 0,
                                 yuv,
+                                metadata,
                             }));
                         }
                         Err(error) => {
@@ -1825,7 +1830,7 @@ impl Cx {
             }
 
             let gl_ref = gl.map(|gl| unsafe { &*gl });
-            if player.poll_frame(gl_ref, &mut self.textures) {
+            if let Some(metadata) = player.poll_frame(gl_ref, &mut self.textures) {
                 events.push(Event::VideoTextureUpdated(VideoTextureUpdatedEvent {
                     video_id: player.video_id,
                     current_position_ms: 0,
@@ -1835,6 +1840,7 @@ impl Cx {
                         biplanar: false,
                         rotation_steps: player.yuv_rotation_steps(),
                     },
+                    metadata,
                 }));
             }
         }
@@ -1903,6 +1909,7 @@ impl Cx {
                             biplanar: false,
                             rotation_steps: 0.0,
                         },
+                        metadata: VideoTextureUpdateMetadata::default(),
                     }));
                 }
             }

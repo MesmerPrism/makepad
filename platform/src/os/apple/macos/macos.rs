@@ -567,7 +567,9 @@ impl Cx {
                     // next NSEvent — the symptom being a Ctrl+C that runs
                     // the user's `QuitRequested` / `Shutdown` handlers but
                     // never actually exits.
-                    if let EventFlow::Exit = self.cocoa_event_callback(MacosEvent::Paint, metal_cx, metal_windows) {
+                    if let EventFlow::Exit =
+                        self.cocoa_event_callback(MacosEvent::Paint, metal_cx, metal_windows)
+                    {
                         return EventFlow::Exit;
                     }
 
@@ -724,6 +726,7 @@ impl Cx {
                                         biplanar: player.yuv_biplanar() > 0.5,
                                         rotation_steps: 0.0,
                                     },
+                                    metadata: crate::event::video_playback::VideoTextureUpdateMetadata::default(),
                                 },
                             ));
                         }

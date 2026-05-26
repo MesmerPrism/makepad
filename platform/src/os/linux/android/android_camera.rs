@@ -56,7 +56,9 @@ enum AndroidImageReaderMode {
 
 pub struct AndroidCameraHardwareBufferFrame {
     pub buffer: *mut ndk_sys::AHardwareBuffer,
+    pub sequence: u64,
     pub timestamp_ns: u64,
+    pub acquire_time_ns: u64,
     pub width: u32,
     pub height: u32,
 }
@@ -170,7 +172,9 @@ impl AndroidCaptureSession {
                             ndk_sys::AHardwareBuffer_acquire(hardware_buffer);
                             cb(AndroidCameraHardwareBufferFrame {
                                 buffer: hardware_buffer,
+                                sequence: 0,
                                 timestamp_ns: timestamp_ns.max(0) as u64,
+                                acquire_time_ns: 0,
                                 width: context.format.width as u32,
                                 height: context.format.height as u32,
                             });

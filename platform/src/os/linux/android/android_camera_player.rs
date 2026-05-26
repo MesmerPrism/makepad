@@ -8,6 +8,9 @@ use {
         AndroidCameraAccess, AndroidCameraHardwareBufferFrame, CameraHardwareBufferInputFn,
     },
     crate::{
+        event::video_playback::{
+            VideoTextureDescriptorShape, VideoTextureResourcePath, VideoTextureUpdateMetadata,
+        },
         makepad_live_id::LiveId,
         texture::{CxTexturePool, TextureFormat, TextureId, TextureUpdated},
         video::*,
@@ -49,6 +52,7 @@ pub struct AndroidCameraPlayer {
     warned_waiting_for_first_frame: bool,
     logged_first_hardware_buffer_consume: bool,
     cpu_yuv_upload_seq: u64,
+    hardware_buffer_update_seq: u64,
 }
 
 impl AndroidCameraPlayer {
@@ -97,22 +101,27 @@ impl AndroidCameraPlayer {
                 let frame_timestamp_ns = frame_ref.timestamp_ns;
                 let width = frame_ref.width;
                 let height = frame_ref.height;
-                let capture_time_ms = diagnostic_time_ms();
-                match frame_ring.publish_i420_copy_with_seq(frame_ref) {
+                let capture_time_ns = diagnostic_time_ns();
+                let capture_time_ms = capture_time_ns / 1_000_000;
+                match frame_ring
+                    .publish_i420_copy_with_seq_and_acquire_time_ns(frame_ref, capture_time_ns)
+                {
                     Some(camera_frame_seq) => crate::log!(
-                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv videoId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} width={} height={} layout=I420",
+                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv videoId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
                         video_id_value,
                         camera_frame_seq,
                         frame_timestamp_ns,
                         capture_time_ms,
+                        capture_time_ns,
                         width,
                         height,
                     ),
                     None => crate::log!(
-                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv videoId={} cameraTimestampNs={} captureTimeMs={} width={} height={} layout=I420",
+                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv videoId={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
                         video_id_value,
                         frame_timestamp_ns,
                         capture_time_ms,
+                        capture_time_ns,
                         width,
                         height,
                     ),
@@ -121,7 +130,21 @@ impl AndroidCameraPlayer {
         });
         let hardware_buffer_cb = hardware_buffer_frame.as_ref().map(|latest| {
             let latest = latest.clone();
-            Box::new(move |frame: AndroidCameraHardwareBufferFrame| {
+            let video_id_value = video_id.0;
+            let mut camera_frame_seq = 0u64;
+            Box::new(move |mut frame: AndroidCameraHardwareBufferFrame| {
+                camera_frame_seq = camera_frame_seq.saturating_add(1);
+                frame.sequence = camera_frame_seq;
+                frame.acquire_time_ns = diagnostic_time_ns();
+                crate::log!(
+                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=hardware-buffer-external videoId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeNs={} width={} height={} layout=AHardwareBuffer",
+                    video_id_value,
+                    frame.sequence,
+                    frame.timestamp_ns,
+                    frame.acquire_time_ns,
+                    frame.width,
+                    frame.height,
+                );
                 *latest.lock().unwrap() = Some(frame);
             }) as CameraHardwareBufferInputFn
         });
@@ -171,6 +194,7 @@ impl AndroidCameraPlayer {
             warned_waiting_for_first_frame: false,
             logged_first_hardware_buffer_consume: false,
             cpu_yuv_upload_seq: 0,
+            hardware_buffer_update_seq: 0,
         }
     }
 
@@ -227,22 +251,27 @@ impl AndroidCameraPlayer {
             let frame_timestamp_ns = frame_ref.timestamp_ns;
             let width = frame_ref.width;
             let height = frame_ref.height;
-            let capture_time_ms = diagnostic_time_ms();
-            match frame_ring.publish_i420_copy_with_seq(frame_ref) {
+            let capture_time_ns = diagnostic_time_ns();
+            let capture_time_ms = capture_time_ns / 1_000_000;
+            match frame_ring
+                .publish_i420_copy_with_seq_and_acquire_time_ns(frame_ref, capture_time_ns)
+            {
                 Some(camera_frame_seq) => crate::log!(
-                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv-fallback videoId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} width={} height={} layout=I420",
+                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv-fallback videoId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
                     video_id_value,
                     camera_frame_seq,
                     frame_timestamp_ns,
                     capture_time_ms,
+                    capture_time_ns,
                     width,
                     height,
                 ),
                 None => crate::log!(
-                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv-fallback videoId={} cameraTimestampNs={} captureTimeMs={} width={} height={} layout=I420",
+                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv-fallback videoId={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
                     video_id_value,
                     frame_timestamp_ns,
                     capture_time_ms,
+                    capture_time_ns,
                     width,
                     height,
                 ),
@@ -267,6 +296,7 @@ impl AndroidCameraPlayer {
         self.warned_waiting_for_first_frame = false;
         self.logged_first_hardware_buffer_consume = false;
         self.cpu_yuv_upload_seq = 0;
+        self.hardware_buffer_update_seq = 0;
         crate::warning!(
             "Android headset camera player: falling back to cpu-yuv video_id={} size={}x{}",
             self.video_id.0,
@@ -354,9 +384,28 @@ impl AndroidCameraPlayer {
         Some(frame)
     }
 
-    pub fn poll_frame(&mut self, gl: Option<&LibGl>, textures: &mut CxTexturePool) -> bool {
+    pub fn hardware_buffer_update_metadata(
+        &mut self,
+        metadata: VideoTextureUpdateMetadata,
+        frame: &AndroidCameraHardwareBufferFrame,
+    ) -> VideoTextureUpdateMetadata {
+        self.hardware_buffer_update_seq = self.hardware_buffer_update_seq.saturating_add(1);
+        metadata
+            .with_camera_frame(
+                frame.sequence,
+                frame.timestamp_ns,
+                (frame.acquire_time_ns != 0).then_some(frame.acquire_time_ns),
+            )
+            .with_hardware_buffer_import(self.hardware_buffer_update_seq, diagnostic_time_ns())
+    }
+
+    pub fn poll_frame(
+        &mut self,
+        gl: Option<&LibGl>,
+        textures: &mut CxTexturePool,
+    ) -> Option<VideoTextureUpdateMetadata> {
         if self.native_preview || self.uses_hardware_buffer_texture() {
-            return false;
+            return None;
         }
 
         let Some(frame) = self
@@ -364,15 +413,27 @@ impl AndroidCameraPlayer {
             .as_mut()
             .and_then(|frames| frames.take_pending_or_latest_mut())
         else {
-            return false;
+            return None;
         };
 
         if frame.width == 0 || frame.height == 0 || frame.plane_count < 3 {
-            return false;
+            return None;
         }
 
         let width = frame.width as u32;
         let height = frame.height as u32;
+        let mut metadata = VideoTextureUpdateMetadata::default()
+            .with_camera_frame(
+                frame.sequence,
+                frame.timestamp_ns,
+                (frame.acquire_time_ns != 0).then_some(frame.acquire_time_ns),
+            )
+            .with_resource(
+                VideoTextureResourcePath::CpuYuvPlanes,
+                VideoTextureDescriptorShape::CpuYuvPlaneTextures,
+                width,
+                height,
+            );
 
         if self.texture_mode == AndroidCameraTextureMode::CpuYuv {
             let frame_seq = frame.sequence;
@@ -402,13 +463,17 @@ impl AndroidCameraPlayer {
                 &mut frame.planes[2].bytes,
             );
             self.cpu_yuv_upload_seq = self.cpu_yuv_upload_seq.saturating_add(1);
+            let upload_time_ns = diagnostic_time_ns();
+            metadata = metadata.with_cpu_yuv_upload(self.cpu_yuv_upload_seq, upload_time_ns);
             crate::log!(
-                "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=cpu-yuv-upload status=ok path=cpu-yuv videoId={} uploadSeq={} cameraFrameSeq={} cameraTimestampNs={} uploadTimeMs={} width={} height={} yBytes={} uBytes={} vBytes={} totalBytes={}",
+                "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=cpu-yuv-upload status=ok path=cpu-yuv videoId={} uploadSeq={} cameraFrameSeq={} cameraTimestampNs={} acquireTimeNs={} uploadTimeMs={} uploadTimeNs={} width={} height={} yBytes={} uBytes={} vBytes={} totalBytes={}",
                 self.video_id.0,
                 self.cpu_yuv_upload_seq,
                 frame_seq,
                 frame_timestamp_ns,
-                diagnostic_time_ms(),
+                frame.acquire_time_ns,
+                upload_time_ns / 1_000_000,
+                upload_time_ns,
                 width,
                 height,
                 y_bytes,
@@ -418,7 +483,7 @@ impl AndroidCameraPlayer {
             );
         } else {
             let Some(gl) = gl else {
-                return false;
+                return None;
             };
             upload_i420_slices_to_gl(
                 gl,
@@ -432,11 +497,12 @@ impl AndroidCameraPlayer {
                 width,
                 height,
             );
+            metadata.resource_path = VideoTextureResourcePath::SoftwareYuvPlanes;
         }
 
         self.width = width;
         self.height = height;
-        true
+        Some(metadata)
     }
 
     pub fn set_preview_window(&mut self, preview_window: Option<*mut ANativeWindow>) {
@@ -454,10 +520,10 @@ impl AndroidCameraPlayer {
     }
 }
 
-fn diagnostic_time_ms() -> u128 {
+fn diagnostic_time_ns() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
+        .map(|duration| duration.as_nanos().min(u64::MAX as u128) as u64)
         .unwrap_or(0)
 }
 
