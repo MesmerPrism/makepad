@@ -35,6 +35,7 @@ use {
 
 #[cfg(use_vulkan)]
 const OPENXR_DEPTH_MESH_READBACK_ENABLED: bool = true;
+const RUSTY_XR_MAKEPAD_FRAME_FLOW_LOG_INTERVAL: u64 = 30;
 
 impl Cx {
     pub(crate) fn openxr_render_loop(
@@ -1856,7 +1857,10 @@ impl CxOpenXrSkippedFrame {
 }
 
 fn should_log_frame_flow(sequence: u64, result: XrResult, result_changed: bool) -> bool {
-    result != XrResult::SUCCESS || result_changed || sequence <= 8 || sequence % 120 == 0
+    result != XrResult::SUCCESS
+        || result_changed
+        || sequence <= 8
+        || sequence % RUSTY_XR_MAKEPAD_FRAME_FLOW_LOG_INTERVAL == 0
 }
 
 fn diagnostic_time_ms() -> u128 {
