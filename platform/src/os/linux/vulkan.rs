@@ -300,6 +300,7 @@ pub struct CxVulkan {
     offscreen_render_passes: HashMap<VulkanRenderPassKey, vk::RenderPass>,
     geometries: HashMap<GeometryId, VulkanGeometryResource>,
     textures: HashMap<VulkanTextureKey, VulkanTextureResource>,
+    reported_video_descriptor_shapes: HashSet<(usize, usize, usize, usize)>,
     frame_resources: FrameResources,
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
@@ -625,6 +626,7 @@ impl CxVulkan {
             offscreen_render_passes: HashMap::new(),
             geometries: HashMap::new(),
             textures: HashMap::new(),
+            reported_video_descriptor_shapes: HashSet::new(),
             frame_resources: FrameResources::default(),
             command_pool,
             command_buffer,
@@ -1022,6 +1024,7 @@ impl CxVulkan {
             offscreen_render_passes: HashMap::new(),
             geometries: HashMap::new(),
             textures: HashMap::new(),
+            reported_video_descriptor_shapes: HashSet::new(),
             frame_resources: FrameResources::default(),
             command_pool,
             command_buffer,
@@ -4813,6 +4816,13 @@ impl CxVulkan {
         unsafe {
             ndk_sys::AHardwareBuffer_acquire(hardware_buffer);
         }
+        crate::log!(
+            "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_IMPORT schema=rusty.xr.makepad-vulkan-video-import.v1 path=external-ahardwarebuffer-ycbcr size={}x{} vkFormat={:?} externalFormat={} samplerYcbcrConversion=true resourceSampler=true resourceShape=image-view-plus-sampler-ycbcr-conversion",
+            width.max(1),
+            height.max(1),
+            vk_format,
+            external_format,
+        );
 
         Ok(VulkanTextureResource {
             image,
@@ -5808,10 +5818,8 @@ impl CxVulkan {
             } else {
                 null_texture_resource
             };
-            let resource = self
-                .textures
-                .get(&Self::texture_key(*texture_id))
-                .or(fallback);
+            let texture_key = Self::texture_key(*texture_id);
+            let resource = self.textures.get(&texture_key).or(fallback);
             let Some(resource) = resource else {
                 return Ok(());
             };
@@ -5828,6 +5836,21 @@ impl CxVulkan {
             let image_info = vk::DescriptorImageInfo::default()
                 .image_view(resource.view)
                 .image_layout(resource.layout);
+            if resource.sampler.is_some() && resource.ycbcr_conversion.is_some() {
+                let report_key = (packet.shader_index, slot, texture_key, sampler_index);
+                if self.reported_video_descriptor_shapes.insert(report_key) {
+                    crate::log!(
+                        "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_DESCRIPTOR_SHAPE schema=rusty.xr.makepad-vulkan-video-descriptor-shape.v1 shaderIndex={} slot={} textureKey={} textureType={:?} textureBinding={} textureDescriptorType=SAMPLED_IMAGE samplerIndex={} samplerBinding={} samplerDescriptorType=SAMPLER resourceSamplerOverride=true samplerYcbcrConversion=true combinedImageSampler=false shaderSampleLowering=textureSampleLevel_separate_texture_sampler",
+                        packet.shader_index,
+                        slot,
+                        texture_key,
+                        packet.texture_types.get(slot).copied(),
+                        vk_shader.texture_binding_base + slot as u32,
+                        sampler_index,
+                        vk_shader.sampler_binding_base + sampler_index as u32,
+                    );
+                }
+            }
             if let Some(video_sampler) = resource.sampler {
                 video_sampler_overrides.insert(sampler_index, video_sampler);
             }

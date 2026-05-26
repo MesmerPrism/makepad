@@ -67,6 +67,10 @@ This branch currently carries:
   backend multiview index to application shader code for XR per-eye texture
   selection without requiring app shaders to reference backend-specific
   symbols.
+- Android Vulkan external video import markers that report the
+  `AHardwareBuffer`/YCbCr resource shape and the current separate
+  sampled-image plus sampler descriptor binding shape before any combined
+  image-sampler shader/resource fix is attempted.
 - App-visible XR event-state fields for the active per-eye OpenXR local-space
   pose/FOV, so public examples can compute display-eye projection mappings from
   runtime view state instead of hard-coded display constants.
