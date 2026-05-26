@@ -2431,8 +2431,6 @@ impl Cx {
                         ..Default::default()
                     };
                     window.is_created = true;
-                    //let ret = unsafe{ndk_sys::ANativeWindow_setFrameRate(self.os.display.as_ref().unwrap().window, 120.0, 0)};
-                    //crate::log!("{}",ret);
                     let new_geom = window.window_geom.clone();
                     let old_geom = window.window_geom.clone();
                     self.call_event_handler(&Event::WindowGeomChange(WindowGeomChangeEvent {

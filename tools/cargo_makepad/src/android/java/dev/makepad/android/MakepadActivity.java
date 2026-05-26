@@ -1708,9 +1708,13 @@ public class MakepadActivity
         View decorView = getWindow().getDecorView();
 
         if (fullscreen) {
-            // LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS = 3 (API 30+), fall back to SHORT_EDGES
-            getWindow().getAttributes().layoutInDisplayCutoutMode =
-                Build.VERSION.SDK_INT >= 30 ? 3 : LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            // Display cutout fields are API 28+. Touching them on API 26-27
+            // throws NoSuchFieldError even when the app is otherwise compatible.
+            if (Build.VERSION.SDK_INT >= 28) {
+                // LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS = 3 (API 30+), fall back to SHORT_EDGES
+                getWindow().getAttributes().layoutInDisplayCutoutMode =
+                    Build.VERSION.SDK_INT >= 30 ? 3 : LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            }
             if (Build.VERSION.SDK_INT >= 30) {
                 getWindow().setDecorFitsSystemWindows(false);
                 android.view.WindowInsetsController controller = getWindow().getInsetsController();

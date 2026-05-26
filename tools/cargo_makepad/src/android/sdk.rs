@@ -11,7 +11,12 @@ use crate::{android::*, makepad_shell::*};
 
 #[derive(Clone, Copy)]
 pub struct AndroidSDKUrls {
+    /// Minimum Android API used for the NDK clang target and generated
+    /// minSdkVersion. This is separate from the Android platform jar used for
+    /// Java compilation.
     pub sdk_version: usize,
+    /// Manifest targetSdkVersion. This controls Android compatibility behavior
+    /// and release policy, not the native binary load floor.
     pub target_sdk_version: usize,
     pub sdk_extension: &'static str,
     pub platform: &'static str,
@@ -34,7 +39,10 @@ pub const BUILD_TOOLS_DIR: &str = "build-tools";
 pub const PLATFORMS_DIR: &str = "platforms";
 
 pub const ANDROID_SDK_URLS_33: AndroidSDKUrls = AndroidSDKUrls {
-    sdk_version: 33,
+    // Build against the Android-33-ext4 platform payload, but emit an API-26
+    // native/minimum floor. API > 26 Java/native entry points must stay guarded
+    // or dynamically resolved.
+    sdk_version: 26,
     target_sdk_version: 33,
     build_tools_version: "33.0.1",
     sdk_extension: "ext4",

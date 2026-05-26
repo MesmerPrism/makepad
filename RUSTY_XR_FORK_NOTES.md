@@ -36,6 +36,10 @@ This branch currently carries:
   generated manifests now separate min SDK from target SDK and can derive
   package id, label, version code, version name, and min SDK from generic Cargo
   metadata or explicit Android command-line flags.
+- Android API-floor cleanup from upstream Makepad: default generated builds now
+  use API 26 as the native/minimum SDK floor while keeping the current target
+  SDK at 33 for this branch. API-newer Java and native surfaces are guarded or
+  kept out of strong native linkage before the floor is lowered.
 - Android packaging fixes for the tested Windows-to-Quest build lane.
 - Dependent Rust shared-library bundling for Android APK output.
 - Windows path normalization for generated Android wrapper inputs.

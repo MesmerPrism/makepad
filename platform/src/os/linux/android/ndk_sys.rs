@@ -54,12 +54,11 @@ extern "C" {
         assetManager: jni_sys::jobject,
     ) -> *mut AAssetManager;
 
-    pub fn ANativeWindow_setFrameRate(
-        window: *mut ANativeWindow,
-        frameRate: f32,
-        compatibility: i8,
-    ) -> i32;
+    // ANativeWindow_setFrameRate is API 30+. Do not declare it here as a
+    // strong extern symbol while the minimum SDK floor is below 30; resolve it
+    // with dlsym and a runtime API guard if frame-rate control is needed.
 
+    // AHardwareBuffer_acquire / _release are API 26, matching the min SDK floor.
     pub fn AHardwareBuffer_acquire(buffer: *mut AHardwareBuffer);
     pub fn AHardwareBuffer_release(buffer: *mut AHardwareBuffer);
 }
@@ -83,6 +82,7 @@ pub type AChoreographerPostCallbackFn = unsafe extern "C" fn(
 
 #[cfg(not(no_android_choreographer))]
 extern "C" {
+    // AChoreographer_getInstance is API 24, so it is safe at minSdkVersion 26.
     pub fn AChoreographer_getInstance() -> *mut AChoreographer;
 }
 
