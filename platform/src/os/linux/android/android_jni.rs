@@ -582,6 +582,16 @@ fn init_simple_render_loop(device_refresh_rate: f32) {
         let mut last_frame_time = std::time::Instant::now();
         let target_frame_time = std::time::Duration::from_secs_f32(1.0 / device_refresh_rate);
         loop {
+            // Stop the fallback loop during shutdown. Otherwise it keeps
+            // posting RenderLoop messages until the OS reclaims the process.
+            //
+            // This is safe at startup: MESSAGES_TX is installed synchronously
+            // in the JNI bootstrap before the Makepad thread is spawned and
+            // before initChoreographer starts this loop.
+            if !from_java_messages_already_set() {
+                break;
+            }
+
             let now = std::time::Instant::now();
             let elapsed = now - last_frame_time;
 
