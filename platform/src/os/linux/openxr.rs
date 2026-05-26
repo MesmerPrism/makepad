@@ -1785,16 +1785,18 @@ impl CxOpenXrFrame {
 
         let result = unsafe { (xr.xrEndFrame)(session.handle, &fei) };
         let end_frame_sequence = session.next_end_frame_sequence();
-        crate::log!(
-            "RUSTY_XR_MAKEPAD_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=xr-end-frame status=submitted renderPath=makepad-xr xrFrameSeq={} shouldRender=true submitTimeMs={} predictedDisplayTimeNs={} predictedDisplayPeriodNs={} resultCode={} layerCount={}",
-            end_frame_sequence,
-            diagnostic_time_ms(),
-            self.frame_state.predicted_display_time.as_nanos(),
-            self.frame_state.predicted_display_period.as_nanos(),
-            result.0,
-            layer_count,
-        );
         let result_changed = session.last_end_frame_result != Some(result);
+        if should_log_frame_flow(end_frame_sequence, result, result_changed) {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=xr-end-frame status=submitted renderPath=makepad-xr xrFrameSeq={} shouldRender=true submitTimeMs={} predictedDisplayTimeNs={} predictedDisplayPeriodNs={} resultCode={} layerCount={}",
+                end_frame_sequence,
+                diagnostic_time_ms(),
+                self.frame_state.predicted_display_time.as_nanos(),
+                self.frame_state.predicted_display_period.as_nanos(),
+                result.0,
+                layer_count,
+            );
+        }
         if result != XrResult::SUCCESS || result_changed || session.debug_end_frame_logs < 4 {
             crate::log!(
                 "RUSTY_XR_MAKEPAD_OPENXR_END_FRAME schema=rusty.xr.makepad-openxr-end-frame.v1 result={:?} resultCode={} nativePassthrough={} projectionBlendSourceAlpha={} layerCount={} environmentBlend=OPAQUE imageRectWidth={} imageRectHeight={} recommendedWidth={} recommendedHeight={} viewCount=2 colorArraySize=2",
@@ -1826,16 +1828,18 @@ impl CxOpenXrSkippedFrame {
 
         let result = unsafe { (xr.xrEndFrame)(session.handle, &fei) };
         let end_frame_sequence = session.next_end_frame_sequence();
-        crate::log!(
-            "RUSTY_XR_MAKEPAD_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=xr-end-frame status=submitted renderPath=makepad-xr xrFrameSeq={} shouldRender=false skippedShouldRenderCount={} submitTimeMs={} predictedDisplayTimeNs={} predictedDisplayPeriodNs={} resultCode={} layerCount=0",
-            end_frame_sequence,
-            self.skipped_should_render_count,
-            diagnostic_time_ms(),
-            self.frame_state.predicted_display_time.as_nanos(),
-            self.frame_state.predicted_display_period.as_nanos(),
-            result.0,
-        );
         let result_changed = session.last_end_frame_result != Some(result);
+        if should_log_frame_flow(end_frame_sequence, result, result_changed) {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=xr-end-frame status=submitted renderPath=makepad-xr xrFrameSeq={} shouldRender=false skippedShouldRenderCount={} submitTimeMs={} predictedDisplayTimeNs={} predictedDisplayPeriodNs={} resultCode={} layerCount=0",
+                end_frame_sequence,
+                self.skipped_should_render_count,
+                diagnostic_time_ms(),
+                self.frame_state.predicted_display_time.as_nanos(),
+                self.frame_state.predicted_display_period.as_nanos(),
+                result.0,
+            );
+        }
         if result != XrResult::SUCCESS || result_changed || session.debug_end_frame_logs < 4 {
             crate::log!(
                 "RUSTY_XR_MAKEPAD_OPENXR_END_FRAME schema=rusty.xr.makepad-openxr-end-frame.v1 result={:?} resultCode={} skippedShouldRender=true skippedShouldRenderCount={} nativePassthrough={} layerCount=0 environmentBlend=OPAQUE",
@@ -1849,6 +1853,10 @@ impl CxOpenXrSkippedFrame {
         session.last_end_frame_result = Some(result);
         result.log_error("xrEndFrame skipped should_render=false");
     }
+}
+
+fn should_log_frame_flow(sequence: u64, result: XrResult, result_changed: bool) -> bool {
+    result != XrResult::SUCCESS || result_changed || sequence <= 8 || sequence % 120 == 0
 }
 
 fn diagnostic_time_ms() -> u128 {
