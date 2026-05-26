@@ -4902,7 +4902,7 @@ impl CxVulkan {
                 .unwrap_or(false);
             return Ok(crate::event::video_playback::VideoYuvMetadata {
                 enabled: true,
-                matrix: 0.0,
+                matrix: 1.0,
                 biplanar,
                 rotation_steps: 0.0,
             });
@@ -5153,7 +5153,7 @@ impl CxVulkan {
 
         Ok(crate::event::video_playback::VideoYuvMetadata {
             enabled: true,
-            matrix: 0.0,
+            matrix: 1.0,
             biplanar: plane_layout.biplanar,
             rotation_steps: 0.0,
         })

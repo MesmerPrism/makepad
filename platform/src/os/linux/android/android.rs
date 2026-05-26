@@ -1744,12 +1744,29 @@ impl Cx {
                                 .to_string()
                         })
                         .and_then(|vk| {
-                            vk.update_video_external_hardware_buffer_texture(
-                                player.texture_id(),
+                            match vk.update_video_yuv_hardware_buffer_textures(
+                                player.tex_y_id(),
+                                player.tex_u_id(),
+                                player.tex_v_id(),
                                 frame.buffer,
                                 frame.width,
                                 frame.height,
-                            )
+                            ) {
+                                Ok(yuv) => Ok(yuv),
+                                Err(yuv_error) => {
+                                    crate::warning!(
+                                        "Android headset camera: YUV plane hardware-buffer import unavailable, falling back to external conversion video_id={} error={}",
+                                        player.video_id.0,
+                                        yuv_error,
+                                    );
+                                    vk.update_video_external_hardware_buffer_texture(
+                                        player.texture_id(),
+                                        frame.buffer,
+                                        frame.width,
+                                        frame.height,
+                                    )
+                                }
+                            }
                         });
                     match update_result {
                         Ok(mut yuv) => {
