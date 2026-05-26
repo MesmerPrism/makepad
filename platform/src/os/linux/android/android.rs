@@ -91,7 +91,7 @@ use {
     std::time::Instant,
 };
 
-const ANDROID_XR_BUFFER_SCALE_MIN: f32 = 0.75;
+const ANDROID_XR_BUFFER_SCALE_MIN: f32 = 0.5;
 const ANDROID_XR_BUFFER_SCALE_DEFAULT: f32 = 1.4;
 const ANDROID_XR_BUFFER_SCALE_MAX: f32 = 1.5;
 const ANDROID_XR_MULTISAMPLES: usize = 4;

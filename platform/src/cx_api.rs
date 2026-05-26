@@ -67,6 +67,7 @@ pub struct XrFrameCpuBreakdown {
     pub draw_event_ms: f64,
     pub compile_shaders_ms: f64,
     pub repaint_ms: f64,
+    pub repaint_gpu_ms: Option<f64>,
     pub repaint_wait_inflight_ms: f64,
     pub repaint_prepare_textures_ms: f64,
     pub repaint_record_draw_ms: f64,

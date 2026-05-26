@@ -239,6 +239,7 @@ pub(crate) struct OpenXrVulkanRepaintStats {
     pub prepare_textures_ms: f64,
     pub record_draw_ms: f64,
     pub submit_ms: f64,
+    pub gpu_ms: Option<f64>,
     pub texture_upload_count: u32,
     pub texture_upload_bytes: u64,
     pub packet_buffer_count: u32,
@@ -2519,6 +2520,7 @@ impl CxVulkan {
         }
 
         if result.is_ok() {
+            stats.gpu_ms = self.xr_last_gpu_frame_time_ms;
             stats.texture_upload_count = self.texture_upload_count_this_frame;
             stats.texture_upload_bytes = self.texture_upload_bytes_this_frame;
             stats.packet_buffer_count = self.xr_packet_buffer_count_this_frame;

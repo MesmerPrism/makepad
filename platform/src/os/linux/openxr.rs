@@ -216,6 +216,7 @@ impl Cx {
                                 xr_cpu.repaint_prepare_textures_ms += stats.prepare_textures_ms;
                                 xr_cpu.repaint_record_draw_ms += stats.record_draw_ms;
                                 xr_cpu.repaint_submit_ms += stats.submit_ms;
+                                xr_cpu.repaint_gpu_ms = stats.gpu_ms;
                                 xr_cpu.repaint_texture_upload_count += stats.texture_upload_count;
                                 xr_cpu.repaint_texture_upload_bytes += stats.texture_upload_bytes;
                                 xr_cpu.repaint_packet_buffer_count += stats.packet_buffer_count;
