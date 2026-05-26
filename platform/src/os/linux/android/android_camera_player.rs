@@ -321,21 +321,21 @@ impl AndroidCameraPlayer {
                 self.tex_y_id,
                 width as usize,
                 height as usize,
-                frame.planes[0].bytes.clone(),
+                &frame.planes[0].bytes,
             );
             replace_r8_plane_texture(
                 textures,
                 self.tex_u_id,
                 width.div_ceil(2) as usize,
                 height.div_ceil(2) as usize,
-                frame.planes[1].bytes.clone(),
+                &frame.planes[1].bytes,
             );
             replace_r8_plane_texture(
                 textures,
                 self.tex_v_id,
                 width.div_ceil(2) as usize,
                 height.div_ceil(2) as usize,
-                frame.planes[2].bytes.clone(),
+                &frame.planes[2].bytes,
             );
         } else {
             let Some(gl) = gl else {
@@ -386,7 +386,7 @@ fn replace_r8_plane_texture(
     texture_id: TextureId,
     width: usize,
     height: usize,
-    data: Vec<u8>,
+    data: &[u8],
 ) {
     let texture = &mut textures[texture_id];
     match &mut texture.format {
@@ -399,14 +399,16 @@ fn replace_r8_plane_texture(
         } => {
             *texture_width = width;
             *texture_height = height;
-            *texture_data = Some(data);
+            let texture_data = texture_data.get_or_insert_with(Vec::new);
+            texture_data.clear();
+            texture_data.extend_from_slice(data);
             *updated = updated.clone().update(None);
         }
         TextureFormat::VideoYuvPlane => {
             texture.format = TextureFormat::VecRu8 {
                 width,
                 height,
-                data: Some(data),
+                data: Some(data.to_vec()),
                 unpack_row_length: None,
                 updated: TextureUpdated::Full,
             };
