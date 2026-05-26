@@ -50,6 +50,10 @@ pub enum CxThreadPriority {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct XrFrameCpuBreakdown {
     pub total_ms: f64,
+    pub should_render: bool,
+    pub skipped_should_render_count: u64,
+    pub pre_frame_events_ms: f64,
+    pub post_frame_media_events_ms: f64,
     pub wait_frame_ms: f64,
     pub begin_frame_ms: f64,
     pub locate_space_ms: f64,
@@ -391,6 +395,7 @@ pub enum CxOsOp {
 
     XrStartPresenting,
     XrSetRenderScale(f32),
+    XrSetDisplayRefreshRate(Option<f32>),
     XrSetNativePassthrough(bool),
     XrSetLocalAnchor(XrAnchor),
     XrSetLocalFloor(f32),
@@ -476,6 +481,7 @@ impl std::fmt::Debug for CxOsOp {
 
             Self::XrStartPresenting => write!(f, "XrStartPresenting"),
             Self::XrSetRenderScale(_) => write!(f, "XrSetRenderScale"),
+            Self::XrSetDisplayRefreshRate(_) => write!(f, "XrSetDisplayRefreshRate"),
             Self::XrSetNativePassthrough(_) => write!(f, "XrSetNativePassthrough"),
             Self::XrStopPresenting => write!(f, "XrStopPresenting"),
             Self::XrAdvertiseAnchor(_) => write!(f, "XrAdvertiseAnchor"),
@@ -794,6 +800,11 @@ impl Cx {
 
     pub fn xr_set_render_scale(&mut self, scale: f32) {
         self.platform_ops.push(CxOsOp::XrSetRenderScale(scale));
+    }
+
+    pub fn xr_set_display_refresh_rate(&mut self, rate_hz: Option<f32>) {
+        self.platform_ops
+            .push(CxOsOp::XrSetDisplayRefreshRate(rate_hz));
     }
 
     pub fn xr_set_native_passthrough(&mut self, enabled: bool) {

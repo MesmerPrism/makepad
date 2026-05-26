@@ -169,7 +169,10 @@ fn run_studio_remote(target: (String, u16)) -> Result<(), String> {
         };
         let mut line = String::new();
         let mut received_any_input = false;
+        #[cfg(unix)]
         let mut using_tty_reader = false;
+        #[cfg(not(unix))]
+        let using_tty_reader = false;
         loop {
             line.clear();
             let read_result = if using_tty_reader {

@@ -3169,6 +3169,15 @@ pub struct XrLoaderInitInfoAndroidKHR {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
+pub struct XrInstanceCreateInfoAndroidKHR {
+    pub ty: XrStructureType,
+    pub next: *const c_void,
+    pub application_vm: *mut c_void,
+    pub application_activity: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
 pub struct XrGraphicsBindingOpenGLESAndroidKHR {
     pub ty: XrStructureType,
     pub next: *const c_void,

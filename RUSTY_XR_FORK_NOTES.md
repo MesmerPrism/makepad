@@ -93,7 +93,7 @@ For this branch, use focused validation instead of claiming full Makepad
 repo-wide formatting hygiene:
 
 ```powershell
-rustfmt --check platform\src\os\linux\vulkan.rs platform\src\os\linux\android\android.rs tools\cargo_makepad\src\android\compile.rs
+python tools\rusty_xr_format.py --changed --check
 cargo metadata --manifest-path libs\csg\csg_math\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_mesh\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_sdf\Cargo.toml --no-deps --format-version 1
@@ -101,6 +101,13 @@ cargo metadata --no-deps --format-version 1
 cargo check -p cargo-makepad
 cargo build -p cargo-makepad --release
 ```
+
+Use `tools\rusty_xr_format.py` instead of `cargo fmt --all`. Cargo's `--all`
+formatter route includes local path dependencies, so it reaches vendored crates
+that are not part of this fork's patch surface. The helper derives the
+workspace-member roots from Cargo metadata and formats only changed first-party
+Rust files by default. Its `--workspace --check` mode is available for audits,
+but existing Makepad-wide rustfmt drift can still make that audit fail.
 
 When Android Java bridge code changes, also compile the touched Java classes
 against the Android platform jar used by the target SDK. When generated Android

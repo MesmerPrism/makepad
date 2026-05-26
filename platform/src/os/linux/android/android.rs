@@ -97,6 +97,38 @@ const ANDROID_XR_BUFFER_SCALE_MAX: f32 = 1.5;
 const ANDROID_XR_MULTISAMPLES: usize = 4;
 const ANDROID_XR_FIXED_FOVEATION_LEVEL: u8 = 3;
 const ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT: bool = true;
+const RUSTY_XR_DISPLAY_REFRESH_RATE_PROPERTY: &str = "debug.rustyxr.xr.display.refresh.rate.hz";
+
+fn android_system_property_value(name: &str) -> Option<String> {
+    use std::ffi::{CStr, CString};
+    use std::os::raw::{c_char, c_int};
+
+    extern "C" {
+        fn __system_property_get(name: *const c_char, value: *mut c_char) -> c_int;
+    }
+
+    let name = CString::new(name).ok()?;
+    let mut value = [0 as c_char; 128];
+    let len = unsafe { __system_property_get(name.as_ptr(), value.as_mut_ptr()) };
+    if len <= 0 {
+        return None;
+    }
+    let value = unsafe { CStr::from_ptr(value.as_ptr()) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn android_system_property_f32(name: &str) -> Option<f32> {
+    android_system_property_value(name)
+        .and_then(|value| value.parse::<f32>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+}
 
 fn android_debug_log(prio: i32, msg: &str) {
     use std::ffi::c_int;
@@ -183,8 +215,13 @@ impl Cx {
         CxOpenXrOptions {
             buffer_scale: self.os.xr_buffer_scale_requested,
             multisamples: ANDROID_XR_MULTISAMPLES,
+            environment_depth: false,
             remove_hands_from_depth: false,
             fixed_foveation_level: ANDROID_XR_FIXED_FOVEATION_LEVEL,
+            display_refresh_rate_hz: self
+                .os
+                .xr_display_refresh_rate_requested_hz
+                .or_else(|| android_system_property_f32(RUSTY_XR_DISPLAY_REFRESH_RATE_PROPERTY)),
             native_passthrough: self.os.xr_native_passthrough_requested,
         }
     }
@@ -1565,6 +1602,19 @@ impl Cx {
     /// Processes events that need to be checked regularly, regardless of incoming messages.
     /// This includes timers, signals, video updates, live edits, and platform operations.
     pub(crate) fn handle_other_events(&mut self) {
+        self.handle_other_events_inner(true);
+    }
+
+    pub(crate) fn handle_other_events_before_openxr_frame(&mut self) {
+        self.handle_other_events_inner(false);
+    }
+
+    pub(crate) fn handle_openxr_post_frame_media_events(&mut self) {
+        self.poll_camera_players();
+        self.poll_software_video_players();
+    }
+
+    fn handle_other_events_inner(&mut self, poll_media_players: bool) {
         // Timers
         let events = self.os.timers.get_dispatch();
         for event in events {
@@ -1606,10 +1656,14 @@ impl Cx {
         }
 
         // Camera player updates
-        self.poll_camera_players();
+        if poll_media_players {
+            self.poll_camera_players();
+        }
 
         // Software AV1 fallback updates (rav1d path)
-        self.poll_software_video_players();
+        if poll_media_players {
+            self.poll_software_video_players();
+        }
 
         // Live edits
         self.run_live_edit_if_needed("android");
@@ -2926,6 +2980,18 @@ impl Cx {
                         self.os.xr_buffer_scale_active = scale;
                     }
                 }
+                CxOsOp::XrSetDisplayRefreshRate(rate_hz) => {
+                    self.os.xr_display_refresh_rate_requested_hz =
+                        rate_hz.filter(|rate| rate.is_finite() && *rate > 0.0);
+                    if let (Some(libxr), Some(session)) = (
+                        self.os.openxr.libxr.as_ref(),
+                        self.os.openxr.session.as_mut(),
+                    ) {
+                        session.display_refresh_rate_request_hz =
+                            self.os.xr_display_refresh_rate_requested_hz;
+                        session.request_configured_display_refresh_rate(libxr);
+                    }
+                }
                 CxOsOp::XrSetNativePassthrough(enabled) => {
                     self.os.xr_native_passthrough_requested = enabled;
                     crate::log!(
@@ -3247,6 +3313,7 @@ impl Default for CxOs {
             in_xr_mode: false,
             xr_buffer_scale_active: ANDROID_XR_BUFFER_SCALE_DEFAULT,
             xr_buffer_scale_requested: ANDROID_XR_BUFFER_SCALE_DEFAULT,
+            xr_display_refresh_rate_requested_hz: None,
             xr_native_passthrough_requested: ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT,
             xr_display_refresh_rate_active_hz: None,
             xr_effective_frame_time_ms: None,
@@ -3380,6 +3447,7 @@ pub struct CxOs {
     pub(crate) in_xr_mode: bool,
     pub(crate) xr_buffer_scale_active: f32,
     pub(crate) xr_buffer_scale_requested: f32,
+    pub(crate) xr_display_refresh_rate_requested_hz: Option<f32>,
     pub(crate) xr_native_passthrough_requested: bool,
     pub(crate) xr_display_refresh_rate_active_hz: Option<f32>,
     pub(crate) xr_effective_frame_time_ms: Option<f64>,

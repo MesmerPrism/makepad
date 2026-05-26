@@ -171,6 +171,15 @@ impl CxOpenXrSession {
         let mut session = XrSession(0);
         unsafe { (xr.xrCreateSession)(instance, &session_create, &mut session) }
             .to_result("xrCreateSession")?;
+        let mut active_display_refresh_rate_hz = None;
+        if let Some(target_hz) = options.display_refresh_rate_hz {
+            CxOpenXrSession::request_display_refresh_rate_for_handle(
+                xr,
+                session,
+                target_hz,
+                &mut active_display_refresh_rate_hz,
+            );
+        }
 
         let (head_space, local_space, recommended_width, recommended_height, width, height) =
             Self::describe_primary_stereo_session(xr, instance, system_id, session, options)?;
@@ -338,7 +347,7 @@ impl CxOpenXrSession {
         };
         let inputs = CxOpenXrInputs::new_inputs(xr, session, instance)?;
 
-        Ok(CxOpenXrSession {
+        let mut openxr_session = CxOpenXrSession {
             order_counter: 0,
             color_images,
             depth_images,
@@ -364,13 +373,17 @@ impl CxOpenXrSession {
             anchor: CxOpenXrAnchor::default(),
             debug_inactive_begin_frame_logs: 0,
             debug_end_frame_logs: 0,
+            skipped_should_render_frame_count: 0,
             depth_swap_chain_index: 0,
             frame_state: XrFrameState::default(),
-            active_display_refresh_rate_hz: None,
+            active_display_refresh_rate_hz,
+            display_refresh_rate_request_hz: options.display_refresh_rate_hz,
             last_predicted_display_time: None,
             last_end_frame_result: None,
             inputs,
-        })
+        };
+        openxr_session.request_configured_display_refresh_rate(xr);
+        Ok(openxr_session)
     }
 
     pub(super) fn destroy_session_gles(&self, gl: &LibGl) {
