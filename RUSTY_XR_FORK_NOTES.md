@@ -45,6 +45,10 @@ This branch currently carries:
   target SDK 35, the Makepad-managed SDK can install bundletool, and app crates
   may provide `resources/android/AndroidManifest.xml.template` for explicit
   manifest customization.
+- Additive upstream `#1091` Android App Bundle route: `cargo makepad android
+  build-aab` stages resources/assets/native libraries into a bundle module,
+  runs bundletool, and signs with jarsigner when a keystore is supplied. APK
+  builds keep the existing side-load route and dynamic-std behavior.
 - Android packaging fixes for the tested Windows-to-Quest build lane.
 - Dependent Rust shared-library bundling for Android APK output.
 - Windows path normalization for generated Android wrapper inputs.

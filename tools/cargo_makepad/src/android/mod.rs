@@ -453,6 +453,8 @@ fn android_help() -> &'static str {
     "Android commands:\n\
   cargo makepad android [options] install-toolchain\n\
   cargo makepad android [options] build <cargo args>\n\
+  cargo makepad android [options] build-aab <cargo args>\n\
+  cargo makepad android keystore-create <path> [keytool options]\n\
   cargo makepad android [options] run <cargo args>\n\
   cargo makepad android [options] adb <adb args>\n\
   cargo makepad android [options] adb-tcp [port]\n\
@@ -471,6 +473,11 @@ Common options:\n\
   --variant=default|quest\n\
   --devices=<serial1,serial2,...>|all    (for run and adb-tcp)\n\
   --keep-sdk-sources\n\
+  --keystore=<path>                       build-aab signing keystore\n\
+  --keystore-pass=<pass>                  build-aab keystore password, or MAKEPAD_KEYSTORE_PASS\n\
+  --keystore-key-alias=<alias>            build-aab key alias\n\
+  --keystore-key-pass=<pass>              build-aab key password, defaults to keystore password\n\
+  --no-sign                               build-aab only: emit unsigned bundle\n\
 \n\
 Custom AndroidManifest:\n\
   Drop a template at `<crate>/resources/android/AndroidManifest.xml.template` to\n\
@@ -480,11 +487,134 @@ Custom AndroidManifest:\n\
 \n\
 Examples:\n\
   cargo makepad android --abi=aarch64 build -p my-app --release\n\
+  cargo makepad android --abi=aarch64 build-aab -p my-app --release\n\
+  cargo makepad android keystore-create my-app.keystore\n\
   cargo makepad android --abi=aarch64 run -p my-app --release\n\
   cargo makepad android --devices=all --variant=quest run -p my-app --release\n\
   cargo makepad android adb devices -l\n\
   cargo makepad android adb-tcp\n\
   cargo makepad android --devices=<serial> adb-tcp 5555"
+}
+
+fn resolve_aab_signing_opts(
+    keystore: Option<String>,
+    keystore_pass: Option<String>,
+    key_alias: Option<String>,
+    key_pass: Option<String>,
+) -> Result<compile::AabSigningOpts, String> {
+    let cargo_manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let any_keystore_opt =
+        keystore.is_some() || keystore_pass.is_some() || key_alias.is_some() || key_pass.is_some();
+
+    if !any_keystore_opt {
+        return Ok(compile::AabSigningOpts {
+            keystore: cargo_manifest_dir.join("debug.keystore"),
+            storepass: "android".to_string(),
+            key_alias: "androiddebugkey".to_string(),
+            keypass: "android".to_string(),
+        });
+    }
+
+    let keystore_path = std::path::PathBuf::from(keystore.ok_or_else(|| {
+        "--keystore=<path> is required when any other keystore option is set".to_string()
+    })?);
+    let sidecar = compile::read_keystore_sidecar(&keystore_path);
+    let storepass = keystore_pass
+        .or_else(|| std::env::var("MAKEPAD_KEYSTORE_PASS").ok())
+        .ok_or_else(|| {
+            "no keystore password provided. Pass --keystore-pass=<pw> or set MAKEPAD_KEYSTORE_PASS"
+                .to_string()
+        })?;
+    let alias = key_alias
+        .or_else(|| sidecar.as_ref().and_then(|s| s.alias.clone()))
+        .ok_or_else(|| {
+            format!(
+                "no key alias found. Pass --keystore-key-alias=<alias>, or run `cargo makepad android keystore-create {}`.",
+                keystore_path.display()
+            )
+        })?;
+    let keypass = key_pass.unwrap_or_else(|| storepass.clone());
+
+    Ok(compile::AabSigningOpts {
+        keystore: keystore_path,
+        storepass,
+        key_alias: alias,
+        keypass,
+    })
+}
+
+fn parse_keystore_create_args(args: &[String]) -> Result<compile::KeystoreCreateOpts, String> {
+    let mut keystore_path: Option<String> = None;
+    let mut alias: String = "upload".to_string();
+    let mut validity_days: u32 = 10_000;
+    let mut key_size: u32 = 2048;
+    let mut key_alg: String = "RSA".to_string();
+    let mut store_type: String = "PKCS12".to_string();
+    let mut dname: Option<String> = None;
+
+    for arg in args {
+        if let Some(v) = arg.strip_prefix("--alias=") {
+            alias = v.to_string();
+        } else if let Some(v) = arg.strip_prefix("--validity=") {
+            validity_days = v
+                .parse::<u32>()
+                .map_err(|_| format!("--validity must be a positive integer, got {v:?}"))?;
+        } else if let Some(v) = arg.strip_prefix("--keysize=") {
+            key_size = v
+                .parse::<u32>()
+                .map_err(|_| format!("--keysize must be a positive integer, got {v:?}"))?;
+        } else if let Some(v) = arg.strip_prefix("--keyalg=") {
+            key_alg = v.to_string();
+        } else if let Some(v) = arg.strip_prefix("--storetype=") {
+            store_type = v.to_string();
+        } else if let Some(v) = arg.strip_prefix("--dname=") {
+            dname = Some(v.to_string());
+        } else if arg == "--help" || arg == "-h" {
+            return Err(keystore_create_help().to_string());
+        } else if arg.starts_with("--") {
+            return Err(format!(
+                "unknown option {arg:?}\n\n{}",
+                keystore_create_help()
+            ));
+        } else if keystore_path.is_none() {
+            keystore_path = Some(arg.clone());
+        } else {
+            return Err(format!(
+                "unexpected positional argument {arg:?}\n\n{}",
+                keystore_create_help()
+            ));
+        }
+    }
+
+    let keystore_path = keystore_path.ok_or_else(|| {
+        format!(
+            "missing required <keystore-path> argument\n\n{}",
+            keystore_create_help()
+        )
+    })?;
+
+    Ok(compile::KeystoreCreateOpts {
+        keystore_path: std::path::PathBuf::from(keystore_path),
+        alias,
+        validity_days,
+        key_size,
+        key_alg,
+        store_type,
+        dname,
+    })
+}
+
+fn keystore_create_help() -> &'static str {
+    "Usage:\n\
+  cargo makepad android keystore-create <keystore-path> [options]\n\
+\n\
+Options:\n\
+  --alias=<alias>       key alias inside the keystore (default: upload)\n\
+  --validity=<days>     certificate validity in days (default: 10000)\n\
+  --keyalg=<alg>        signing algorithm (default: RSA)\n\
+  --keysize=<bits>      key size in bits (default: 2048)\n\
+  --storetype=<type>    keystore type (default: PKCS12)\n\
+  --dname=<dn>          non-interactive certificate subject"
 }
 
 fn resolve_devices_arg(
@@ -527,6 +657,11 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
     let mut keep_sdk_sources = false;
     let mut no_icon = false;
     let mut config = AndroidConfig::default();
+    let mut keystore: Option<String> = None;
+    let mut keystore_pass: Option<String> = None;
+    let mut keystore_key_alias: Option<String> = None;
+    let mut keystore_key_pass: Option<String> = None;
+    let mut no_sign = false;
 
     let urls = sdk::ANDROID_SDK_URLS_33;
 
@@ -561,6 +696,16 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
             no_icon = true;
         } else if v.trim() == "--keep-sdk-sources" {
             keep_sdk_sources = true;
+        } else if let Some(opt) = v.strip_prefix("--keystore=") {
+            keystore = Some(opt.to_string());
+        } else if let Some(opt) = v.strip_prefix("--keystore-pass=") {
+            keystore_pass = Some(opt.to_string());
+        } else if let Some(opt) = v.strip_prefix("--keystore-key-alias=") {
+            keystore_key_alias = Some(opt.to_string());
+        } else if let Some(opt) = v.strip_prefix("--keystore-key-pass=") {
+            keystore_key_pass = Some(opt.to_string());
+        } else if v.trim() == "--no-sign" {
+            no_sign = true;
         } else {
             args = &args[i..];
             break;
@@ -569,7 +714,7 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
 
     if args.is_empty() {
         return Err(format!(
-            "missing android subcommand. use one of: install-toolchain, build, run, adb, adb-tcp\n\n{}",
+            "missing android subcommand. use one of: install-toolchain, build, build-aab, keystore-create, run, adb, adb-tcp\n\n{}",
             android_help()
         ));
     }
@@ -616,6 +761,10 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
             println!("\nAndroid toolchain has been installed\n");
             Ok(())
         }
+        "keystore-create" => {
+            let opts = parse_keystore_create_args(&args[1..])?;
+            compile::keystore_create(&sdk_dir, host_os, &opts)
+        }
         /*"base-apk"=>{
             compile::base_apk(&sdk_dir, host_os, &args[1..])
         }*/
@@ -633,6 +782,34 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
                 &variant,
                 &config,
                 &urls,
+            )?;
+            Ok(())
+        }
+        "build-aab" => {
+            let signing = if no_sign {
+                None
+            } else {
+                Some(resolve_aab_signing_opts(
+                    keystore,
+                    keystore_pass,
+                    keystore_key_alias,
+                    keystore_key_pass,
+                )?)
+            };
+            compile::build_aab(
+                &sdk_dir,
+                host_os,
+                package_name,
+                app_label,
+                version_code,
+                version_name,
+                min_sdk_version,
+                &args[1..],
+                &targets,
+                &variant,
+                &config,
+                &urls,
+                signing,
             )?;
             Ok(())
         }

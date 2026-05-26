@@ -1,11 +1,14 @@
-use super::sdk::{AndroidSDKUrls, BUILD_TOOLS_DIR, PLATFORMS_DIR};
+use super::sdk::{AndroidSDKUrls, BUILD_TOOLS_DIR, BUNDLETOOL_JAR_REL, PLATFORMS_DIR};
 use crate::android::{AndroidConfig, AndroidTarget, AndroidVariant, HostOs, ManifestArgs};
 use crate::makepad_shell::*;
 use crate::utils::*;
+use makepad_zip_file::*;
 use std::{
     collections::{hash_map::DefaultHasher, HashSet},
     fs,
+    fs::File,
     hash::{Hash, Hasher},
+    io::Write,
     path::{Path, PathBuf},
     thread,
     time::Duration,
@@ -16,6 +19,22 @@ fn aapt_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
         .join(BUILD_TOOLS_DIR)
         .join(resolve_build_tools_version(sdk_dir, urls))
         .join(host_executable_name("aapt"))
+}
+
+fn aapt2_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
+    sdk_dir
+        .join(BUILD_TOOLS_DIR)
+        .join(resolve_build_tools_version(sdk_dir, urls))
+        .join(host_executable_name("aapt2"))
+}
+
+fn bundletool_jar_path(sdk_dir: &Path) -> PathBuf {
+    sdk_dir.join(BUNDLETOOL_JAR_REL)
+}
+
+fn keytool_path(sdk_dir: &Path, host_os: HostOs) -> PathBuf {
+    let java_home = resolve_java_home(sdk_dir, host_os);
+    java_tool_path(&java_home, "keytool")
 }
 
 fn d8_jar_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
@@ -44,6 +63,152 @@ fn android_jar_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
         .join(PLATFORMS_DIR)
         .join(resolve_android_platform(sdk_dir, urls))
         .join("android.jar")
+}
+
+pub fn keystore_sidecar_path(keystore: &Path) -> PathBuf {
+    let mut name = keystore
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
+    name.push(".makepad");
+    keystore.with_file_name(name)
+}
+
+#[derive(Debug, Default)]
+pub struct KeystoreSidecar {
+    pub alias: Option<String>,
+    pub store_type: Option<String>,
+}
+
+pub fn read_keystore_sidecar(keystore: &Path) -> Option<KeystoreSidecar> {
+    let path = keystore_sidecar_path(keystore);
+    let text = fs::read_to_string(&path).ok()?;
+    let mut sidecar = KeystoreSidecar::default();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"').to_string();
+        match key.trim() {
+            "alias" => sidecar.alias = Some(value),
+            "store_type" => sidecar.store_type = Some(value),
+            _ => {}
+        }
+    }
+    Some(sidecar)
+}
+
+fn write_keystore_sidecar(keystore: &Path, sidecar: &KeystoreSidecar) -> Result<(), String> {
+    let path = keystore_sidecar_path(keystore);
+    let mut body = String::from(
+        "# Keystore metadata written by `cargo makepad android keystore-create`.\n\
+         # Safe to commit: contains no passwords. `cargo makepad android build-aab` reads this\n\
+         # next to the keystore so you only need to pass --keystore + password on each build.\n",
+    );
+    if let Some(alias) = &sidecar.alias {
+        body.push_str(&format!("alias = {alias}\n"));
+    }
+    if let Some(store_type) = &sidecar.store_type {
+        body.push_str(&format!("store_type = {store_type}\n"));
+    }
+    fs::write(&path, body).map_err(|e| format!("Cant write {:?}: {e}", path))
+}
+
+pub struct KeystoreCreateOpts {
+    pub keystore_path: PathBuf,
+    pub alias: String,
+    pub validity_days: u32,
+    pub key_size: u32,
+    pub key_alg: String,
+    pub store_type: String,
+    pub dname: Option<String>,
+}
+
+pub fn keystore_create(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    opts: &KeystoreCreateOpts,
+) -> Result<(), String> {
+    if opts.keystore_path.exists() {
+        return Err(format!(
+            "Refusing to overwrite existing file {:?}. Pick a new path or delete the existing keystore first.",
+            opts.keystore_path
+        ));
+    }
+    let keytool = keytool_path(sdk_dir, host_os);
+    if !keytool.is_file() {
+        return Err(format!(
+            "keytool not found at {:?}. Run `cargo makepad android install-toolchain` or set JAVA_HOME to a full JDK.",
+            keytool
+        ));
+    }
+    if let Some(parent) = opts.keystore_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            mkdir(parent)?;
+        }
+    }
+
+    println!("================================================================================");
+    println!("CREATING ANDROID UPLOAD KEYSTORE");
+    println!("================================================================================");
+    println!();
+    println!("This keystore is your upload key. Back up the file and password.");
+    println!("Do not commit the keystore to a public repository.");
+    println!();
+
+    let java_home = resolve_java_home(sdk_dir, host_os);
+    let cwd = std::env::current_dir().unwrap();
+    let validity = opts.validity_days.to_string();
+    let keysize = opts.key_size.to_string();
+    let keystore_str = opts.keystore_path.to_string_lossy().to_string();
+
+    let mut args: Vec<String> = vec![
+        "-genkeypair".to_string(),
+        "-v".to_string(),
+        "-keystore".to_string(),
+        keystore_str,
+        "-alias".to_string(),
+        opts.alias.clone(),
+        "-keyalg".to_string(),
+        opts.key_alg.clone(),
+        "-keysize".to_string(),
+        keysize,
+        "-validity".to_string(),
+        validity,
+        "-storetype".to_string(),
+        opts.store_type.clone(),
+    ];
+    if let Some(dname) = &opts.dname {
+        args.push("-dname".to_string());
+        args.push(dname.clone());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    shell_env(
+        &[("JAVA_HOME", java_home.to_str().unwrap())],
+        &cwd,
+        keytool.to_str().unwrap(),
+        &arg_refs,
+    )?;
+
+    write_keystore_sidecar(
+        &opts.keystore_path,
+        &KeystoreSidecar {
+            alias: Some(opts.alias.clone()),
+            store_type: Some(opts.store_type.clone()),
+        },
+    )?;
+
+    println!("Keystore created: {}", opts.keystore_path.display());
+    println!(
+        "Metadata sidecar: {}",
+        keystore_sidecar_path(&opts.keystore_path).display()
+    );
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -1957,6 +2122,663 @@ fn sign_apk(
     )?;
 
     Ok(())
+}
+
+struct AabPaths {
+    aab_dir: PathBuf,
+    staged_assets_dir: PathBuf,
+    staged_libs_dir: PathBuf,
+    compiled_res_zip: PathBuf,
+    proto_apk: PathBuf,
+    base_module_dir: PathBuf,
+    base_module_zip: PathBuf,
+    dst_aab: PathBuf,
+}
+
+fn prepare_aab_paths(build_crate: &str, app_label: &str) -> Result<AabPaths, String> {
+    let cwd = std::env::current_dir().unwrap();
+    let target_dir = cargo_target_dir(&cwd);
+    let underscore_build_crate = build_crate.replace('-', "_");
+    let aab_dir = target_dir
+        .join("makepad-android-aab")
+        .join(&underscore_build_crate);
+    let _ = rmdir(&aab_dir);
+    mkdir(&aab_dir)?;
+
+    let staged_assets_dir = aab_dir.join("assets");
+    let staged_libs_dir = aab_dir.join("lib");
+    let compiled_res_zip = aab_dir.join("compiled_res.zip");
+    let proto_apk = aab_dir.join("base_proto.apk");
+    let base_module_dir = aab_dir.join("base");
+    let base_module_zip = aab_dir.join("base.zip");
+    let dst_aab = aab_dir.join(format!("{}.aab", to_snakecase(app_label)));
+
+    mkdir(&staged_assets_dir)?;
+    mkdir(&staged_libs_dir)?;
+
+    Ok(AabPaths {
+        aab_dir,
+        staged_assets_dir,
+        staged_libs_dir,
+        compiled_res_zip,
+        proto_apk,
+        base_module_dir,
+        base_module_zip,
+        dst_aab,
+    })
+}
+
+fn stage_aab_assets(
+    build_crate: &str,
+    aab_dir: &Path,
+    build_dir: &Path,
+    android_targets: &[AndroidTarget],
+    variant: &AndroidVariant,
+    config: &AndroidConfig,
+) -> Result<(), String> {
+    let mut ignored_assets_to_add = Vec::new();
+    let build_crate_dir = get_crate_dir(build_crate)?;
+    add_assets_dir_to_apk(
+        aab_dir,
+        &mut ignored_assets_to_add,
+        build_crate,
+        &build_crate_dir.join("resources"),
+        "resources",
+        config,
+    )?;
+    add_font_assets_dir_to_apk(
+        aab_dir,
+        &mut ignored_assets_to_add,
+        build_crate,
+        &build_crate_dir.join("fonts"),
+        &build_crate_dir.join("resources"),
+        config,
+    )?;
+
+    let deps = get_crate_dep_dirs(build_crate, build_dir, &android_targets[0].toolchain());
+    for (name, dep_dir) in deps.iter() {
+        add_assets_dir_to_apk(
+            aab_dir,
+            &mut ignored_assets_to_add,
+            name,
+            &dep_dir.join("resources"),
+            "resources",
+            config,
+        )?;
+        add_font_assets_dir_to_apk(
+            aab_dir,
+            &mut ignored_assets_to_add,
+            name,
+            &dep_dir.join("fonts"),
+            &dep_dir.join("resources"),
+            config,
+        )?;
+    }
+
+    if let AndroidVariant::Quest = variant {
+        let dst_dir = aab_dir.join("assets/makepad/makepad_widgets/resources");
+        for remove in [
+            "fa-solid-900.ttf",
+            "LiberationMono-Regular.ttf",
+            "NotoSans-Regular.ttf",
+        ] {
+            let remove_path = dst_dir.join(remove);
+            if remove_path.is_file() {
+                rm(&remove_path)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn stage_ndk_shared_deps_for_so(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    urls: &AndroidSDKUrls,
+    android_target: &AndroidTarget,
+    so_path: &Path,
+    abi: &str,
+    libs_root: &Path,
+) -> Result<(), String> {
+    let (_ndk_version, ndk_prebuilt_root) =
+        resolve_ndk_prebuilt_root(sdk_dir, host_os, urls.ndk_version_full)?;
+    let compiler_api =
+        resolve_compiler_api_level(host_os, urls, &ndk_prebuilt_root, android_target)?;
+    let readelf_path = ndk_bin_path(&ndk_prebuilt_root, host_os, "llvm-readelf");
+    if !readelf_path.exists() {
+        return Ok(());
+    }
+    let cwd = std::env::current_dir().unwrap();
+    let output = shell_env_cap(
+        &[],
+        &cwd,
+        readelf_path.to_str().unwrap(),
+        &["-d", so_path.to_str().unwrap()],
+    )?;
+    let sysroot_lib_dir = ndk_prebuilt_root
+        .join("sysroot/usr/lib")
+        .join(android_target.clang());
+    for line in output.lines() {
+        if !line.contains("(NEEDED)") {
+            continue;
+        }
+        let Some(lib_name) = line.find('[').and_then(|start| {
+            line[start + 1..]
+                .find(']')
+                .map(|end| &line[start + 1..start + 1 + end])
+        }) else {
+            continue;
+        };
+        let candidate = sysroot_lib_dir.join(lib_name);
+        if !candidate.exists() || !candidate.is_file() {
+            continue;
+        }
+        let api_level_stub = sysroot_lib_dir
+            .join(compiler_api.to_string())
+            .join(lib_name);
+        if api_level_stub.exists() {
+            continue;
+        }
+        let dst_lib = libs_root.join(abi).join(lib_name);
+        if dst_lib.exists() {
+            continue;
+        }
+        cp(&candidate, &dst_lib, false)?;
+        println!("  Bundled NDK shared dep: {lib_name} (for {abi})");
+    }
+    Ok(())
+}
+
+fn stage_local_shared_deps(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    urls: &AndroidSDKUrls,
+    android_target: &AndroidTarget,
+    so_path: &Path,
+    abi: &str,
+    libs_root: &Path,
+    build_dir: &Path,
+) -> Result<(), String> {
+    let mut pending = vec![so_path.to_path_buf()];
+    let mut visited = HashSet::<String>::new();
+    let search_dirs = [build_dir.to_path_buf(), build_dir.join("deps")];
+    while let Some(current_so) = pending.pop() {
+        for lib_name in read_needed_shared_libs(sdk_dir, host_os, urls, &current_so)? {
+            if !visited.insert(lib_name.clone()) {
+                continue;
+            }
+            let dst_lib = libs_root.join(abi).join(&lib_name);
+            if dst_lib.exists() {
+                continue;
+            }
+            let candidate = search_dirs
+                .iter()
+                .map(|dir| dir.join(&lib_name))
+                .find(|path| path.is_file())
+                .or_else(|| find_rustup_shared_lib(android_target, &lib_name));
+            let Some(candidate) = candidate else {
+                continue;
+            };
+            cp(&candidate, &dst_lib, false)?;
+            stage_ndk_shared_deps_for_so(
+                sdk_dir,
+                host_os,
+                urls,
+                android_target,
+                &dst_lib,
+                abi,
+                libs_root,
+            )?;
+            println!("  Bundled local shared dep: {lib_name} (for {abi})");
+            pending.push(candidate);
+        }
+    }
+    Ok(())
+}
+
+fn stage_aab_native_libs(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    underscore_target: &str,
+    libs_root: &Path,
+    android_targets: &[AndroidTarget],
+    args: &[String],
+    variant: &AndroidVariant,
+    urls: &AndroidSDKUrls,
+) -> Result<PathBuf, String> {
+    let cwd = std::env::current_dir().unwrap();
+    let target_dir = cargo_target_dir(&cwd);
+    let profile = get_profile_from_args(args);
+    let mut build_dir = None;
+    for android_target in android_targets {
+        let abi = android_target.abi_identifier();
+        mkdir(&libs_root.join(abi))?;
+
+        let android_target_dir = android_target.toolchain();
+        if profile == "debug" {
+            println!("WARNING - compiling a DEBUG build of the application, this creates a very slow and big app. Try adding --release for a fast, or --profile=small for a small build.");
+        }
+        let src_lib = target_dir.join(format!(
+            "{android_target_dir}/{profile}/lib{underscore_target}.so"
+        ));
+        let current_build_dir = target_dir.join(format!("{android_target_dir}/{profile}"));
+        build_dir = Some(current_build_dir.clone());
+        let dst_lib = libs_root.join(abi).join("libmakepad.so");
+        cp(&src_lib, &dst_lib, false)?;
+
+        stage_ndk_shared_deps_for_so(
+            sdk_dir,
+            host_os,
+            urls,
+            android_target,
+            &dst_lib,
+            abi,
+            libs_root,
+        )?;
+        stage_local_shared_deps(
+            sdk_dir,
+            host_os,
+            urls,
+            android_target,
+            &src_lib,
+            abi,
+            libs_root,
+            &current_build_dir,
+        )?;
+    }
+    if let AndroidVariant::Quest = variant {
+        let cargo_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for (rel_path, src_lib) in [("arm64-v8a/libopenxr_loader.so", "quest/libopenxr_loader.so")]
+        {
+            let src_lib = cargo_manifest_dir.join(src_lib);
+            let dst_lib = libs_root.join(rel_path);
+            cp(&src_lib, &dst_lib, false)?;
+        }
+    }
+    build_dir.ok_or_else(|| "No Android targets selected for AAB native libs".to_string())
+}
+
+fn aapt2_compile_resources(
+    sdk_dir: &Path,
+    res_dir: &Path,
+    out_zip: &Path,
+    urls: &AndroidSDKUrls,
+) -> Result<(), String> {
+    let cwd = std::env::current_dir().unwrap();
+    shell_env_cap(
+        &[],
+        &cwd,
+        aapt2_path(sdk_dir, urls).to_str().unwrap(),
+        &[
+            "compile",
+            "--dir",
+            res_dir.to_str().unwrap(),
+            "-o",
+            out_zip.to_str().unwrap(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn aapt2_link_proto_apk(
+    sdk_dir: &Path,
+    manifest_xml: &Path,
+    compiled_res_zip: &Path,
+    assets_dir: &Path,
+    out_apk: &Path,
+    urls: &AndroidSDKUrls,
+) -> Result<(), String> {
+    let cwd = std::env::current_dir().unwrap();
+    let android_jar = android_jar_path(sdk_dir, urls);
+    let android_jar_str = android_jar.to_str().unwrap().to_string();
+    let manifest_str = manifest_xml.to_str().unwrap().to_string();
+    let out_str = out_apk.to_str().unwrap().to_string();
+    let res_zip_str = compiled_res_zip.to_str().unwrap().to_string();
+    let assets_str = assets_dir.to_str().unwrap().to_string();
+    let has_assets = assets_dir.is_dir() && ls(assets_dir).map(|v| !v.is_empty()).unwrap_or(false);
+
+    let mut args: Vec<&str> = vec![
+        "link",
+        "--proto-format",
+        "--auto-add-overlay",
+        "-I",
+        &android_jar_str,
+        "--manifest",
+        &manifest_str,
+        "-o",
+        &out_str,
+    ];
+    if has_assets {
+        args.push("-A");
+        args.push(&assets_str);
+    }
+    args.push(&res_zip_str);
+
+    shell_env_cap(
+        &[],
+        &cwd,
+        aapt2_path(sdk_dir, urls).to_str().unwrap(),
+        &args,
+    )?;
+    Ok(())
+}
+
+fn assemble_aab_base_module(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    proto_apk: &Path,
+    classes_dex: &Path,
+    libs_root: &Path,
+    base_dir: &Path,
+    base_zip: &Path,
+) -> Result<(), String> {
+    let _ = rmdir(base_dir);
+    mkdir(base_dir)?;
+
+    let mut zip_file =
+        File::open(proto_apk).map_err(|e| format!("Cant open proto APK {:?}: {e}", proto_apk))?;
+    let directory = zip_read_central_directory(&mut zip_file)
+        .map_err(|e| format!("Cant read proto APK {:?}: {:?}", proto_apk, e))?;
+
+    for header in &directory.file_headers {
+        let entry_name = &header.file_name;
+        if entry_name.ends_with('/') {
+            continue;
+        }
+        let data = header
+            .extract(&mut zip_file)
+            .map_err(|e| format!("Failed to extract {entry_name} from proto APK: {:?}", e))?;
+        let dst_rel = if entry_name == "AndroidManifest.xml" {
+            "manifest/AndroidManifest.xml".to_string()
+        } else {
+            entry_name.clone()
+        };
+        let dst_path = base_dir.join(&dst_rel);
+        mkdir(dst_path.parent().unwrap())?;
+        let mut f =
+            File::create(&dst_path).map_err(|e| format!("Cant write {:?}: {e}", dst_path))?;
+        f.write_all(&data)
+            .map_err(|e| format!("Cant write to {:?}: {e}", dst_path))?;
+    }
+
+    cp(classes_dex, &base_dir.join("dex/classes.dex"), false)?;
+
+    if libs_root.is_dir() && ls(libs_root).map(|v| !v.is_empty()).unwrap_or(false) {
+        cp_all(libs_root, &base_dir.join("lib"), false)?;
+    }
+
+    let java_home = resolve_java_home(sdk_dir, host_os);
+    if base_zip.is_file() {
+        rm(base_zip)?;
+    }
+    shell_env_cap(
+        &[("JAVA_HOME", java_home.to_str().unwrap())],
+        base_dir,
+        java_tool_path(&java_home, "jar").to_str().unwrap(),
+        &["cMf", base_zip.to_str().unwrap(), "."],
+    )?;
+
+    Ok(())
+}
+
+fn run_bundletool_build_bundle(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    base_zip: &Path,
+    aab_path: &Path,
+) -> Result<(), String> {
+    let java_home = resolve_java_home(sdk_dir, host_os);
+    let bundletool = bundletool_jar_path(sdk_dir);
+    if !bundletool.is_file() {
+        return Err(format!(
+            "bundletool jar not found at {:?}. Re-run `cargo makepad android install-toolchain` to download it.",
+            bundletool
+        ));
+    }
+    if aab_path.is_file() {
+        rm(aab_path)?;
+    }
+    let cwd = std::env::current_dir().unwrap();
+    let modules_arg = format!("--modules={}", base_zip.display());
+    let output_arg = format!("--output={}", aab_path.display());
+    shell_env_cap(
+        &[("JAVA_HOME", java_home.to_str().unwrap())],
+        &cwd,
+        java_tool_path(&java_home, "java").to_str().unwrap(),
+        &[
+            "-jar",
+            bundletool.to_str().unwrap(),
+            "build-bundle",
+            &modules_arg,
+            &output_arg,
+        ],
+    )?;
+    Ok(())
+}
+
+fn resolve_jarsigner(sdk_dir: &Path, host_os: HostOs) -> Option<PathBuf> {
+    let java_home = resolve_java_home(sdk_dir, host_os);
+    let from_home = java_tool_path(&java_home, "jarsigner");
+    if from_home.is_file() {
+        return Some(from_home);
+    }
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            for name in ["jarsigner", "jarsigner.exe"] {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug)]
+pub struct AabSigningOpts {
+    pub keystore: PathBuf,
+    pub storepass: String,
+    pub key_alias: String,
+    pub keypass: String,
+}
+
+fn sign_aab(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    aab_path: &Path,
+    opts: &AabSigningOpts,
+) -> Result<(), String> {
+    let jarsigner = resolve_jarsigner(sdk_dir, host_os).ok_or_else(|| {
+        "jarsigner not found. Re-run `cargo makepad android install-toolchain`, or set JAVA_HOME to a full JDK install."
+            .to_string()
+    })?;
+    let java_home = resolve_java_home(sdk_dir, host_os);
+    let cwd = std::env::current_dir().unwrap();
+    shell_env_cap(
+        &[("JAVA_HOME", java_home.to_str().unwrap())],
+        &cwd,
+        jarsigner.to_str().unwrap(),
+        &[
+            "-keystore",
+            opts.keystore.to_str().unwrap(),
+            "-storepass",
+            &opts.storepass,
+            "-keypass",
+            &opts.keypass,
+            aab_path.to_str().unwrap(),
+            &opts.key_alias,
+        ],
+    )?;
+    Ok(())
+}
+
+pub struct BuildAabResult {
+    #[allow(dead_code)]
+    pub dst_aab: PathBuf,
+}
+
+pub fn build_aab(
+    sdk_dir: &Path,
+    host_os: HostOs,
+    package_name: Option<String>,
+    app_label: Option<String>,
+    version_code: Option<VersionCodeStrategy>,
+    version_name: Option<String>,
+    min_sdk_version: Option<usize>,
+    args: &[String],
+    android_targets: &[AndroidTarget],
+    variant: &AndroidVariant,
+    config: &AndroidConfig,
+    urls: &AndroidSDKUrls,
+    signing: Option<AabSigningOpts>,
+) -> Result<BuildAabResult, String> {
+    let build_crate = get_build_crate_from_args(args)?;
+    let binary_name =
+        get_package_binary_name(build_crate).unwrap_or_else(|| build_crate.to_string());
+    let underscore_build_crate = build_crate.replace('-', "_");
+
+    let resolved = resolve_packaging_inputs(
+        build_crate,
+        &binary_name,
+        package_name,
+        app_label,
+        version_code,
+        version_name,
+        min_sdk_version,
+        urls,
+    )?;
+    let mut effective_urls = *urls;
+    if let Some(min_sdk_version) = resolved.min_sdk_version_override {
+        effective_urls.sdk_version = min_sdk_version;
+    }
+    let urls = &effective_urls;
+
+    if let Some(icon) = resolve_app_icon_env(build_crate)? {
+        for (var, value) in APP_ICON_ENV_VARS.iter().zip(icon.iter()) {
+            std::env::set_var(var, value);
+        }
+    }
+
+    let resolved_sdk = preflight_android_sdk(sdk_dir, host_os, urls, android_targets)?;
+    std::env::set_var("ANDROID_PLATFORM", &resolved_sdk.platform);
+    std::env::set_var("ANDROID_SDK_VERSION", resolved_sdk.platform_api.to_string());
+    std::env::set_var("ANDROID_API_LEVEL", resolved_sdk.compiler_api.to_string());
+    std::env::set_var(
+        "ANDROID_BUILD_TOOLS_VERSION",
+        &resolved_sdk.build_tools_version,
+    );
+    std::env::set_var("JAVA_HOME", &resolved_sdk.java_home);
+    std::env::set_var("ANDROID_NDK_PREBUILT_ROOT", &resolved_sdk.ndk_prebuilt_root);
+
+    rust_build(
+        sdk_dir,
+        host_os,
+        build_crate,
+        args,
+        android_targets,
+        variant,
+        urls,
+        false,
+    )?;
+
+    let prep_opts = PrepareBuildOpts {
+        build_crate,
+        java_url: &resolved.java_url,
+        app_label: &resolved.app_label,
+        variant,
+        urls,
+        version_code: resolved.version_code,
+        version_name: &resolved.version_name,
+        debuggable: false,
+    };
+    let build_paths = prepare_build(&prep_opts)?;
+    let aab_paths = prepare_aab_paths(build_crate, &resolved.app_label)?;
+
+    println!(
+        "Building AAB (package={}, label={}, versionCode={}, versionName={}, minSdkVersion={}, targetSdkVersion={})",
+        resolved.java_url,
+        resolved.app_label,
+        resolved.version_code,
+        resolved.version_name,
+        urls.sdk_version,
+        urls.target_sdk_version
+    );
+
+    build_r_class(sdk_dir, host_os, &build_paths, urls)?;
+    compile_java(sdk_dir, host_os, &build_paths, urls)?;
+    build_dex(sdk_dir, host_os, &build_paths, urls)?;
+    let classes_dex = build_paths.out_dir.join("classes.dex");
+    if !classes_dex.is_file() {
+        return Err(format!(
+            "d8 did not produce classes.dex at {:?}",
+            classes_dex
+        ));
+    }
+
+    let build_dir = stage_aab_native_libs(
+        sdk_dir,
+        host_os,
+        &underscore_build_crate,
+        &aab_paths.staged_libs_dir,
+        android_targets,
+        args,
+        variant,
+        urls,
+    )?;
+
+    stage_aab_assets(
+        build_crate,
+        &aab_paths.aab_dir,
+        &build_dir,
+        android_targets,
+        variant,
+        config,
+    )?;
+
+    aapt2_compile_resources(
+        sdk_dir,
+        &build_paths.res_dir,
+        &aab_paths.compiled_res_zip,
+        urls,
+    )?;
+    aapt2_link_proto_apk(
+        sdk_dir,
+        &build_paths.manifest_file,
+        &aab_paths.compiled_res_zip,
+        &aab_paths.staged_assets_dir,
+        &aab_paths.proto_apk,
+        urls,
+    )?;
+
+    assemble_aab_base_module(
+        sdk_dir,
+        host_os,
+        &aab_paths.proto_apk,
+        &classes_dex,
+        &aab_paths.staged_libs_dir,
+        &aab_paths.base_module_dir,
+        &aab_paths.base_module_zip,
+    )?;
+
+    run_bundletool_build_bundle(
+        sdk_dir,
+        host_os,
+        &aab_paths.base_module_zip,
+        &aab_paths.dst_aab,
+    )?;
+
+    if let Some(opts) = &signing {
+        sign_aab(sdk_dir, host_os, &aab_paths.dst_aab, opts)?;
+    } else {
+        println!("Skipping signing (--no-sign). The AAB is unsigned and will not be accepted by the Play Store as-is.");
+    }
+
+    println!("AAB Build completed: {}", aab_paths.dst_aab.display());
+    Ok(BuildAabResult {
+        dst_aab: aab_paths.dst_aab,
+    })
 }
 
 pub fn build(
