@@ -24,10 +24,13 @@ use crate::{
     texture::{TextureCategory, TextureFormat, TextureId, TexturePixel, TextureUpdated},
 };
 use ash::vk::{self, Handle};
-use std::collections::{HashMap, HashSet};
-use std::ffi::CStr;
-use std::os::raw::{c_char, c_void};
-use std::time::Instant;
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    ffi::CStr,
+    os::raw::{c_char, c_void},
+    time::Instant,
+};
 
 #[link(name = "nativewindow")]
 extern "C" {
@@ -244,8 +247,8 @@ struct ImportedYuvPlaneLayout {
     plane2_view_format: Option<vk::Format>,
 }
 
-struct VulkanTextureUpload {
-    data: Vec<u8>,
+struct VulkanTextureUpload<'a> {
+    data: Cow<'a, [u8]>,
     offset_x: u32,
     offset_y: u32,
     width: u32,
@@ -3719,16 +3722,26 @@ impl CxVulkan {
         }
     }
 
-    fn pack_texture_region_bytes(
-        src: &[u8],
+    fn texture_region_bytes<'a>(
+        src: &'a [u8],
         src_row_pixels: usize,
         bytes_per_pixel: usize,
         x: usize,
         y: usize,
         width: usize,
         height: usize,
-    ) -> Vec<u8> {
+    ) -> Cow<'a, [u8]> {
+        let src_row_bytes = src_row_pixels.saturating_mul(bytes_per_pixel);
         let row_bytes = width.saturating_mul(bytes_per_pixel);
+        let byte_offset = y
+            .saturating_mul(src_row_pixels)
+            .saturating_add(x)
+            .saturating_mul(bytes_per_pixel);
+        let byte_len = row_bytes.saturating_mul(height);
+        if x == 0 && row_bytes == src_row_bytes && byte_offset.saturating_add(byte_len) <= src.len()
+        {
+            return Cow::Borrowed(&src[byte_offset..byte_offset + byte_len]);
+        }
         let mut out = vec![0u8; row_bytes.saturating_mul(height)];
         for row in 0..height {
             let src_offset = (y + row)
@@ -3741,14 +3754,14 @@ impl CxVulkan {
                 out[dst_offset..dst_offset + row_bytes].copy_from_slice(&src[src_offset..src_end]);
             }
         }
-        out
+        Cow::Owned(out)
     }
 
-    fn vec_texture_upload(
-        format: &TextureFormat,
+    fn vec_texture_upload<'a>(
+        format: &'a TextureFormat,
         updated: TextureUpdated,
         force_full: bool,
-    ) -> Option<VulkanTextureUpload> {
+    ) -> Option<VulkanTextureUpload<'a>> {
         match format {
             TextureFormat::VecBGRAu8_32 {
                 width,
@@ -3767,9 +3780,9 @@ impl CxVulkan {
                     let src = unsafe {
                         std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
                     };
-                    Self::pack_texture_region_bytes(src, *width, 4, x, y, w, h)
+                    Self::texture_region_bytes(src, *width, 4, x, y, w, h)
                 } else {
-                    vec![0u8; w.saturating_mul(h).saturating_mul(4)]
+                    Cow::Owned(vec![0u8; w.saturating_mul(h).saturating_mul(4)])
                 };
                 Some(VulkanTextureUpload {
                     data: out,
@@ -3797,12 +3810,15 @@ impl CxVulkan {
                     };
                     let expected = w.saturating_mul(h).saturating_mul(4).saturating_mul(6);
                     if src.len() >= expected {
-                        src[..expected].to_vec()
+                        Cow::Borrowed(&src[..expected])
                     } else {
-                        vec![0u8; expected]
+                        Cow::Owned(vec![0u8; expected])
                     }
                 } else {
-                    vec![0u8; w.saturating_mul(h).saturating_mul(4).saturating_mul(6)]
+                    Cow::Owned(vec![
+                        0u8;
+                        w.saturating_mul(h).saturating_mul(4).saturating_mul(6)
+                    ])
                 };
                 Some(VulkanTextureUpload {
                     data: out,
@@ -3824,9 +3840,9 @@ impl CxVulkan {
                     let src = unsafe {
                         std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
                     };
-                    Self::pack_texture_region_bytes(src, *width, 16, x, y, w, h)
+                    Self::texture_region_bytes(src, *width, 16, x, y, w, h)
                 } else {
-                    vec![0u8; w.saturating_mul(h).saturating_mul(16)]
+                    Cow::Owned(vec![0u8; w.saturating_mul(h).saturating_mul(16)])
                 };
                 Some(VulkanTextureUpload {
                     data: out,
@@ -3848,9 +3864,9 @@ impl CxVulkan {
                     let src = unsafe {
                         std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
                     };
-                    Self::pack_texture_region_bytes(src, *width, 4, x, y, w, h)
+                    Self::texture_region_bytes(src, *width, 4, x, y, w, h)
                 } else {
-                    vec![0u8; w.saturating_mul(h).saturating_mul(4)]
+                    Cow::Owned(vec![0u8; w.saturating_mul(h).saturating_mul(4)])
                 };
                 Some(VulkanTextureUpload {
                     data: out,
@@ -3871,9 +3887,9 @@ impl CxVulkan {
                 let (x, y, w, h) = Self::texture_upload_rect(*width, *height, updated, force_full)?;
                 let row_len = unpack_row_length.unwrap_or(*width);
                 let out = if let Some(data) = data.as_ref() {
-                    Self::pack_texture_region_bytes(data, row_len, 1, x, y, w, h)
+                    Self::texture_region_bytes(data, row_len, 1, x, y, w, h)
                 } else {
-                    vec![0u8; w.saturating_mul(h)]
+                    Cow::Owned(vec![0u8; w.saturating_mul(h)])
                 };
                 Some(VulkanTextureUpload {
                     data: out,
@@ -3894,9 +3910,9 @@ impl CxVulkan {
                 let (x, y, w, h) = Self::texture_upload_rect(*width, *height, updated, force_full)?;
                 let row_len = unpack_row_length.unwrap_or(*width);
                 let out = if let Some(data) = data.as_ref() {
-                    Self::pack_texture_region_bytes(data, row_len, 2, x, y, w, h)
+                    Self::texture_region_bytes(data, row_len, 2, x, y, w, h)
                 } else {
-                    vec![0u8; w.saturating_mul(h).saturating_mul(2)]
+                    Cow::Owned(vec![0u8; w.saturating_mul(h).saturating_mul(2)])
                 };
                 Some(VulkanTextureUpload {
                     data: out,
@@ -5422,8 +5438,10 @@ impl CxVulkan {
         self.texture_upload_count_this_frame += 1;
         self.texture_upload_bytes_this_frame += upload.data.len() as u64;
 
-        let staging =
-            self.create_host_buffer_with_data(vk::BufferUsageFlags::TRANSFER_SRC, &upload.data)?;
+        let staging = self.create_host_buffer_with_data(
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            upload.data.as_ref(),
+        )?;
         self.frame_resources.buffers.push(staging);
 
         let (image, old_layout) = {
