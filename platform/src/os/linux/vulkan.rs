@@ -150,6 +150,8 @@ struct FrameResources {
     descriptor_pools: Vec<vk::DescriptorPool>,
     packet_buffer: Option<VulkanBuffer>,
     packet_buffer_used: vk::DeviceSize,
+    texture_upload_buffer: Option<VulkanBuffer>,
+    texture_upload_buffer_used: vk::DeviceSize,
 }
 
 struct VulkanXrInFlightFrame {
@@ -1213,8 +1215,13 @@ impl CxVulkan {
                 device.destroy_buffer(buffer.buffer, None);
                 device.free_memory(buffer.memory, None);
             }
+            if let Some(buffer) = frame_resources.texture_upload_buffer.take() {
+                device.destroy_buffer(buffer.buffer, None);
+                device.free_memory(buffer.memory, None);
+            }
         }
         frame_resources.packet_buffer_used = 0;
+        frame_resources.texture_upload_buffer_used = 0;
     }
 
     fn recycle_owned_frame_resources(
@@ -1233,6 +1240,7 @@ impl CxVulkan {
             }
         }
         frame_resources.packet_buffer_used = 0;
+        frame_resources.texture_upload_buffer_used = 0;
         Ok(())
     }
 
@@ -1267,6 +1275,38 @@ impl CxVulkan {
             .frame_resources
             .packet_buffer
             .ok_or_else(|| "missing frame packet buffer".to_string())?;
+        Ok((buffer, offset))
+    }
+
+    fn alloc_frame_texture_upload_slice(
+        &mut self,
+        size: vk::DeviceSize,
+    ) -> Result<(VulkanBuffer, vk::DeviceSize), String> {
+        let size = size.max(4);
+        let alignment = 4;
+        let mut offset =
+            Self::align_device_size(self.frame_resources.texture_upload_buffer_used, alignment);
+        let required_size = offset + size;
+        let needs_grow = self
+            .frame_resources
+            .texture_upload_buffer
+            .map(|buffer| buffer.size < required_size)
+            .unwrap_or(true);
+        if needs_grow {
+            if let Some(old_buffer) = self.frame_resources.texture_upload_buffer.take() {
+                self.frame_resources.buffers.push(old_buffer);
+            }
+            let new_size = required_size.next_power_of_two().max(8 * 1024 * 1024);
+            let buffer = self.create_host_buffer(vk::BufferUsageFlags::TRANSFER_SRC, new_size)?;
+            self.frame_resources.texture_upload_buffer = Some(buffer);
+            self.frame_resources.texture_upload_buffer_used = 0;
+            offset = 0;
+        }
+        self.frame_resources.texture_upload_buffer_used = offset + size;
+        let buffer = self
+            .frame_resources
+            .texture_upload_buffer
+            .ok_or_else(|| "missing frame texture upload buffer".to_string())?;
         Ok((buffer, offset))
     }
 
@@ -5438,11 +5478,26 @@ impl CxVulkan {
         self.texture_upload_count_this_frame += 1;
         self.texture_upload_bytes_this_frame += upload.data.len() as u64;
 
-        let staging = self.create_host_buffer_with_data(
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            upload.data.as_ref(),
-        )?;
-        self.frame_resources.buffers.push(staging);
+        let upload_data = upload.data.as_ref();
+        let upload_size = upload_data.len() as vk::DeviceSize;
+        let (staging, staging_offset) = self.alloc_frame_texture_upload_slice(upload_size)?;
+        unsafe {
+            let mapped = self
+                .device
+                .map_memory(
+                    staging.memory,
+                    staging_offset,
+                    upload_size,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .map_err(|e| format!("map_memory(texture_upload_buffer) failed: {e:?}"))?;
+            std::ptr::copy_nonoverlapping(
+                upload_data.as_ptr(),
+                mapped as *mut u8,
+                upload_data.len(),
+            );
+            self.device.unmap_memory(staging.memory);
+        }
 
         let (image, old_layout) = {
             let texture = self
@@ -5468,7 +5523,7 @@ impl CxVulkan {
                     .layer_count(layer_count),
             );
         let copy_region = vk::BufferImageCopy::default()
-            .buffer_offset(0)
+            .buffer_offset(staging_offset)
             .buffer_row_length(0)
             .buffer_image_height(0)
             .image_subresource(
