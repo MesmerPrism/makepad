@@ -81,10 +81,10 @@ This branch currently carries:
 - A video-source metadata event that forwards broker stream-header projection
   metadata to app code before projection-stage rows are derived.
 - Optional `VideoTextureUpdated` metadata for camera texture lanes. Android
-  camera paths can carry camera frame sequence/timestamp, acquire/upload/import
-  timing, texture resource path, descriptor shape, Vulkan format facts, and
-  fallback state without forcing app adapters to reconstruct those facts from
-  marker text.
+  camera paths can carry camera input/format identity, camera frame
+  sequence/timestamp, acquire/upload/import timing, texture resource path,
+  descriptor shape, Vulkan format facts, and fallback state without forcing app
+  adapters to reconstruct those facts from marker text.
 - A small shader builtin, `xr_view_id()`, that exposes Makepad's existing
   backend multiview index to application shader code for XR per-eye texture
   selection without requiring app shaders to reference backend-specific
