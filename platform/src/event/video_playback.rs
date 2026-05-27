@@ -109,6 +109,8 @@ impl VideoTextureDescriptorShape {
 pub struct VideoTextureUpdateMetadata {
     pub resource_path: VideoTextureResourcePath,
     pub descriptor_shape: VideoTextureDescriptorShape,
+    pub camera_input_id: Option<VideoInputId>,
+    pub camera_format_id: Option<VideoFormatId>,
     pub camera_frame_sequence: Option<u64>,
     pub camera_timestamp_ns: Option<u64>,
     pub acquire_time_ns: Option<u64>,
@@ -138,6 +140,12 @@ impl VideoTextureUpdateMetadata {
         self.descriptor_shape = descriptor_shape;
         self.width = width;
         self.height = height;
+        self
+    }
+
+    pub fn with_camera_source(mut self, input_id: VideoInputId, format_id: VideoFormatId) -> Self {
+        self.camera_input_id = Some(input_id);
+        self.camera_format_id = Some(format_id);
         self
     }
 
