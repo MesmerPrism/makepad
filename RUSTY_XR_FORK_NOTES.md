@@ -116,6 +116,28 @@ Keep future changes reviewable as independent Makepad fixes. Portability,
 packaging, workspace metadata, and renderer-correctness fixes should be shaped
 so they can become upstream PRs when possible.
 
+## CPU-YUV Upload Accounting
+
+The Android CPU-YUV Quest lane currently moves one full I420 camera frame per
+camera input stream before Vulkan upload. The camera callback publishes I420
+frames into a latest-wins `CameraFrameRing`; `AndroidCameraPlayer::poll_frame`
+then consumes only a pending or newly observed frame, swaps Y/U/V plane buffers
+into three `VecRu8` textures, and emits one `cpu-yuv-upload` metadata marker
+for that camera frame.
+
+On the Vulkan side, dirty vector textures are uploaded once per repaint after
+draw-list traversal deduplicates texture IDs. For the stereo camera evidence
+lane, the measured repaint payload is therefore expected to be two camera input
+streams times three I420 plane textures. At 1280x1280 this is about 2.34 MiB per
+camera upload marker and about 4.69 MiB per repaint when both streams update in
+the same repaint window.
+
+Treat this as the baseline headroom cost for the CPU-YUV reference path. Future
+optimizations should target reducing CPU copy/staging/upload work, avoiding
+unnecessary full-plane uploads, or making the hardware-buffer path color-correct;
+do not assume the current six texture uploads per repaint are a duplicate-upload
+bug without new evidence from per-plane/frame markers.
+
 ## Validation
 
 For this branch, use focused validation instead of claiming full Makepad
