@@ -1128,6 +1128,7 @@ struct PrepareBuildOpts<'a> {
     java_url: &'a str,
     app_label: &'a str,
     variant: &'a AndroidVariant,
+    config: &'a AndroidConfig,
     urls: &'a AndroidSDKUrls,
     version_code: u32,
     version_name: &'a str,
@@ -1136,6 +1137,11 @@ struct PrepareBuildOpts<'a> {
 
 fn substitute_manifest_template(template: &str, args: &ManifestArgs<'_>) -> String {
     let debuggable = if args.debuggable { "true" } else { "false" };
+    let screen_orientation = args.screen_orientation.unwrap_or("");
+    let resizeable_activity = args
+        .resizeable_activity
+        .map(|value| if value { "true" } else { "false" })
+        .unwrap_or("");
     template
         .replace("{label}", args.label)
         .replace("{class_name}", args.class_name)
@@ -1145,6 +1151,8 @@ fn substitute_manifest_template(template: &str, args: &ManifestArgs<'_>) -> Stri
         .replace("{version_code}", &args.version_code.to_string())
         .replace("{version_name}", args.version_name)
         .replace("{debuggable}", debuggable)
+        .replace("{screen_orientation}", screen_orientation)
+        .replace("{resizeable_activity}", resizeable_activity)
 }
 
 fn prepare_build(opts: &PrepareBuildOpts<'_>) -> Result<BuildPaths, String> {
@@ -1208,6 +1216,8 @@ fn prepare_build(opts: &PrepareBuildOpts<'_>) -> Result<BuildPaths, String> {
         version_code: opts.version_code,
         version_name: opts.version_name,
         debuggable: opts.debuggable,
+        screen_orientation: opts.config.screen_orientation.as_deref(),
+        resizeable_activity: opts.config.resizeable_activity,
     };
     let custom_template = build_crate_dir.join("resources/android/AndroidManifest.xml.template");
     let manifest_xml = if custom_template.is_file() {
@@ -2688,6 +2698,7 @@ pub fn build_aab(
         java_url: &resolved.java_url,
         app_label: &resolved.app_label,
         variant,
+        config,
         urls,
         version_code: resolved.version_code,
         version_name: &resolved.version_name,
@@ -2849,6 +2860,7 @@ pub fn build(
         java_url: &resolved.java_url,
         app_label: &resolved.app_label,
         variant,
+        config,
         urls,
         version_code: resolved.version_code,
         version_name: &resolved.version_name,

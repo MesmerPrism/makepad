@@ -16,9 +16,11 @@ pub enum AndroidVariant {
     Quest,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AndroidConfig {
     pub small_fonts: bool,
+    pub screen_orientation: Option<String>,
+    pub resizeable_activity: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -32,6 +34,29 @@ pub struct ManifestArgs<'a> {
     pub version_code: u32,
     pub version_name: &'a str,
     pub debuggable: bool,
+    pub screen_orientation: Option<&'a str>,
+    pub resizeable_activity: Option<bool>,
+}
+
+fn parse_android_bool_flag(name: &str, value: &str) -> Result<bool, String> {
+    match value {
+        "true" | "1" | "yes" => Ok(true),
+        "false" | "0" | "no" => Ok(false),
+        _ => Err(format!("{name} must be true or false, got {value:?}")),
+    }
+}
+
+fn validate_manifest_attr_value(name: &str, value: &str) -> Result<String, String> {
+    if value.is_empty()
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err(format!(
+            "{name} must be a non-empty Android manifest token, got {value:?}"
+        ));
+    }
+    Ok(value.to_string())
 }
 
 impl AndroidVariant {
@@ -59,6 +84,8 @@ impl AndroidVariant {
             version_code,
             version_name,
             debuggable,
+            screen_orientation,
+            resizeable_activity,
         } = args;
         let icon_attr = if *has_icon {
             "\n                    android:icon=\"@mipmap/ic_launcher\""
@@ -66,6 +93,23 @@ impl AndroidVariant {
             ""
         };
         let debuggable_str = if *debuggable { "true" } else { "false" };
+        let default_screen_orientation_attr = screen_orientation
+            .map(|value| format!("\n                    android:screenOrientation=\"{value}\""))
+            .unwrap_or_default();
+        let default_resizeable_activity_attr = resizeable_activity
+            .map(|value| {
+                format!(
+                    "\n                    android:resizeableActivity=\"{}\"",
+                    if value { "true" } else { "false" }
+                )
+            })
+            .unwrap_or_default();
+        let quest_screen_orientation = screen_orientation.unwrap_or("landscape");
+        let quest_resizeable_activity = if resizeable_activity.unwrap_or(false) {
+            "true"
+        } else {
+            "false"
+        };
 
         match self {
             Self::Default => format!(
@@ -88,7 +132,7 @@ impl AndroidVariant {
                     android:name=".{class_name}"
                     android:configChanges="orientation|screenSize|keyboardHidden"
                     android:exported="true"
-                    android:launchMode="singleTask"
+                    android:launchMode="singleTask"{default_resizeable_activity_attr}{default_screen_orientation_attr}
                     android:windowSoftInputMode="adjustNothing|stateUnchanged"
                     android:theme="@style/MakepadLaunchTheme">
                     <intent-filter>
@@ -184,8 +228,8 @@ impl AndroidVariant {
                         android:exported="true"
                         android:hardwareAccelerated="false"
                         android:launchMode="singleTask"
-                        android:resizeableActivity="false"
-                        android:screenOrientation="landscape"
+                        android:resizeableActivity="{quest_resizeable_activity}"
+                        android:screenOrientation="{quest_screen_orientation}"
                         android:windowSoftInputMode="adjustNothing|stateUnchanged"
                         android:theme="@style/MakepadLaunchTheme" 
                         >
@@ -202,8 +246,8 @@ impl AndroidVariant {
                         android:exported="true"
                         android:hardwareAccelerated="false"
                         android:launchMode="singleTask"
-                        android:resizeableActivity="false"
-                        android:screenOrientation="landscape"
+                        android:resizeableActivity="{quest_resizeable_activity}"
+                        android:screenOrientation="{quest_screen_orientation}"
                         android:windowSoftInputMode="adjustNothing|stateUnchanged"
                         android:theme="@style/MakepadLaunchTheme" 
                         >
@@ -467,6 +511,8 @@ Common options:\n\
   --version-name=<str>\n\
   --min-sdk-version=<api>\n\
   --small-fonts\n\
+  --screen-orientation=<value>            Adds android:screenOrientation to the generated launcher activity\n\
+  --resizeable-activity=true|false        Adds android:resizeableActivity to the generated launcher activity\n\
   --no-icon\n\
   --sdk-path=<path>\n\
   --host-os=linux-x64|windows-x64|macos-aarch64|macos-x64\n\
@@ -483,7 +529,7 @@ Custom AndroidManifest:\n\
   Drop a template at `<crate>/resources/android/AndroidManifest.xml.template` to\n\
   override the built-in manifest. Tokens replaced: {package_id}, {label},\n\
   {class_name}, {min_sdk_version}, {target_sdk_version}, {version_code},\n\
-  {version_name}, {debuggable}.\n\
+  {version_name}, {debuggable}, {screen_orientation}, {resizeable_activity}.\n\
 \n\
 Examples:\n\
   cargo makepad android --abi=aarch64 build -p my-app --release\n\
@@ -692,6 +738,12 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
             variant = AndroidVariant::from_str(opt)?;
         } else if v.trim() == "--small-fonts" {
             config.small_fonts = true;
+        } else if let Some(opt) = v.strip_prefix("--screen-orientation=") {
+            config.screen_orientation =
+                Some(validate_manifest_attr_value("--screen-orientation", opt)?);
+        } else if let Some(opt) = v.strip_prefix("--resizeable-activity=") {
+            config.resizeable_activity =
+                Some(parse_android_bool_flag("--resizeable-activity", opt)?);
         } else if v.trim() == "--no-icon" {
             no_icon = true;
         } else if v.trim() == "--keep-sdk-sources" {
@@ -854,6 +906,8 @@ mod tests {
             version_code: 7,
             version_name: "1.2.3",
             debuggable: true,
+            screen_orientation: None,
+            resizeable_activity: None,
         }
     }
 
@@ -896,5 +950,16 @@ mod tests {
         assert!(xml.contains("android:targetSdkVersion=\"35\""));
         assert!(xml.contains("android:versionCode=\"7\""));
         assert!(xml.contains("android:versionName=\"1.2.3\""));
+    }
+
+    #[test]
+    fn default_manifest_can_force_landscape_panel() {
+        let mut args = test_manifest_args("App", "dev.makepad.app");
+        args.screen_orientation = Some("landscape");
+        args.resizeable_activity = Some(false);
+        let xml = AndroidVariant::Default.manifest_xml(&args);
+        assert!(xml.contains("android:screenOrientation=\"landscape\""));
+        assert!(xml.contains("android:resizeableActivity=\"false\""));
+        assert!(!xml.contains("com.oculus.intent.category.VR"));
     }
 }

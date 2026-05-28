@@ -87,7 +87,7 @@ script_mod! {
                 1.0 / max(size.y, 1.0)
             )
             let uv = self.pos
-            let smooth =
+            let blended_source =
                 self.sample_source(uv) * 0.25
                 + (
                     self.sample_source(uv + texel * vec2(1.0, 0.0))
@@ -101,7 +101,7 @@ script_mod! {
                     + self.sample_source(uv + texel * vec2(1.0, -1.0))
                     + self.sample_source(uv + texel * vec2(-1.0, -1.0))
                 ) * 0.0625
-            return smooth.mix(self.sample_detail(uv), clamp(self.detail_mix, 0.0, 1.0))
+            return blended_source.mix(self.sample_detail(uv), clamp(self.detail_mix, 0.0, 1.0))
         }
     }
 
