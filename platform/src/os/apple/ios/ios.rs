@@ -5,6 +5,7 @@ use {
         draw_pass::CxDrawPassParent,
         event::{
             drag_drop::{DragEvent, DragItem, DragResponse, DropEvent},
+            keyboard::{CharOffset, FullTextState},
             video_playback::{
                 CameraPreviewMode, VideoBufferedRangesEvent, VideoDecodingErrorEvent,
                 VideoPlaybackPreparedEvent, VideoPlaybackResourcesReleasedEvent,
@@ -499,6 +500,9 @@ impl Cx {
                 if te.timer_id == 0 {
                     let vk = with_ios_app(|app| app.virtual_keyboard_event.take());
                     if let Some(vk) = vk {
+                        let window_id = CxWindowPool::id_zero();
+                        let vk =
+                            self.windows[window_id].native_virtual_keyboard_event_to_layout(vk);
                         // When the keyboard is going away (user pressed iOS's
                         // "hide keyboard" button, an external keyboard was
                         // attached, an inputAccessoryView triggered hide,
@@ -538,6 +542,16 @@ impl Cx {
                                 self.call_event_handler(&Event::TextRangeReplace(
                                     TextRangeReplaceEvent { start, end, text },
                                 ));
+                            }
+                            ios_app::IosTextInputEvent::SelectionChanged(text, start, end) => {
+                                self.call_event_handler(&Event::TextInput(TextInputEvent {
+                                    full_state_sync: Some(FullTextState {
+                                        text,
+                                        selection: CharOffset(start)..CharOffset(end),
+                                        composition: None,
+                                    }),
+                                    ..Default::default()
+                                }));
                             }
                             ios_app::IosTextInputEvent::KeyEvent(key_code) => {
                                 self.call_event_handler(&Event::KeyDown(KeyEvent {
@@ -617,9 +631,11 @@ impl Cx {
             IosEvent::WindowLostFocus(window_id) => {
                 self.call_event_handler(&Event::WindowLostFocus(window_id));
             }
-            IosEvent::WindowGeomChange(re) => {
+            IosEvent::WindowGeomChange(mut re) => {
                 let window_id = CxWindowPool::id_zero();
                 let window = &mut self.windows[window_id];
+                window.os_dpi_factor = Some(re.new_geom.dpi_factor);
+                re.new_geom = window.native_window_geom_to_layout(re.new_geom);
                 window.window_geom = re.new_geom.clone();
                 self.call_event_handler(&Event::WindowGeomChange(re));
                 self.redraw_all();
@@ -768,7 +784,12 @@ impl Cx {
                 // ok here we send out to all our childprocesses
                 self.handle_repaint(metal_cx);
             }
-            IosEvent::TouchUpdate(e) => {
+            IosEvent::TouchUpdate(mut e) => {
+                let window = &self.windows[e.window_id];
+                for touch in e.touches.iter_mut() {
+                    touch.abs = window.native_vec2d_to_layout(touch.abs);
+                    touch.radius = window.native_vec2d_to_layout(touch.radius);
+                }
                 // Check for outside-click popup dismiss on touch start
                 if e.touches
                     .iter()
@@ -828,10 +849,12 @@ impl Cx {
 
                 self.fingers.process_touch_update_end(&e.touches);
             }
-            IosEvent::LongPress(e) => {
+            IosEvent::LongPress(mut e) => {
+                e.abs = self.windows[e.window_id].native_vec2d_to_layout(e.abs);
                 self.call_event_handler(&Event::LongPress(e.into()));
             }
-            IosEvent::MouseDown(e) => {
+            IosEvent::MouseDown(mut e) => {
+                e.abs = self.windows[e.window_id].native_vec2d_to_layout(e.abs);
                 // Check for outside-click popup dismiss
                 if let Some(popup_window_id) = self.find_popup_to_dismiss_on_mouse(e.abs) {
                     self.dismiss_popup_window(
@@ -843,21 +866,27 @@ impl Cx {
                 self.fingers.mouse_down(e.button, e.window_id);
                 self.call_event_handler(&Event::MouseDown(e.into()))
             }
-            IosEvent::MouseMove(e) => {
+            IosEvent::MouseMove(mut e) => {
+                e.abs = self.windows[e.window_id].native_vec2d_to_layout(e.abs);
                 self.call_event_handler(&Event::MouseMove(e.into()));
                 self.fingers.cycle_hover_area(live_id!(mouse).into());
                 self.fingers.switch_captures();
             }
-            IosEvent::MouseUp(e) => {
+            IosEvent::MouseUp(mut e) => {
+                e.abs = self.windows[e.window_id].native_vec2d_to_layout(e.abs);
                 let button = e.button;
                 self.call_event_handler(&Event::MouseUp(e.into()));
                 self.fingers.mouse_up(button);
                 self.fingers.cycle_hover_area(live_id!(mouse).into());
             }
-            IosEvent::Scroll(e) => self.call_event_handler(&Event::Scroll(e.into())),
+            IosEvent::Scroll(mut e) => {
+                e.abs = self.windows[e.window_id].native_vec2d_to_layout(e.abs);
+                self.call_event_handler(&Event::Scroll(e.into()));
+            }
             IosEvent::TextInput(e) => self.call_event_handler(&Event::TextInput(e)),
             IosEvent::TextRangeReplace(e) => self.call_event_handler(&Event::TextRangeReplace(e)),
-            IosEvent::SelectionHandleDrag(e) => {
+            IosEvent::SelectionHandleDrag(mut e) => {
+                e.abs = self.windows[CxWindowPool::id_zero()].native_vec2d_to_layout(e.abs);
                 self.call_event_handler(&Event::SelectionHandleDrag(e))
             }
 
@@ -935,6 +964,8 @@ impl Cx {
                     window.is_created = true;
                 }
                 CxOsOp::ShowTextIME(_area, pos, config) => {
+                    let window_id = CxWindowPool::id_zero();
+                    let pos = self.windows[window_id].layout_vec2d_to_native_points(pos);
                     IosApp::set_ime_position(pos);
                     IosApp::configure_keyboard(&config);
                     IosApp::show_keyboard();
@@ -947,7 +978,7 @@ impl Cx {
                     selection,
                     composition: _,
                 } => {
-                    IosApp::set_ime_text(text, selection.end.0);
+                    IosApp::set_ime_text(text, selection.start.0, selection.end.0);
                 }
                 CxOsOp::StartTimer {
                     timer_id,
@@ -985,6 +1016,10 @@ impl Cx {
                     rect,
                     keyboard_shift,
                 } => {
+                    let window_id = CxWindowPool::id_zero();
+                    let window = &self.windows[window_id];
+                    let rect = window.layout_rect_to_native_points(rect);
+                    let keyboard_shift = window.layout_points_to_native_points(keyboard_shift);
                     IosApp::show_clipboard_actions(has_selection, rect, keyboard_shift);
                 }
                 CxOsOp::HideClipboardActions => {
@@ -995,9 +1030,17 @@ impl Cx {
                 }
                 CxOsOp::SetPrimarySelection(_) => {}
                 CxOsOp::ShowSelectionHandles { start, end } => {
+                    let window_id = CxWindowPool::id_zero();
+                    let window = &self.windows[window_id];
+                    let start = window.layout_vec2d_to_native_points(start);
+                    let end = window.layout_vec2d_to_native_points(end);
                     IosApp::show_selection_handles(start, end);
                 }
                 CxOsOp::UpdateSelectionHandles { start, end } => {
+                    let window_id = CxWindowPool::id_zero();
+                    let window = &self.windows[window_id];
+                    let start = window.layout_vec2d_to_native_points(start);
+                    let end = window.layout_vec2d_to_native_points(end);
                     IosApp::update_selection_handles(start, end);
                 }
                 CxOsOp::HideSelectionHandles => {

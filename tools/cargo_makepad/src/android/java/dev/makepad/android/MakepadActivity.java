@@ -53,6 +53,7 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.WindowManager.LayoutParams;
 import android.view.inputmethod.BaseInputConnection;
@@ -85,6 +86,7 @@ import java.util.concurrent.CompletableFuture;
 
 class MakepadImeInsets {
     private static final int MIN_KEYBOARD_HEIGHT_DP = 80;
+    static boolean imeAnimationInProgress = false;
 
     private static int keyboardThresholdPx(View view) {
         return Math.max(1, (int) (view.getResources().getDisplayMetrics().density * MIN_KEYBOARD_HEIGHT_DP));
@@ -93,6 +95,17 @@ class MakepadImeInsets {
     private static int rootHeightPx(View view) {
         View root = view.getRootView();
         return root == null ? 0 : root.getHeight();
+    }
+
+    private static int surfaceBottomGapPx(View view) {
+        View root = view.getRootView();
+        if (root == null || root.getHeight() <= 0 || view.getHeight() <= 0) {
+            return 0;
+        }
+        int[] loc = new int[2];
+        view.getLocationInWindow(loc);
+        int surfaceBottom = loc[1] + view.getHeight();
+        return Math.max(0, root.getHeight() - surfaceBottom);
     }
 
     private static int clampToRootHeight(View view, int overlap) {
@@ -124,14 +137,15 @@ class MakepadImeInsets {
         }
 
         int rootBottomOnScreen = rootLocation[1] + root.getHeight();
-        return Math.max(0, rootBottomOnScreen - visibleFrame.bottom);
+        return Math.max(0, rootBottomOnScreen - visibleFrame.bottom - surfaceBottomGapPx(view));
     }
 
     static int bottomOverlapPx(View view, WindowInsets insets) {
         int imeBottom = 0;
         if (Build.VERSION.SDK_INT >= 30 && insets != null) {
             Insets imeInsets = insets.getInsets(WindowInsets.Type.ime());
-            imeBottom = clampToRootHeight(view, Math.max(0, imeInsets.bottom));
+            int imeOverlap = Math.max(0, imeInsets.bottom - surfaceBottomGapPx(view));
+            imeBottom = clampToRootHeight(view, imeOverlap);
         }
 
         if (imeBottom > 0 && !isNearFullHeightOverlap(view, imeBottom)) {
@@ -155,17 +169,23 @@ class MakepadImeInsets {
         return clampToRootHeight(view, fallback);
     }
 
-    static boolean isVisible(View view, WindowInsets insets, int bottomOverlapPx) {
-        if (Build.VERSION.SDK_INT >= 30 && insets != null
-                && insets.isVisible(WindowInsets.Type.ime())) {
-            return true;
+    static boolean isVisible(View view, int bottomOverlapPx) {
+        if (Build.VERSION.SDK_INT >= 30 && view != null) {
+            WindowInsets root = view.getRootWindowInsets();
+            if (root != null && root.isVisible(WindowInsets.Type.ime())) {
+                return true;
+            }
         }
         return bottomOverlapPx > 0;
     }
 
-    static void report(View view, WindowInsets insets) {
+    static void report(View view, WindowInsets insets, String src) {
+        if (imeAnimationInProgress
+                && (src.equals("onApplyWindowInsets") || src.equals("onGlobalLayout"))) {
+            return;
+        }
         int bottomOverlap = bottomOverlapPx(view, insets);
-        boolean visible = isVisible(view, insets, bottomOverlap);
+        boolean visible = isVisible(view, bottomOverlap);
         MakepadNative.surfaceOnResizeTextIME(bottomOverlap, visible);
     }
 }
@@ -184,27 +204,59 @@ class MakepadSystemInsets {
     }
 
     @SuppressWarnings("deprecation")
-    static MakepadSystemInsets from(WindowInsets insets, float density) {
-        if (insets == null) {
+    static MakepadSystemInsets from(View view, WindowInsets insets, float density) {
+        if (insets == null || view == null || density <= 0.0f) {
             return new MakepadSystemInsets(0, 0, 0, 0);
         }
+        int barTop, barRight, barBottom, barLeft;
         if (Build.VERSION.SDK_INT >= 30) {
-            Insets systemBarInsets = insets.getInsets(
+            Insets bars = insets.getInsets(
                 WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
             );
-            return new MakepadSystemInsets(
-                systemBarInsets.top / density,
-                systemBarInsets.right / density,
-                systemBarInsets.bottom / density,
-                systemBarInsets.left / density
-            );
+            barTop = bars.top;
+            barRight = bars.right;
+            barBottom = bars.bottom;
+            barLeft = bars.left;
+        } else {
+            barTop = insets.getSystemWindowInsetTop();
+            barRight = insets.getSystemWindowInsetRight();
+            barBottom = insets.getSystemWindowInsetBottom();
+            barLeft = insets.getSystemWindowInsetLeft();
         }
+
+        View root = view.getRootView();
+        if (root == null || root.getWidth() <= 0 || root.getHeight() <= 0) {
+            return new MakepadSystemInsets(0, 0, 0, 0);
+        }
+        int windowWidth = root.getWidth();
+        int windowHeight = root.getHeight();
+
+        int[] loc = new int[2];
+        view.getLocationInWindow(loc);
+        int surfaceLeft = loc[0];
+        int surfaceTop = loc[1];
+        int surfaceRight = surfaceLeft + view.getWidth();
+        int surfaceBottom = surfaceTop + view.getHeight();
+
+        int top = Math.max(0, Math.min(barTop, surfaceBottom) - Math.max(0, surfaceTop));
+        int left = Math.max(0, Math.min(barLeft, surfaceRight) - Math.max(0, surfaceLeft));
+        int bottom = Math.max(0,
+            Math.min(windowHeight, surfaceBottom) - Math.max(windowHeight - barBottom, surfaceTop));
+        int right = Math.max(0,
+            Math.min(windowWidth, surfaceRight) - Math.max(windowWidth - barRight, surfaceLeft));
+
         return new MakepadSystemInsets(
-            insets.getSystemWindowInsetTop() / density,
-            insets.getSystemWindowInsetRight() / density,
-            insets.getSystemWindowInsetBottom() / density,
-            insets.getSystemWindowInsetLeft() / density
+            top / density,
+            right / density,
+            bottom / density,
+            left / density
         );
+    }
+
+    static void report(View view, WindowInsets insets) {
+        float density = view.getResources().getDisplayMetrics().density;
+        MakepadSystemInsets i = MakepadSystemInsets.from(view, insets, density);
+        MakepadNative.surfaceOnSafeAreaInsets(i.top, i.right, i.bottom, i.left);
     }
 }
 
@@ -233,6 +285,7 @@ class MakepadSurface
     static final int INPUT_MODE_EMAIL = 5;
     static final int INPUT_MODE_DECIMAL = 6;
     static final int INPUT_MODE_SEARCH = 7;
+    static final int INPUT_MODE_NONE = 8;
 
     // Autocapitalize constants (must match Rust Autocapitalize enum)
     static final int AUTOCAP_NONE = 0;
@@ -252,6 +305,8 @@ class MakepadSurface
     static final int RETURN_KEY_SEND = 3;
     static final int RETURN_KEY_NEXT = 4;
     static final int RETURN_KEY_DONE = 5;
+    static final int RETURN_KEY_NONE = 6;
+    static final int RETURN_KEY_PREVIOUS = 7;
 
     // Keyboard configuration (set by Rust via configureKeyboard)
     private int mInputMode = INPUT_MODE_TEXT;
@@ -412,7 +467,8 @@ class MakepadSurface
         // net for layout changes that arrive without an inset dispatch, for
         // example, a focus change that retargets the IME to a different field.
         WindowInsets insets = this.getRootWindowInsets();
-        MakepadImeInsets.report(this, insets);
+        MakepadImeInsets.report(this, insets, "onGlobalLayout");
+        MakepadSystemInsets.report(this, insets);
     }
 
     // docs says getCharacters are deprecated
@@ -435,7 +491,7 @@ class MakepadSurface
             int character = event.getUnicodeChar();
             if (character == 0) {
                 String characters = event.getCharacters();
-                if (characters != null && characters.length() >= 0) {
+                if (characters != null && characters.length() > 0) {
                     character = characters.charAt(0);
                 }
             }
@@ -462,6 +518,9 @@ class MakepadSurface
         int inputType = InputType.TYPE_CLASS_TEXT;
 
         switch (mInputMode) {
+            case INPUT_MODE_NONE:
+                inputType = InputType.TYPE_NULL;
+                break;
             case INPUT_MODE_ASCII:
                 // TYPE_TEXT_VARIATION_VISIBLE_PASSWORD shows ASCII keyboard without masking
                 // This is the closest Android equivalent to iOS's UIKeyboardTypeASCIICapable
@@ -510,6 +569,7 @@ class MakepadSurface
             // Autocorrect
             switch (mAutocorrect) {
                 case AUTOCORRECT_DEFAULT:
+                    break;
                 case AUTOCORRECT_YES:
                     inputType |= InputType.TYPE_TEXT_FLAG_AUTO_CORRECT;
                     break;
@@ -536,6 +596,9 @@ class MakepadSurface
 
         // Return key type
         switch (mReturnKeyType) {
+            case RETURN_KEY_NONE:
+                imeOptions |= EditorInfo.IME_ACTION_NONE;
+                break;
             case RETURN_KEY_GO:
                 imeOptions |= EditorInfo.IME_ACTION_GO;
                 break;
@@ -551,9 +614,14 @@ class MakepadSurface
             case RETURN_KEY_DONE:
                 imeOptions |= EditorInfo.IME_ACTION_DONE;
                 break;
+            case RETURN_KEY_PREVIOUS:
+                imeOptions |= EditorInfo.IME_ACTION_PREVIOUS;
+                break;
             default: // RETURN_KEY_DEFAULT
                 if (!mIsMultiline) {
                     imeOptions |= EditorInfo.IME_ACTION_DONE;
+                } else {
+                    imeOptions |= EditorInfo.IME_FLAG_NO_ENTER_ACTION;
                 }
                 break;
         }
@@ -575,6 +643,9 @@ class MakepadSurface
         int selEnd = Selection.getSelectionEnd(mEditable);
         outAttrs.initialSelStart = Math.max(0, selStart);
         outAttrs.initialSelEnd = Math.max(0, selEnd);
+        if (Build.VERSION.SDK_INT >= 30) {
+            outAttrs.setInitialSurroundingSubText(mEditable, 0);
+        }
 
         // Create InputConnection with fullEditor=true since we have an Editable
         mInputConnection = new MakepadInputConnection(this, true);
@@ -608,7 +679,8 @@ class MakepadSurface
     }
 
     // Called from Rust to update text state (for programmatic changes, not IME input)
-    public void updateImeTextState(String fullText, int selStart, int selEnd) {
+    public void updateImeTextState(String fullText, int selStart, int selEnd,
+                                   int composingStart, int composingEnd) {
         String currentText = mEditable.toString();
         boolean textChanged = !currentText.equals(fullText);
 
@@ -628,12 +700,23 @@ class MakepadSurface
         int textLen = textChanged ? fullText.length() : currentText.length();
         selStart = Math.max(0, Math.min(selStart, textLen));
         selEnd = Math.max(selStart, Math.min(selEnd, textLen));
+        boolean hasComposition = composingStart >= 0 && composingEnd >= composingStart;
+        if (hasComposition) {
+            composingStart = Math.max(0, Math.min(composingStart, textLen));
+            composingEnd = Math.max(composingStart, Math.min(composingEnd, textLen));
+        } else {
+            composingStart = -1;
+            composingEnd = -1;
+        }
 
         if (textChanged) {
             // Text content changed - update Editable and notify IME
             BaseInputConnection.removeComposingSpans(mEditable);
             mEditable.replace(0, mEditable.length(), fullText);
             Selection.setSelection(mEditable, selStart, selEnd);
+            if (hasComposition && mInputConnection != null) {
+                mInputConnection.setComposingRegion(composingStart, composingEnd);
+            }
 
             // ECHO PREVENTION: Clear the sent buffer after applying Rust's authoritative
             // state update. This ensures the next text we send to Rust won't be incorrectly
@@ -656,21 +739,27 @@ class MakepadSurface
                         et.selectionEnd = selEnd;
                         imm.updateExtractedText(this, mInputConnection.mExtractedTextToken, et);
                     }
-                    imm.updateSelection(this, selStart, selEnd, -1, -1);
+                    imm.updateSelection(this, selStart, selEnd, composingStart, composingEnd);
                 }
             }
         } else {
             // Only selection changed - just update selection, no restart needed
             int currentSelStart = Selection.getSelectionStart(mEditable);
             int currentSelEnd = Selection.getSelectionEnd(mEditable);
-            if (currentSelStart != selStart || currentSelEnd != selEnd) {
+            int currentCompStart = BaseInputConnection.getComposingSpanStart(mEditable);
+            int currentCompEnd = BaseInputConnection.getComposingSpanEnd(mEditable);
+            if (currentSelStart != selStart || currentSelEnd != selEnd
+                    || currentCompStart != composingStart || currentCompEnd != composingEnd) {
+                if (hasComposition && mInputConnection != null) {
+                    mInputConnection.setComposingRegion(composingStart, composingEnd);
+                } else {
+                    BaseInputConnection.removeComposingSpans(mEditable);
+                }
                 Selection.setSelection(mEditable, selStart, selEnd);
                 // Notify IME of selection change without restart
                 InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
                 if (imm != null) {
-                    int compStart = BaseInputConnection.getComposingSpanStart(mEditable);
-                    int compEnd = BaseInputConnection.getComposingSpanEnd(mEditable);
-                    imm.updateSelection(this, selStart, selEnd, compStart, compEnd);
+                    imm.updateSelection(this, selStart, selEnd, composingStart, composingEnd);
                 }
             }
         }
@@ -764,16 +853,26 @@ class ResizingLayout
                     android.view.WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE
                 ) {
                     @Override
+                    public void onPrepare(android.view.WindowInsetsAnimation animation) {
+                        if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) {
+                            MakepadImeInsets.imeAnimationInProgress = true;
+                        }
+                    }
+
+                    @Override
                     public android.view.WindowInsets onProgress(
                         android.view.WindowInsets insets,
                         java.util.List<android.view.WindowInsetsAnimation> runningAnimations
                     ) {
-                        MakepadImeInsets.report(ResizingLayout.this, insets);
+                        MakepadImeInsets.report(ResizingLayout.this, insets, "onProgress");
                         return insets;
                     }
 
                     @Override
                     public void onEnd(android.view.WindowInsetsAnimation animation) {
+                        if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) {
+                            MakepadImeInsets.imeAnimationInProgress = false;
+                        }
                         // The framework usually delivers a final-state inset
                         // through onProgress just before onEnd, but on some
                         // OEM devices it skips that last frame. Fetch the
@@ -781,7 +880,7 @@ class ResizingLayout
                         // sees the settled state.
                         android.view.WindowInsets insets = getRootWindowInsets();
                         if (insets == null) return;
-                        MakepadImeInsets.report(ResizingLayout.this, insets);
+                        MakepadImeInsets.report(ResizingLayout.this, insets, "onEnd");
                     }
                 }
             );
@@ -797,18 +896,8 @@ class ResizingLayout
         // *and* the KeyboardView shifts). The activity is configured with
         // `windowSoftInputMode="adjustNothing"` in the manifest, so the
         // system doesn't auto-resize either.
-        MakepadImeInsets.report(v, insets);
-
-        // Compute safe area insets from system bars and display cutout.
-        // These are in physical pixels; convert to logical points by dividing by density.
-        float density = getResources().getDisplayMetrics().density;
-        MakepadSystemInsets systemBarInsets = MakepadSystemInsets.from(insets, density);
-        MakepadNative.surfaceOnSafeAreaInsets(
-            systemBarInsets.top,
-            systemBarInsets.right,
-            systemBarInsets.bottom,
-            systemBarInsets.left
-        );
+        MakepadImeInsets.report(v, insets, "onApplyWindowInsets");
+        MakepadSystemInsets.report(v, insets);
 
         return insets;
     }
@@ -845,6 +934,7 @@ public class MakepadActivity
     static HashMap<Long, MakepadWebSocketReader> mActiveWebsocketsReaders = new HashMap<>();
     static HashMap<Long, MakepadSocketStream> mActiveSocketStreams = new HashMap<>();
     private boolean mIsSwitchingActivity = false;
+    private boolean mSystemBarDarkIcons = false;
 
     // clipboard actions (ActionMode for copy/paste/cut)
     private ActionMode mActionMode;
@@ -1412,6 +1502,43 @@ public class MakepadActivity
             });
     }
 
+    public void setSystemBarAppearance(final boolean darkIcons) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mSystemBarDarkIcons = darkIcons;
+                applySystemBarAppearance();
+            }
+        });
+    }
+
+    @SuppressWarnings("deprecation")
+    private void applySystemBarAppearance() {
+        Window window = getWindow();
+        if (window == null) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                controller.setSystemBarsAppearance(mSystemBarDarkIcons ? mask : 0, mask);
+            }
+        } else {
+            View decorView = window.getDecorView();
+            int lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            int flags = decorView.getSystemUiVisibility();
+            if (mSystemBarDarkIcons) {
+                flags |= lightBars;
+            } else {
+                flags &= ~lightBars;
+            }
+            decorView.setSystemUiVisibility(flags);
+        }
+    }
+
     private boolean canCaptureSurfaceSnapshot() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return false;
@@ -1745,6 +1872,8 @@ public class MakepadActivity
             }
         }
 
+        applySystemBarAppearance();
+
         // Force a layout pass so the SurfaceView gets the new dimensions
         if (view != null) {
             view.requestLayout();
@@ -1856,11 +1985,26 @@ public class MakepadActivity
             @Override
             public void run() {
                 if (show) {
+                    if (view == null || view.getInputMode() == MakepadSurface.INPUT_MODE_NONE) {
+                        return;
+                    }
+                    view.requestFocus();
                     InputMethodManager imm = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
-                    imm.showSoftInput(view, 0);
+                    if (imm != null) {
+                        imm.showSoftInput(view, 0);
+                    }
                 } else {
-                    InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-                    imm.hideSoftInputFromWindow(view.getWindowToken(),0);
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        WindowInsetsController controller = getWindow().getInsetsController();
+                        if (controller != null) {
+                            controller.hide(WindowInsets.Type.ime());
+                        }
+                    } else {
+                        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                        if (imm != null && view != null) {
+                            imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
+                        }
+                    }
                 }
             }
         });
@@ -1869,12 +2013,19 @@ public class MakepadActivity
     // Update IME text state for programmatic changes - called from Rust
     // Note: This should only be called for programmatic text changes (e.g., clear button),
     // NOT during normal IME input (which flows Java to Rust via onImeTextStateChanged)
-    public void updateImeTextState(final String fullText, final int selStart, final int selEnd) {
+    public void updateImeTextState(final String fullText, final int selStart, final int selEnd,
+                                   final int composingStart, final int composingEnd) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 if (view != null) {
-                    view.updateImeTextState(fullText, selStart, selEnd);
+                    view.updateImeTextState(
+                        fullText,
+                        selStart,
+                        selEnd,
+                        composingStart,
+                        composingEnd
+                    );
                 }
             }
         });

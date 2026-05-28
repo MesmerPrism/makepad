@@ -626,10 +626,10 @@ impl Cx {
                     .iter_mut()
                     .find(|w| w.window_id == re.window_id)
                 {
-                    self.windows[re.window_id].os_dpi_factor = Some(re.new_geom.dpi_factor);
-                    if let Some(dpi_override) = self.windows[re.window_id].dpi_override {
-                        re.new_geom.inner_size *= re.new_geom.dpi_factor / dpi_override;
-                        re.new_geom.dpi_factor = dpi_override;
+                    {
+                        let cx_window = &mut self.windows[re.window_id];
+                        cx_window.os_dpi_factor = Some(re.new_geom.dpi_factor);
+                        re.new_geom = cx_window.native_window_geom_to_layout(re.new_geom);
                     }
                     window.window_geom = re.new_geom.clone();
                     self.windows[re.window_id].window_geom = re.new_geom.clone();
@@ -886,10 +886,6 @@ impl Cx {
         }
     }
 
-    fn dpi_override_scale(&self, pos: &mut Vec2d, window_id: WindowId) {
-        *pos = self.windows[window_id].remap_dpi_override(*pos)
-    }
-
     fn handle_platform_ops(
         &mut self,
         metal_windows: &mut Vec<MetalWindow>,
@@ -1062,6 +1058,10 @@ impl Cx {
                 }
                 CxOsOp::ShowTextIME(area, pos, _config) => {
                     let pos = area.clipped_rect(self).pos + pos;
+                    let window_id = self
+                        .get_window_id_of(&area)
+                        .unwrap_or(CxWindowPool::id_zero());
+                    let pos = self.windows[window_id].layout_vec2d_to_native_points(pos);
                     metal_windows.iter_mut().for_each(|w| {
                         w.cocoa_window.set_ime_active(true);
                         w.cocoa_window.set_ime_spot(pos);

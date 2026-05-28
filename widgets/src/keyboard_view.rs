@@ -32,7 +32,7 @@ pub struct KeyboardView {
     outer_walk: Walk,
     #[live]
     keyboard_walk: Walk,
-    /// Minimum gap (in logical pixels) preserved between the focused IME field's
+    /// Minimum gap (in Makepad layout points) preserved between the focused IME field's
     /// bottom edge and the top of the on-screen keyboard. Acts as breathing room
     /// so the cursor isn't pressed flush against the keyboard.
     #[live]
@@ -40,14 +40,17 @@ pub struct KeyboardView {
     #[rust]
     next_frame: NextFrame,
 
-    /// Current vertical scroll offset applied to the inner content (logical pixels).
+    /// Current vertical scroll offset applied to the inner content (Makepad layout points).
     #[rust]
     keyboard_shift: f64,
-    /// Last known on-screen keyboard height in logical pixels. Stored so the
+    /// Last known on-screen keyboard height in Makepad layout points. Stored so the
     /// shift can be recomputed when the focused IME area moves due to a layout
     /// reflow that happens while the keyboard stays open.
     #[rust]
     keyboard_height: f64,
+    /// The height observed by the previous post-draw reconcile.
+    #[rust]
+    last_reconciled_keyboard_height: f64,
     #[rust(AnimState::Closed)]
     anim_state: AnimState,
     #[rust]
@@ -75,7 +78,7 @@ enum AnimState {
 
 impl KeyboardView {
     /// Compute the vertical scroll required to keep the focused IME field above
-    /// an on-screen keyboard of `keyboard_height` logical pixels.
+    /// an on-screen keyboard of `keyboard_height` Makepad layout points.
     ///
     /// The keyboard is a window-level obstruction occupying the bottom strip of
     /// the active window, so the calculation is anchored to the window's inner
@@ -109,9 +112,7 @@ impl KeyboardView {
         let keyboard_top = window_inner_size.y - keyboard_height;
         let ime_natural_bottom = ime_rect.pos.y + ime_rect.size.y + self.keyboard_shift;
         let needed = ime_natural_bottom + self.keyboard_min_shift - keyboard_top;
-        needed
-            .max(0.0)
-            .min(keyboard_height)
+        needed.max(0.0).min(keyboard_height)
     }
 
     fn set_keyboard_shift(&mut self, cx: &mut Cx, shift: f64) {
@@ -260,13 +261,12 @@ impl Widget for KeyboardView {
                         self.view.handle_event(cx, event, scope);
                         return;
                     }
-                    // Android reports per-frame IME insets via this settled
-                    // event path. Keep `keyboard_shift` paired with the IME
-                    // area from the last draw; post-draw reconciliation below
-                    // computes the pan after the focused input registers its
-                    // current rect.
                     self.keyboard_height = *height;
                     self.anim_state = AnimState::Open;
+                    if cx.get_ime_area_rect().size.y > 0.0 {
+                        let target = self.compute_target_shift(*height, cx);
+                        self.set_keyboard_shift(cx, target);
+                    }
                     self.redraw(cx);
                 }
                 VirtualKeyboardEvent::DidHide { time } => {
@@ -318,16 +318,21 @@ impl Widget for KeyboardView {
         // Cost: one frame (~16 ms) of unshifted content on first show.
         // Acceptable, and matches what users tolerate elsewhere.
         if matches!(self.anim_state, AnimState::Open) && self.keyboard_height > 0.0 {
-            let new_target = self.compute_target_shift(self.keyboard_height, cx);
-            if (new_target - self.keyboard_shift).abs() > KEYBOARD_SHIFT_EPSILON {
-                let time = cx.time();
-                self.animate_to_shift(
-                    cx,
-                    time,
-                    new_target,
-                    KEYBOARD_RECONCILE_DURATION,
-                    KEYBOARD_RECONCILE_EASE,
-                );
+            if cx.get_ime_area_rect().size.y > 0.0 {
+                let height_changed = (self.keyboard_height - self.last_reconciled_keyboard_height)
+                    .abs()
+                    > KEYBOARD_SHIFT_EPSILON;
+                self.last_reconciled_keyboard_height = self.keyboard_height;
+                let new_target = self.compute_target_shift(self.keyboard_height, cx);
+                if (new_target - self.keyboard_shift).abs() > KEYBOARD_SHIFT_EPSILON {
+                    let time = cx.time();
+                    let duration = if height_changed {
+                        0.0
+                    } else {
+                        KEYBOARD_RECONCILE_DURATION
+                    };
+                    self.animate_to_shift(cx, time, new_target, duration, KEYBOARD_RECONCILE_EASE);
+                }
             }
         }
         DrawStep::done()

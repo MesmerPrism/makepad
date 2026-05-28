@@ -84,7 +84,7 @@ pub use makepad_wasm_bridge;
 pub use makepad_objc_sys;
 
 #[cfg(target_os = "windows")]
-pub use ::windows;
+pub extern crate windows;
 
 pub use makepad_futures;
 pub use makepad_script_std::makepad_network;
@@ -107,6 +107,7 @@ pub use {
         cursor::MouseCursor,
         cx::{Cx, CxRef, LinuxWindowParams, OsType},
         cx_api::{AccessibilityUpdatePayload, CxOsApi, CxOsOp, CxThreadPriority, OpenUrlInPlace},
+        display_context::{DisplayContext, SystemBarAppearance},
         draw_list::{CxDrawCall, CxDrawItem, CxDrawListPool, CxRectArea, DrawList, DrawListId},
         draw_matrix::DrawMatrix,
         draw_pass::{

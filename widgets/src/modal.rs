@@ -182,6 +182,9 @@ impl Modal {
     }
 
     pub fn close(&mut self, cx: &mut Cx) {
+        if !self.is_open {
+            return;
+        }
         // Inform the inner modal content that its modal is being dismissed.
         let content = self.view.widget(cx, ids!(content));
         content.handle_event(
