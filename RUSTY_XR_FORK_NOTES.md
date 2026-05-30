@@ -176,6 +176,17 @@ metadata but leaves MediaCodec without enough frames to prove decoded input
 parity. Treat CPU-YUV decoded cadence and zero-copy surface-texture transport
 as separate performance conclusions.
 
+Broker H.264 stress validation now treats live stereo cadence, per-eye texture
+updates, paired-frame markers, and projection-mapping readiness as one gate.
+Makepad owns the UI/rendering consumer path; the broker owns stream identity,
+module state, and optional sidecar modules such as external Linux/Python
+processors or dedicated biometric communication modules.
+
+The current validated path assumes the broker stream remains live for the full
+measurement window. If broker stream leases expire or the stream server
+restarts, the Makepad consumer should reconnect or surface a hard stale state
+instead of silently continuing with the last decoded texture.
+
 The GL `SurfaceTexture` path remains useful when the renderer is actually
 OpenGL ES: Android MediaCodec and camera preview APIs naturally output to a
 `SurfaceTexture` backed by `GL_TEXTURE_EXTERNAL_OES`. That does not by itself
