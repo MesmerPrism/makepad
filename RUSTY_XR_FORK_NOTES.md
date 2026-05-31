@@ -99,6 +99,10 @@ This branch currently carries:
 - App-visible XR event-state fields for the active per-eye OpenXR local-space
   pose/FOV, so public examples can compute display-eye projection mappings from
   runtime view state instead of hard-coded display constants.
+- App-visible OpenXR hand-mesh bind data for runtimes that expose
+  `XR_FB_hand_tracking_mesh`. The fork keeps this generic: compact mesh
+  status/counts in XR hand state, and full bind poses, joint parents, vertices,
+  normals, UVs, blend indices/weights, and indices behind an on-demand Cx API.
 - An XR environment camera guard so `XrEnv` does not acquire a passthrough
   camera stream unless the environment cube is enabled. This keeps custom
   raw-camera projection examples from competing with Makepad's environment

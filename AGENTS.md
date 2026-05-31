@@ -46,6 +46,9 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
   and `RXYRVID1` stream framing, MediaCodec decode, stream-header metadata
   events, and a CPU-YUV decoded handoff for Vulkan/XR paths without a GL
   external texture handle.
+- Generic OpenXR hand-mesh bind-data access for runtimes that expose
+  `XR_FB_hand_tracking_mesh`, kept as mesh counts/status plus an on-demand API
+  rather than app-specific recording behavior.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 

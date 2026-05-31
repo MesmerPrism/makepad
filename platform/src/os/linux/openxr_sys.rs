@@ -226,6 +226,7 @@ pub struct LibOpenXr {
     pub xrCreateHandTrackerEXT: TxrCreateHandTrackerEXT,
     pub xrDestroyHandTrackerEXT: TxrDestroyHandTrackerEXT,
     pub xrLocateHandJointsEXT: TxrLocateHandJointsEXT,
+    pub xrGetHandMeshFB: Option<TxrGetHandMeshFB>,
     pub xrSetEnvironmentDepthHandRemovalMETA: TxrSetEnvironmentDepthHandRemovalMETA,
     pub xrStartColocationAdvertisementMETA: TxrStartColocationAdvertisementMETA,
     pub xrStopColocationAdvertisementMETA: TxrStopColocationAdvertisementMETA,
@@ -437,6 +438,7 @@ impl LibOpenXr {
             xrCreateHandTrackerEXT: get_proc_addr!(gipa, instance, TxrCreateHandTrackerEXT)?,
             xrDestroyHandTrackerEXT: get_proc_addr!(gipa, instance, TxrDestroyHandTrackerEXT)?,
             xrLocateHandJointsEXT: get_proc_addr!(gipa, instance, TxrLocateHandJointsEXT)?,
+            xrGetHandMeshFB: get_optional_proc_addr!(gipa, instance, TxrGetHandMeshFB),
             xrSetEnvironmentDepthHandRemovalMETA: get_proc_addr!(
                 gipa,
                 instance,
@@ -884,6 +886,11 @@ pub type TxrLocateHandJointsEXT = unsafe extern "C" fn(
     locations: *mut XrHandJointLocationsEXT,
 ) -> XrResult;
 
+pub type TxrGetHandMeshFB = unsafe extern "C" fn(
+    hand_tracker: XrHandTrackerEXT,
+    mesh: *mut XrHandTrackingMeshFB,
+) -> XrResult;
+
 pub type TxrSetEnvironmentDepthHandRemovalMETA = unsafe extern "C" fn(
     environment_depth_provider: XrEnvironmentDepthProviderMETA,
     set_info: *const XrEnvironmentDepthHandRemovalSetInfoMETA,
@@ -1186,6 +1193,24 @@ pub type XrVector3f = crate::makepad_math::Vec3f;
 pub type XrVector2f = crate::makepad_math::Vec2f;
 pub type XrQuaternionf = crate::makepad_math::Quat;
 pub type XrPosef = crate::makepad_math::Pose;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct XrVector4f {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct XrVector4sFB {
+    pub x: i16,
+    pub y: i16,
+    pub z: i16,
+    pub w: i16,
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(transparent)]
@@ -1804,6 +1829,52 @@ impl Default for XrHandTrackingScaleFB {
             current_output: 0.0,
             override_hand_scale: XrBool32(0),
             override_value_input: 0.0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct XrHandTrackingMeshFB {
+    pub ty: XrStructureType,
+    pub next: *mut c_void,
+    pub joint_capacity_input: u32,
+    pub joint_count_output: u32,
+    pub joint_bind_poses: *mut XrPosef,
+    pub joint_radii: *mut f32,
+    pub joint_parents: *mut XrHandJointEXT,
+    pub vertex_capacity_input: u32,
+    pub vertex_count_output: u32,
+    pub vertex_positions: *mut XrVector3f,
+    pub vertex_normals: *mut XrVector3f,
+    pub vertex_uvs: *mut XrVector2f,
+    pub vertex_blend_indices: *mut XrVector4sFB,
+    pub vertex_blend_weights: *mut XrVector4f,
+    pub index_capacity_input: u32,
+    pub index_count_output: u32,
+    pub indices: *mut i16,
+}
+
+impl Default for XrHandTrackingMeshFB {
+    fn default() -> Self {
+        XrHandTrackingMeshFB {
+            ty: XrStructureType::HAND_TRACKING_MESH_FB,
+            next: 0 as *mut _,
+            joint_capacity_input: 0,
+            joint_count_output: 0,
+            joint_bind_poses: 0 as *mut _,
+            joint_radii: 0 as *mut _,
+            joint_parents: 0 as *mut _,
+            vertex_capacity_input: 0,
+            vertex_count_output: 0,
+            vertex_positions: 0 as *mut _,
+            vertex_normals: 0 as *mut _,
+            vertex_uvs: 0 as *mut _,
+            vertex_blend_indices: 0 as *mut _,
+            vertex_blend_weights: 0 as *mut _,
+            index_capacity_input: 0,
+            index_count_output: 0,
+            indices: 0 as *mut _,
         }
     }
 }
@@ -3491,6 +3562,85 @@ impl fmt::Debug for XrSpaceComponentTypeFB {
             write!(fmt, "{}", name)
         } else {
             write!(fmt, "unknown XrSpaceComponentTypeFB {}", self.0)
+        }
+    }
+}
+
+#[repr(transparent)]
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct XrHandJointEXT(i32);
+impl XrHandJointEXT {
+    pub const PALM: XrHandJointEXT = Self(0i32);
+    pub const WRIST: XrHandJointEXT = Self(1i32);
+    pub const THUMB_METACARPAL: XrHandJointEXT = Self(2i32);
+    pub const THUMB_PROXIMAL: XrHandJointEXT = Self(3i32);
+    pub const THUMB_DISTAL: XrHandJointEXT = Self(4i32);
+    pub const THUMB_TIP: XrHandJointEXT = Self(5i32);
+    pub const INDEX_METACARPAL: XrHandJointEXT = Self(6i32);
+    pub const INDEX_PROXIMAL: XrHandJointEXT = Self(7i32);
+    pub const INDEX_INTERMEDIATE: XrHandJointEXT = Self(8i32);
+    pub const INDEX_DISTAL: XrHandJointEXT = Self(9i32);
+    pub const INDEX_TIP: XrHandJointEXT = Self(10i32);
+    pub const MIDDLE_METACARPAL: XrHandJointEXT = Self(11i32);
+    pub const MIDDLE_PROXIMAL: XrHandJointEXT = Self(12i32);
+    pub const MIDDLE_INTERMEDIATE: XrHandJointEXT = Self(13i32);
+    pub const MIDDLE_DISTAL: XrHandJointEXT = Self(14i32);
+    pub const MIDDLE_TIP: XrHandJointEXT = Self(15i32);
+    pub const RING_METACARPAL: XrHandJointEXT = Self(16i32);
+    pub const RING_PROXIMAL: XrHandJointEXT = Self(17i32);
+    pub const RING_INTERMEDIATE: XrHandJointEXT = Self(18i32);
+    pub const RING_DISTAL: XrHandJointEXT = Self(19i32);
+    pub const RING_TIP: XrHandJointEXT = Self(20i32);
+    pub const LITTLE_METACARPAL: XrHandJointEXT = Self(21i32);
+    pub const LITTLE_PROXIMAL: XrHandJointEXT = Self(22i32);
+    pub const LITTLE_INTERMEDIATE: XrHandJointEXT = Self(23i32);
+    pub const LITTLE_DISTAL: XrHandJointEXT = Self(24i32);
+    pub const LITTLE_TIP: XrHandJointEXT = Self(25i32);
+
+    pub fn as_raw(self) -> i32 {
+        self.0
+    }
+}
+impl Default for XrHandJointEXT {
+    fn default() -> Self {
+        Self::PALM
+    }
+}
+impl fmt::Debug for XrHandJointEXT {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let name = match *self {
+            Self::PALM => Some("PALM"),
+            Self::WRIST => Some("WRIST"),
+            Self::THUMB_METACARPAL => Some("THUMB_METACARPAL"),
+            Self::THUMB_PROXIMAL => Some("THUMB_PROXIMAL"),
+            Self::THUMB_DISTAL => Some("THUMB_DISTAL"),
+            Self::THUMB_TIP => Some("THUMB_TIP"),
+            Self::INDEX_METACARPAL => Some("INDEX_METACARPAL"),
+            Self::INDEX_PROXIMAL => Some("INDEX_PROXIMAL"),
+            Self::INDEX_INTERMEDIATE => Some("INDEX_INTERMEDIATE"),
+            Self::INDEX_DISTAL => Some("INDEX_DISTAL"),
+            Self::INDEX_TIP => Some("INDEX_TIP"),
+            Self::MIDDLE_METACARPAL => Some("MIDDLE_METACARPAL"),
+            Self::MIDDLE_PROXIMAL => Some("MIDDLE_PROXIMAL"),
+            Self::MIDDLE_INTERMEDIATE => Some("MIDDLE_INTERMEDIATE"),
+            Self::MIDDLE_DISTAL => Some("MIDDLE_DISTAL"),
+            Self::MIDDLE_TIP => Some("MIDDLE_TIP"),
+            Self::RING_METACARPAL => Some("RING_METACARPAL"),
+            Self::RING_PROXIMAL => Some("RING_PROXIMAL"),
+            Self::RING_INTERMEDIATE => Some("RING_INTERMEDIATE"),
+            Self::RING_DISTAL => Some("RING_DISTAL"),
+            Self::RING_TIP => Some("RING_TIP"),
+            Self::LITTLE_METACARPAL => Some("LITTLE_METACARPAL"),
+            Self::LITTLE_PROXIMAL => Some("LITTLE_PROXIMAL"),
+            Self::LITTLE_INTERMEDIATE => Some("LITTLE_INTERMEDIATE"),
+            Self::LITTLE_DISTAL => Some("LITTLE_DISTAL"),
+            Self::LITTLE_TIP => Some("LITTLE_TIP"),
+            _ => None,
+        };
+        if let Some(name) = name {
+            write!(fmt, "{}", name)
+        } else {
+            write!(fmt, "unknown XrHandJointEXT {}", self.0)
         }
     }
 }

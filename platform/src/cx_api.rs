@@ -10,7 +10,7 @@ use {
         draw_pass::{CxDrawPassParent, CxDrawPassRect, DrawPassId},
         dvec2,
         event::keyboard::CharOffset,
-        event::xr::XrAnchor,
+        event::xr::{XrAnchor, XrHandMeshBindData},
         event::{
             video_playback::CameraPreviewMode, DragItem, Event, NextFrame, QuitReason,
             QuitRequestedEvent, Timer, Trigger, VideoSource,
@@ -216,6 +216,10 @@ pub trait CxOsApi {
     }
 
     fn xr_effective_frame_rate_hz(&self) -> Option<f64> {
+        None
+    }
+
+    fn xr_hand_mesh_bind_data(&self, _is_left: bool) -> Option<XrHandMeshBindData> {
         None
     }
 
@@ -616,6 +620,10 @@ impl Cx {
 
     pub fn xr_effective_frame_rate_hz(&self) -> Option<f64> {
         <Self as CxOsApi>::xr_effective_frame_rate_hz(self)
+    }
+
+    pub fn xr_hand_mesh_bind_data(&self, is_left: bool) -> Option<XrHandMeshBindData> {
+        <Self as CxOsApi>::xr_hand_mesh_bind_data(self, is_left)
     }
 
     pub fn geometry_pool_slot_count(&self) -> usize {

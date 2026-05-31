@@ -29,6 +29,7 @@ use {
         cx_api::{CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown},
         draw_pass::CxDrawPassParent,
         draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
+        event::xr::XrHandMeshBindData,
         event::{
             drag_drop::{DragEvent, DragItem, DragResponse, DropEvent},
             keyboard::{CharOffset, FullTextState, ImeAction, ImeActionEvent},
@@ -3195,6 +3196,14 @@ impl CxOsApi for Cx {
 
     fn xr_effective_frame_rate_hz(&self) -> Option<f64> {
         self.os.xr_effective_frame_rate_hz
+    }
+
+    fn xr_hand_mesh_bind_data(&self, is_left: bool) -> Option<XrHandMeshBindData> {
+        self.os
+            .openxr
+            .session
+            .as_ref()
+            .and_then(|session| session.inputs.hand_mesh_bind_data(is_left))
     }
 }
 

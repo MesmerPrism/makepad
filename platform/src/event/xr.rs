@@ -95,6 +95,65 @@ impl XrController {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, SerBin, DeBin)]
+pub struct XrHandMeshState {
+    pub flags: u8,
+    pub joint_count: u32,
+    pub vertex_count: u32,
+    pub index_count: u32,
+    pub triangle_count: u32,
+    pub bind_version: u32,
+}
+
+impl XrHandMeshState {
+    pub const FUNCTION_AVAILABLE: u8 = 1 << 0;
+    pub const LOAD_ATTEMPTED: u8 = 1 << 1;
+    pub const BIND_READY: u8 = 1 << 2;
+    pub const LOAD_FAILED: u8 = 1 << 3;
+    pub const INDEX_COUNT_TRIANGULATED: u8 = 1 << 4;
+
+    pub fn function_available(&self) -> bool {
+        self.flags & Self::FUNCTION_AVAILABLE != 0
+    }
+
+    pub fn load_attempted(&self) -> bool {
+        self.flags & Self::LOAD_ATTEMPTED != 0
+    }
+
+    pub fn bind_ready(&self) -> bool {
+        self.flags & Self::BIND_READY != 0
+    }
+
+    pub fn load_failed(&self) -> bool {
+        self.flags & Self::LOAD_FAILED != 0
+    }
+
+    pub fn index_count_triangulated(&self) -> bool {
+        self.flags & Self::INDEX_COUNT_TRIANGULATED != 0
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct XrHandMeshBindData {
+    pub is_left: bool,
+    pub bind_version: u32,
+    pub joint_bind_poses: Vec<Pose>,
+    pub joint_radii: Vec<f32>,
+    pub joint_parent_indices: Vec<i32>,
+    pub vertex_positions: Vec<Vec3f>,
+    pub vertex_normals: Vec<Vec3f>,
+    pub vertex_uvs: Vec<Vec2f>,
+    pub vertex_blend_indices: Vec<[i16; 4]>,
+    pub vertex_blend_weights: Vec<[f32; 4]>,
+    pub indices: Vec<i16>,
+}
+
+impl XrHandMeshBindData {
+    pub fn triangle_count(&self) -> usize {
+        self.indices.len() / 3
+    }
+}
+
 #[derive(Clone, Debug, Default, SerBin, DeBin)]
 pub struct XrHand {
     pub flags: u8,
@@ -103,6 +162,7 @@ pub struct XrHand {
     pub tips_active: u8,
     pub aim_pose: Pose,
     pub pinch: [u8; 4],
+    pub mesh: XrHandMeshState,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

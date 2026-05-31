@@ -54,6 +54,7 @@ impl CxOpenXrSession {
             local_space,
             predicted_display_time,
             &self.inputs.actions,
+            true,
         );
         let right_hand = self.inputs.right_hand.poll(
             xr,
@@ -61,6 +62,7 @@ impl CxOpenXrSession {
             local_space,
             predicted_display_time,
             &self.inputs.actions,
+            false,
         );
 
         let anchor = self
@@ -138,8 +140,171 @@ pub struct CxOpenXrHand {
     path: XrPath,
     tracker: XrHandTrackerEXT,
     joint_locations: [XrHandJointLocationEXT; HAND_JOINT_COUNT_EXT],
+    mesh: CxOpenXrHandMesh,
     grab_active: bool,
     last_hand: XrHand,
+}
+
+#[derive(Default)]
+struct CxOpenXrHandMesh {
+    status: XrHandMeshState,
+    bind_data: Option<XrHandMeshBindData>,
+    load_attempted: bool,
+}
+
+impl CxOpenXrHandMesh {
+    fn ensure_loaded(&mut self, xr: &LibOpenXr, tracker: XrHandTrackerEXT, is_left: bool) {
+        if self.load_attempted {
+            return;
+        }
+
+        self.load_attempted = true;
+        self.status.flags |= XrHandMeshState::LOAD_ATTEMPTED;
+
+        let Some(get_hand_mesh) = xr.xrGetHandMeshFB else {
+            self.status.flags |= XrHandMeshState::LOAD_FAILED;
+            return;
+        };
+
+        self.status.flags |= XrHandMeshState::FUNCTION_AVAILABLE;
+        let bind_version = self.status.bind_version.wrapping_add(1);
+        match Self::load_bind_data(get_hand_mesh, tracker, is_left, bind_version) {
+            Ok((status, bind_data)) => {
+                crate::log!(
+                    "OpenXR hand mesh bind data ready hand={} joints={} vertices={} indices={} triangles={}",
+                    if is_left { "left" } else { "right" },
+                    status.joint_count,
+                    status.vertex_count,
+                    status.index_count,
+                    status.triangle_count
+                );
+                self.status = status;
+                self.bind_data = Some(bind_data);
+            }
+            Err(err) => {
+                self.status.flags |= XrHandMeshState::LOAD_FAILED;
+                self.bind_data = None;
+                crate::warning!(
+                    "OpenXR hand mesh bind data unavailable hand={}: {}",
+                    if is_left { "left" } else { "right" },
+                    err
+                );
+            }
+        }
+    }
+
+    fn load_bind_data(
+        get_hand_mesh: TxrGetHandMeshFB,
+        tracker: XrHandTrackerEXT,
+        is_left: bool,
+        bind_version: u32,
+    ) -> Result<(XrHandMeshState, XrHandMeshBindData), String> {
+        let mut mesh = XrHandTrackingMeshFB::default();
+        let result = unsafe { get_hand_mesh(tracker, &mut mesh) };
+        if result != XrResult::SUCCESS && result != XrResult::ERROR_SIZE_INSUFFICIENT {
+            return Err(format!("count query failed: {result}"));
+        }
+
+        let joint_capacity = mesh.joint_count_output as usize;
+        let vertex_capacity = mesh.vertex_count_output as usize;
+        let index_capacity = mesh.index_count_output as usize;
+        if joint_capacity == 0 || vertex_capacity == 0 || index_capacity < 3 {
+            return Err(format!(
+                "invalid counts joints={} vertices={} indices={}",
+                joint_capacity, vertex_capacity, index_capacity
+            ));
+        }
+
+        let mut joint_bind_poses = vec![XrPosef::default(); joint_capacity];
+        let mut joint_radii = vec![0.0f32; joint_capacity];
+        let mut joint_parents = vec![XrHandJointEXT::default(); joint_capacity];
+        let mut vertex_positions = vec![XrVector3f::default(); vertex_capacity];
+        let mut vertex_normals = vec![XrVector3f::default(); vertex_capacity];
+        let mut vertex_uvs = vec![XrVector2f::default(); vertex_capacity];
+        let mut vertex_blend_indices = vec![XrVector4sFB::default(); vertex_capacity];
+        let mut vertex_blend_weights = vec![XrVector4f::default(); vertex_capacity];
+        let mut indices = vec![0i16; index_capacity];
+
+        let mut mesh = XrHandTrackingMeshFB {
+            joint_capacity_input: joint_capacity as u32,
+            joint_bind_poses: joint_bind_poses.as_mut_ptr(),
+            joint_radii: joint_radii.as_mut_ptr(),
+            joint_parents: joint_parents.as_mut_ptr(),
+            vertex_capacity_input: vertex_capacity as u32,
+            vertex_positions: vertex_positions.as_mut_ptr(),
+            vertex_normals: vertex_normals.as_mut_ptr(),
+            vertex_uvs: vertex_uvs.as_mut_ptr(),
+            vertex_blend_indices: vertex_blend_indices.as_mut_ptr(),
+            vertex_blend_weights: vertex_blend_weights.as_mut_ptr(),
+            index_capacity_input: index_capacity as u32,
+            indices: indices.as_mut_ptr(),
+            ..Default::default()
+        };
+        let result = unsafe { get_hand_mesh(tracker, &mut mesh) };
+        if result != XrResult::SUCCESS {
+            return Err(format!("data query failed: {result}"));
+        }
+
+        let joint_count = (mesh.joint_count_output as usize).min(joint_capacity);
+        let vertex_count = (mesh.vertex_count_output as usize).min(vertex_capacity);
+        let index_count = (mesh.index_count_output as usize).min(index_capacity);
+        if joint_count == 0 || vertex_count == 0 || index_count < 3 {
+            return Err(format!(
+                "invalid returned counts joints={} vertices={} indices={}",
+                joint_count, vertex_count, index_count
+            ));
+        }
+
+        joint_bind_poses.truncate(joint_count);
+        joint_radii.truncate(joint_count);
+        joint_parents.truncate(joint_count);
+        vertex_positions.truncate(vertex_count);
+        vertex_normals.truncate(vertex_count);
+        vertex_uvs.truncate(vertex_count);
+        vertex_blend_indices.truncate(vertex_count);
+        vertex_blend_weights.truncate(vertex_count);
+        indices.truncate(index_count);
+
+        let mut flags = XrHandMeshState::FUNCTION_AVAILABLE
+            | XrHandMeshState::LOAD_ATTEMPTED
+            | XrHandMeshState::BIND_READY;
+        if index_count % 3 == 0 {
+            flags |= XrHandMeshState::INDEX_COUNT_TRIANGULATED;
+        }
+
+        let status = XrHandMeshState {
+            flags,
+            joint_count: joint_count as u32,
+            vertex_count: vertex_count as u32,
+            index_count: index_count as u32,
+            triangle_count: (index_count / 3) as u32,
+            bind_version,
+        };
+        let bind_data = XrHandMeshBindData {
+            is_left,
+            bind_version,
+            joint_bind_poses,
+            joint_radii,
+            joint_parent_indices: joint_parents
+                .into_iter()
+                .map(XrHandJointEXT::as_raw)
+                .collect(),
+            vertex_positions,
+            vertex_normals,
+            vertex_uvs,
+            vertex_blend_indices: vertex_blend_indices
+                .into_iter()
+                .map(|v| [v.x, v.y, v.z, v.w])
+                .collect(),
+            vertex_blend_weights: vertex_blend_weights
+                .into_iter()
+                .map(|v| [v.x, v.y, v.z, v.w])
+                .collect(),
+            indices,
+        };
+
+        Ok((status, bind_data))
+    }
 }
 
 impl CxOpenXrHand {
@@ -154,7 +319,9 @@ impl CxOpenXrHand {
         local_space: XrSpace,
         time: XrTime,
         actions: &CxOpenXrInputActions,
+        is_left: bool,
     ) -> XrHand {
+        self.mesh.ensure_loaded(xr, self.tracker, is_left);
         let mut scale = XrHandTrackingScaleFB {
             sensor_output: 1.0,
             current_output: 1.0,
@@ -294,6 +461,7 @@ impl CxOpenXrHand {
             (aim_state.pinch_strength_ring * u8::MAX as f32) as u8;
         hand.pinch[XrHand::PINCH_STRENGTH_LITTLE] =
             (aim_state.pinch_strength_little * u8::MAX as f32) as u8;
+        hand.mesh = self.mesh.status;
         self.last_hand = hand.clone();
         hand
     }
@@ -494,6 +662,15 @@ impl CxOpenXrController {
 }
 
 impl CxOpenXrInputs {
+    pub(crate) fn hand_mesh_bind_data(&self, is_left: bool) -> Option<XrHandMeshBindData> {
+        let hand = if is_left {
+            &self.left_hand
+        } else {
+            &self.right_hand
+        };
+        hand.mesh.bind_data.clone()
+    }
+
     pub fn new_inputs(
         xr: &LibOpenXr,
         session: XrSession,
@@ -998,6 +1175,7 @@ impl CxOpenXrInputs {
                 path: left_hand_path,
                 tracker: left_hand_track,
                 joint_locations: Default::default(),
+                mesh: CxOpenXrHandMesh::default(),
                 grab_active: false,
                 last_hand: XrHand::default(),
             },
@@ -1005,6 +1183,7 @@ impl CxOpenXrInputs {
                 path: right_hand_path,
                 tracker: right_hand_track,
                 joint_locations: Default::default(),
+                mesh: CxOpenXrHandMesh::default(),
                 grab_active: false,
                 last_hand: XrHand::default(),
             },
