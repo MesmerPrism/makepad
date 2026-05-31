@@ -12,12 +12,12 @@ script_mod! {
         candle_up_color: #x26a69a
         candle_down_color: #xef5350
         wick_color: #x888888
-        grid_color: #x2a2a3e
-        grid_text_color: #x777777
-        border_color: #x3a3a4e
+        grid_color: #xe6e0d766
+        grid_text_color: #x746d64
+        border_color: #x00000000
         high_line_color: #x4db6ac
         low_line_color: #xef9a9a
-        bg_color: #x1a1a2e
+        bg_color: #xf9faf7
         candle_width_fraction: 0.7
         line_color: #x4fc3f7
         line_width: 2.0
@@ -30,12 +30,12 @@ script_mod! {
 
         draw_bg +: {
             draw_depth: 0.0
-            color: #x1a1a2e
+            color: #xf9faf7
         }
 
         draw_grid_line +: {
             draw_depth: 0.1
-            color: #x2a2a3e
+            color: #xe6e0d766
         }
 
         draw_vector +: {
@@ -44,7 +44,7 @@ script_mod! {
 
         draw_text +: {
             draw_depth: 3.0
-            color: #x777777
+            color: #x746d64
         }
     }
 
@@ -1162,14 +1162,31 @@ pub fn generate_fake_scatter_data(count: usize) -> Vec<DataPoint> {
 
 // ---- Helper: draw common grid/border for point-data charts ----
 
-fn draw_point_chart_grid(chart_view: &mut ChartView, cx: &mut Cx2d, vp: &ChartViewport) {
-    let y_ticks = nice_ticks(vp.y_min, vp.y_max, 8);
-    let y_labels: Vec<String> = y_ticks.iter().map(|v| format!("{:.1}", v)).collect();
-    chart_view.draw_grid_y(cx, &y_ticks, &y_labels);
+const POINT_CHART_Y_GRID_LINES: usize = 3;
+const POINT_CHART_X_GRID_LINES: usize = 4;
 
-    let x_ticks = nice_ticks(vp.x_min, vp.x_max, 10);
-    let x_labels: Vec<String> = x_ticks.iter().map(|v| format!("{}", *v as i64)).collect();
-    chart_view.draw_grid_x(cx, &x_ticks, &x_labels);
+fn draw_point_chart_grid(chart_view: &mut ChartView, cx: &mut Cx2d, vp: &ChartViewport) {
+    let y_step = vp.y_range() / POINT_CHART_Y_GRID_LINES as f64;
+    if y_step.is_finite() && y_step > 0.0 {
+        for index in 1..POINT_CHART_Y_GRID_LINES {
+            chart_view.draw_grid_line_h(
+                cx,
+                vp.y_min + y_step * index as f64,
+                chart_view.grid_color,
+            );
+        }
+    }
+
+    let x_step = vp.x_range() / POINT_CHART_X_GRID_LINES as f64;
+    if x_step.is_finite() && x_step > 0.0 {
+        for index in 1..POINT_CHART_X_GRID_LINES {
+            chart_view.draw_grid_line_v(
+                cx,
+                vp.x_min + x_step * index as f64,
+                chart_view.grid_color,
+            );
+        }
+    }
 
     chart_view.draw_plot_border(cx);
 }
@@ -1185,6 +1202,8 @@ pub struct LineChart {
     #[rust]
     data: FlatPointData,
     #[rust]
+    y_axis_range: Option<(f64, f64)>,
+    #[rust]
     initialized: bool,
 }
 
@@ -1192,6 +1211,31 @@ impl LineChart {
     pub fn set_data(&mut self, points: Vec<DataPoint>) {
         self.data = FlatPointData::new(points);
         self.initialized = false;
+    }
+
+    pub fn set_y_axis_range(&mut self, range: Option<(f64, f64)>) {
+        self.y_axis_range = range.and_then(|(min, max)| {
+            if min.is_finite() && max.is_finite() && min < max {
+                Some((min, max))
+            } else {
+                None
+            }
+        });
+        self.initialized = false;
+    }
+
+    pub fn set_line_style(&mut self, color: Vec4f, width: f32) {
+        self.chart_view.line_color = color;
+        self.chart_view.line_width = width.max(0.25);
+    }
+
+    fn apply_y_axis_range(&mut self) {
+        if let Some((min, max)) = self.y_axis_range {
+            self.chart_view.viewport.y_min = min;
+            self.chart_view.viewport.y_max = max;
+        } else {
+            self.chart_view.fit_point_data_y(&self.data);
+        }
     }
 }
 
@@ -1206,10 +1250,11 @@ impl Widget for LineChart {
                 self.data = FlatPointData::new(generate_fake_line_data(200));
             }
             self.chart_view.fit_point_data(&self.data);
+            self.apply_y_axis_range();
             self.initialized = true;
         }
 
-        self.chart_view.fit_point_data_y(&self.data);
+        self.apply_y_axis_range();
         self.chart_view.begin(cx, walk);
 
         let vp = self.chart_view.viewport().clone();
@@ -1229,6 +1274,9 @@ impl Widget for LineChart {
             let color = self.chart_view.line_color;
             let width = self.chart_view.line_width;
             self.chart_view.draw_line_series(&pts, color, width);
+            if let Some(last) = pts.last() {
+                self.chart_view.draw_dot(last.x, last.y, 2.8, color);
+            }
         }
 
         self.chart_view.end(cx);
