@@ -201,6 +201,24 @@ struct VulkanVideoCombinedImmutableSamplerKey {
     sampler: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct VulkanExternalYcbcrSamplerKey {
+    external_format: u64,
+    ycbcr_model: i32,
+    ycbcr_range: i32,
+    component_mapping: [i32; 4],
+    x_chroma_offset: i32,
+    y_chroma_offset: i32,
+    chroma_filter: i32,
+    force_explicit_reconstruction: bool,
+}
+
+struct VulkanExternalYcbcrSampler {
+    sampler: vk::Sampler,
+    conversion: vk::SamplerYcbcrConversion,
+    metadata: VideoTextureYcbcrConversionMetadata,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct VulkanRenderPassKey {
     color_formats: Vec<i32>,
@@ -270,6 +288,7 @@ struct VulkanTextureResource {
     sampler: Option<vk::Sampler>,
     ycbcr_conversion: Option<vk::SamplerYcbcrConversion>,
     ycbcr_conversion_metadata: Option<VideoTextureYcbcrConversionMetadata>,
+    owns_sampler_ycbcr_conversion: bool,
     owns_image: bool,
 }
 
@@ -400,6 +419,7 @@ pub struct CxVulkan {
     geometries: HashMap<GeometryId, VulkanGeometryResource>,
     textures: HashMap<VulkanTextureKey, VulkanTextureResource>,
     retired_texture_resources: Vec<RetiredTextureResource>,
+    external_ycbcr_samplers: HashMap<VulkanExternalYcbcrSamplerKey, VulkanExternalYcbcrSampler>,
     reported_video_descriptor_shapes: HashSet<(usize, usize, usize, usize)>,
     frame_resources: FrameResources,
     command_pool: vk::CommandPool,
@@ -730,6 +750,7 @@ impl CxVulkan {
             geometries: HashMap::new(),
             textures: HashMap::new(),
             retired_texture_resources: Vec::new(),
+            external_ycbcr_samplers: HashMap::new(),
             reported_video_descriptor_shapes: HashSet::new(),
             frame_resources: FrameResources::default(),
             command_pool,
@@ -1132,6 +1153,7 @@ impl CxVulkan {
             geometries: HashMap::new(),
             textures: HashMap::new(),
             retired_texture_resources: Vec::new(),
+            external_ycbcr_samplers: HashMap::new(),
             reported_video_descriptor_shapes: HashSet::new(),
             frame_resources: FrameResources::default(),
             command_pool,
@@ -4163,6 +4185,7 @@ impl CxVulkan {
             sampler: None,
             ycbcr_conversion: None,
             ycbcr_conversion_metadata: None,
+            owns_sampler_ycbcr_conversion: false,
             owns_image: true,
         })
     }
@@ -4299,6 +4322,7 @@ impl CxVulkan {
             sampler: None,
             ycbcr_conversion: None,
             ycbcr_conversion_metadata: None,
+            owns_sampler_ycbcr_conversion: false,
             owns_image: true,
         })
     }
@@ -4480,6 +4504,7 @@ impl CxVulkan {
             sampler: None,
             ycbcr_conversion: None,
             ycbcr_conversion_metadata: None,
+            owns_sampler_ycbcr_conversion: false,
             owns_image: true,
         })
     }
@@ -4592,6 +4617,7 @@ impl CxVulkan {
             sampler: None,
             ycbcr_conversion: None,
             ycbcr_conversion_metadata: None,
+            owns_sampler_ycbcr_conversion: false,
             owns_image: true,
         })
     }
@@ -4614,12 +4640,14 @@ impl CxVulkan {
 
     fn destroy_texture_resource(&self, resource: VulkanTextureResource) {
         unsafe {
-            if let Some(sampler) = resource.sampler {
-                self.device.destroy_sampler(sampler, None);
-            }
-            if let Some(conversion) = resource.ycbcr_conversion {
-                self.device
-                    .destroy_sampler_ycbcr_conversion(conversion, None);
+            if resource.owns_sampler_ycbcr_conversion {
+                if let Some(sampler) = resource.sampler {
+                    self.device.destroy_sampler(sampler, None);
+                }
+                if let Some(conversion) = resource.ycbcr_conversion {
+                    self.device
+                        .destroy_sampler_ycbcr_conversion(conversion, None);
+                }
             }
             for face_view in resource.face_views {
                 if face_view != vk::ImageView::null() {
@@ -4870,9 +4898,173 @@ impl CxVulkan {
             sampler: None,
             ycbcr_conversion: None,
             ycbcr_conversion_metadata: None,
+            owns_sampler_ycbcr_conversion: false,
             owns_image: true,
         };
         Ok(resource)
+    }
+
+    fn external_ycbcr_sampler_key(
+        external_format: u64,
+        component_mapping: vk::ComponentMapping,
+        ycbcr_model: vk::SamplerYcbcrModelConversion,
+        ycbcr_range: vk::SamplerYcbcrRange,
+        x_chroma_offset: vk::ChromaLocation,
+        y_chroma_offset: vk::ChromaLocation,
+    ) -> VulkanExternalYcbcrSamplerKey {
+        VulkanExternalYcbcrSamplerKey {
+            external_format,
+            ycbcr_model: ycbcr_model.as_raw(),
+            ycbcr_range: ycbcr_range.as_raw(),
+            component_mapping: [
+                component_mapping.r.as_raw(),
+                component_mapping.g.as_raw(),
+                component_mapping.b.as_raw(),
+                component_mapping.a.as_raw(),
+            ],
+            x_chroma_offset: x_chroma_offset.as_raw(),
+            y_chroma_offset: y_chroma_offset.as_raw(),
+            chroma_filter: vk::Filter::LINEAR.as_raw(),
+            force_explicit_reconstruction: false,
+        }
+    }
+
+    fn get_or_create_external_ycbcr_sampler(
+        &mut self,
+        external_format: u64,
+        format_props: &vk::AndroidHardwareBufferFormatPropertiesANDROID,
+    ) -> Result<
+        (
+            vk::SamplerYcbcrConversion,
+            vk::Sampler,
+            VideoTextureYcbcrConversionMetadata,
+            bool,
+            vk::SamplerYcbcrModelConversion,
+            vk::SamplerYcbcrRange,
+            vk::SamplerYcbcrModelConversion,
+            vk::SamplerYcbcrRange,
+            String,
+        ),
+        String,
+    > {
+        let suggested_ycbcr_model = format_props.suggested_ycbcr_model;
+        let suggested_ycbcr_range = format_props.suggested_ycbcr_range;
+        let effective_ycbcr_model = vk::SamplerYcbcrModelConversion::YCBCR_601;
+        let effective_ycbcr_range = vk::SamplerYcbcrRange::ITU_NARROW;
+        let component_mapping = format_props.sampler_ycbcr_conversion_components;
+        let x_chroma_offset = format_props.suggested_x_chroma_offset;
+        let y_chroma_offset = format_props.suggested_y_chroma_offset;
+        let ycbcr_components = ycbcr_component_mapping_label(component_mapping);
+        let key = Self::external_ycbcr_sampler_key(
+            external_format,
+            component_mapping,
+            effective_ycbcr_model,
+            effective_ycbcr_range,
+            x_chroma_offset,
+            y_chroma_offset,
+        );
+
+        if let Some(cached) = self.external_ycbcr_samplers.get(&key) {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_IMPORT schema=rusty.xr.makepad-vulkan-video-import.v1 phase=ycbcr-sampler-cache status=reused externalFormat={} samplerHandle={} conversionHandle={} samplerBindingMode=combined-immutable-sampler stableImmutableSampler=true pipelineKeyStable=true colorFixAttempt=hwb-external-combined-immutable-v4-default-sampler-remap",
+                external_format,
+                cached.sampler.as_raw(),
+                cached.conversion.as_raw(),
+            );
+            return Ok((
+                cached.conversion,
+                cached.sampler,
+                cached.metadata.clone(),
+                true,
+                suggested_ycbcr_model,
+                suggested_ycbcr_range,
+                effective_ycbcr_model,
+                effective_ycbcr_range,
+                ycbcr_components,
+            ));
+        }
+
+        let mut conversion_external_format =
+            vk::ExternalFormatANDROID::default().external_format(external_format);
+        let conversion_info = vk::SamplerYcbcrConversionCreateInfo::default()
+            .push_next(&mut conversion_external_format)
+            .format(vk::Format::UNDEFINED)
+            .ycbcr_model(effective_ycbcr_model)
+            .ycbcr_range(effective_ycbcr_range)
+            .components(component_mapping)
+            .x_chroma_offset(x_chroma_offset)
+            .y_chroma_offset(y_chroma_offset)
+            .chroma_filter(vk::Filter::LINEAR)
+            .force_explicit_reconstruction(false);
+        let ycbcr_conversion = unsafe {
+            self.device
+                .create_sampler_ycbcr_conversion(&conversion_info, None)
+        }
+        .map_err(|e| {
+            format!("Android Vulkan camera import failed: create_sampler_ycbcr_conversion: {e:?}")
+        })?;
+
+        let mut sampler_conversion =
+            vk::SamplerYcbcrConversionInfo::default().conversion(ycbcr_conversion);
+        let sampler_info = vk::SamplerCreateInfo::default()
+            .push_next(&mut sampler_conversion)
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .unnormalized_coordinates(false)
+            .compare_enable(false)
+            .min_lod(0.0)
+            .max_lod(vk::LOD_CLAMP_NONE);
+        let sampler = unsafe { self.device.create_sampler(&sampler_info, None) }.map_err(|e| {
+            unsafe {
+                self.device
+                    .destroy_sampler_ycbcr_conversion(ycbcr_conversion, None);
+            }
+            format!("Android Vulkan camera import failed: create_sampler(external): {e:?}")
+        })?;
+
+        let metadata = VideoTextureYcbcrConversionMetadata {
+            suggested_model: format!("{suggested_ycbcr_model:?}"),
+            suggested_range: format!("{suggested_ycbcr_range:?}"),
+            effective_model: format!("{effective_ycbcr_model:?}"),
+            effective_range: format!("{effective_ycbcr_range:?}"),
+            components: ycbcr_components.clone(),
+            suggested_x_chroma_offset: format!("{x_chroma_offset:?}"),
+            suggested_y_chroma_offset: format!("{y_chroma_offset:?}"),
+            conversion_mode: "forced-bt601-limited-cpuyuv-reference".to_string(),
+            sampler_binding_mode: "combined-immutable-sampler".to_string(),
+            sampler_binding_compliance: "pure-hwb-reference-combined-immutable".to_string(),
+            shader_sample_lowering: "textureSampleLevel_combined_image_sampler_same_binding"
+                .to_string(),
+        };
+        self.external_ycbcr_samplers.insert(
+            key,
+            VulkanExternalYcbcrSampler {
+                sampler,
+                conversion: ycbcr_conversion,
+                metadata: metadata.clone(),
+            },
+        );
+        crate::log!(
+            "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_IMPORT schema=rusty.xr.makepad-vulkan-video-import.v1 phase=ycbcr-sampler-cache status=created externalFormat={} samplerHandle={} conversionHandle={} samplerBindingMode=combined-immutable-sampler stableImmutableSampler=true pipelineKeyStable=true colorFixAttempt=hwb-external-combined-immutable-v4-default-sampler-remap",
+            external_format,
+            sampler.as_raw(),
+            ycbcr_conversion.as_raw(),
+        );
+        Ok((
+            ycbcr_conversion,
+            sampler,
+            metadata,
+            false,
+            suggested_ycbcr_model,
+            suggested_ycbcr_range,
+            effective_ycbcr_model,
+            effective_ycbcr_range,
+            ycbcr_components,
+        ))
     }
 
     fn create_imported_external_hardware_buffer_texture_resource(
@@ -5000,49 +5192,25 @@ impl CxVulkan {
             ));
         }
 
-        let mut conversion_external_format =
-            vk::ExternalFormatANDROID::default().external_format(external_format);
-        let suggested_ycbcr_model = format_props.suggested_ycbcr_model;
-        let suggested_ycbcr_range = format_props.suggested_ycbcr_range;
-        let effective_ycbcr_model = vk::SamplerYcbcrModelConversion::YCBCR_601;
-        let effective_ycbcr_range = vk::SamplerYcbcrRange::ITU_NARROW;
-        let ycbcr_components =
-            ycbcr_component_mapping_label(format_props.sampler_ycbcr_conversion_components);
-        let ycbcr_conversion_metadata = VideoTextureYcbcrConversionMetadata {
-            suggested_model: format!("{suggested_ycbcr_model:?}"),
-            suggested_range: format!("{suggested_ycbcr_range:?}"),
-            effective_model: format!("{effective_ycbcr_model:?}"),
-            effective_range: format!("{effective_ycbcr_range:?}"),
-            components: ycbcr_components.clone(),
-            suggested_x_chroma_offset: format!("{:?}", format_props.suggested_x_chroma_offset),
-            suggested_y_chroma_offset: format!("{:?}", format_props.suggested_y_chroma_offset),
-            conversion_mode: "forced-bt601-limited-cpuyuv-reference".to_string(),
-            sampler_binding_mode: "combined-immutable-sampler".to_string(),
-            sampler_binding_compliance: "pure-hwb-reference-combined-immutable".to_string(),
-            shader_sample_lowering: "textureSampleLevel_combined_image_sampler_same_binding"
-                .to_string(),
-        };
-        let conversion_info = vk::SamplerYcbcrConversionCreateInfo::default()
-            .push_next(&mut conversion_external_format)
-            .format(vk::Format::UNDEFINED)
-            .ycbcr_model(effective_ycbcr_model)
-            .ycbcr_range(effective_ycbcr_range)
-            .components(format_props.sampler_ycbcr_conversion_components)
-            .x_chroma_offset(format_props.suggested_x_chroma_offset)
-            .y_chroma_offset(format_props.suggested_y_chroma_offset)
-            .chroma_filter(vk::Filter::LINEAR)
-            .force_explicit_reconstruction(false);
-        let ycbcr_conversion = unsafe {
-            self.device
-                .create_sampler_ycbcr_conversion(&conversion_info, None)
-        }
-        .map_err(|e| {
-            unsafe {
-                self.device.free_memory(memory, None);
-                self.device.destroy_image(image, None);
-            }
-            format!("Android Vulkan camera import failed: create_sampler_ycbcr_conversion: {e:?}")
-        })?;
+        let (
+            ycbcr_conversion,
+            sampler,
+            ycbcr_conversion_metadata,
+            ycbcr_sampler_cache_reused,
+            suggested_ycbcr_model,
+            suggested_ycbcr_range,
+            effective_ycbcr_model,
+            effective_ycbcr_range,
+            ycbcr_components,
+        ) = self
+            .get_or_create_external_ycbcr_sampler(external_format, &format_props)
+            .map_err(|err| {
+                unsafe {
+                    self.device.free_memory(memory, None);
+                    self.device.destroy_image(image, None);
+                }
+                err
+            })?;
 
         let mut view_conversion =
             vk::SamplerYcbcrConversionInfo::default().conversion(ycbcr_conversion);
@@ -5063,8 +5231,6 @@ impl CxVulkan {
             Ok(view) => view,
             Err(e) => {
                 unsafe {
-                    self.device
-                        .destroy_sampler_ycbcr_conversion(ycbcr_conversion, None);
                     self.device.free_memory(memory, None);
                     self.device.destroy_image(image, None);
                 }
@@ -5074,36 +5240,11 @@ impl CxVulkan {
             }
         };
 
-        let mut sampler_conversion =
-            vk::SamplerYcbcrConversionInfo::default().conversion(ycbcr_conversion);
-        let sampler_info = vk::SamplerCreateInfo::default()
-            .push_next(&mut sampler_conversion)
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .unnormalized_coordinates(false)
-            .compare_enable(false)
-            .min_lod(0.0)
-            .max_lod(vk::LOD_CLAMP_NONE);
-        let sampler = unsafe { self.device.create_sampler(&sampler_info, None) }.map_err(|e| {
-            unsafe {
-                self.device.destroy_image_view(view, None);
-                self.device
-                    .destroy_sampler_ycbcr_conversion(ycbcr_conversion, None);
-                self.device.free_memory(memory, None);
-                self.device.destroy_image(image, None);
-            }
-            format!("Android Vulkan camera import failed: create_sampler(external): {e:?}")
-        })?;
-
         unsafe {
             ndk_sys::AHardwareBuffer_acquire(hardware_buffer);
         }
         crate::log!(
-            "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_IMPORT schema=rusty.xr.makepad-vulkan-video-import.v1 path=external-ahardwarebuffer-ycbcr size={}x{} vkFormat={:?} externalFormat={} samplerYcbcrConversion=true resourceSampler=true resourceShape=image-view-plus-combined-immutable-sampler-ycbcr-conversion importImageLayout=shader-read-transition initialLayout=undefined descriptorImageLayout=shader-read-only-optimal suggestedYcbcrModel={:?} suggestedYcbcrRange={:?} effectiveYcbcrModel={:?} effectiveYcbcrRange={:?} ycbcrComponents={} suggestedXChromaOffset={:?} suggestedYChromaOffset={:?} conversionMode=forced-bt601-limited-cpuyuv-reference samplerBindingMode=combined-immutable-sampler samplerBindingCompliance=pure-hwb-reference-combined-immutable combinedImageSampler=true immutableSampler=true shaderSampleLowering=textureSampleLevel_combined_image_sampler_same_binding colorFixAttempt=hwb-external-combined-immutable-v4-default-sampler-remap",
+            "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_IMPORT schema=rusty.xr.makepad-vulkan-video-import.v1 path=external-ahardwarebuffer-ycbcr size={}x{} vkFormat={:?} externalFormat={} samplerYcbcrConversion=true resourceSampler=true resourceShape=image-view-plus-combined-immutable-sampler-ycbcr-conversion importImageLayout=shader-read-transition initialLayout=undefined descriptorImageLayout=shader-read-only-optimal suggestedYcbcrModel={:?} suggestedYcbcrRange={:?} effectiveYcbcrModel={:?} effectiveYcbcrRange={:?} ycbcrComponents={} suggestedXChromaOffset={:?} suggestedYChromaOffset={:?} conversionMode=forced-bt601-limited-cpuyuv-reference samplerBindingMode=combined-immutable-sampler samplerBindingCompliance=pure-hwb-reference-combined-immutable combinedImageSampler=true immutableSampler=true ycbcrSamplerCacheReused={} stableImmutableSampler=true shaderSampleLowering=textureSampleLevel_combined_image_sampler_same_binding colorFixAttempt=hwb-external-combined-immutable-v4-default-sampler-remap",
             width.max(1),
             height.max(1),
             vk_format,
@@ -5115,6 +5256,7 @@ impl CxVulkan {
             ycbcr_components,
             format_props.suggested_x_chroma_offset,
             format_props.suggested_y_chroma_offset,
+            ycbcr_sampler_cache_reused,
         );
 
         Ok((
@@ -5133,6 +5275,7 @@ impl CxVulkan {
                 sampler: Some(sampler),
                 ycbcr_conversion: Some(ycbcr_conversion),
                 ycbcr_conversion_metadata: Some(ycbcr_conversion_metadata.clone()),
+                owns_sampler_ycbcr_conversion: false,
                 owns_image: true,
             },
             format!("{vk_format:?}"),
@@ -5422,6 +5565,7 @@ impl CxVulkan {
             sampler: None,
             ycbcr_conversion: None,
             ycbcr_conversion_metadata: None,
+            owns_sampler_ycbcr_conversion: false,
             owns_image: true,
         };
         let u_resource = VulkanTextureResource {
@@ -5439,6 +5583,7 @@ impl CxVulkan {
             sampler: None,
             ycbcr_conversion: None,
             ycbcr_conversion_metadata: None,
+            owns_sampler_ycbcr_conversion: false,
             owns_image: false,
         };
         let v_resource = VulkanTextureResource {
@@ -5458,6 +5603,7 @@ impl CxVulkan {
             sampler: None,
             ycbcr_conversion: None,
             ycbcr_conversion_metadata: None,
+            owns_sampler_ycbcr_conversion: false,
             owns_image: false,
         };
 
@@ -7771,6 +7917,21 @@ impl CxVulkan {
         }
     }
 
+    fn destroy_external_ycbcr_samplers(&mut self) {
+        let samplers: Vec<VulkanExternalYcbcrSampler> = self
+            .external_ycbcr_samplers
+            .drain()
+            .map(|(_, r)| r)
+            .collect();
+        for sampler in samplers {
+            unsafe {
+                self.device.destroy_sampler(sampler.sampler, None);
+                self.device
+                    .destroy_sampler_ycbcr_conversion(sampler.conversion, None);
+            }
+        }
+    }
+
     fn destroy_geometry_resources(&mut self) {
         let resources: Vec<VulkanGeometryResource> = self
             .geometries
@@ -7814,6 +7975,7 @@ impl Drop for CxVulkan {
         self.destroy_xr_in_flight_frames();
         self.destroy_geometry_resources();
         self.destroy_texture_resources();
+        self.destroy_external_ycbcr_samplers();
 
         unsafe {
             if self.in_flight_fence != vk::Fence::null() {
