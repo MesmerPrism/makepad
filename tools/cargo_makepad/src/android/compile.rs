@@ -11,7 +11,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 fn aapt_path(sdk_dir: &Path, urls: &AndroidSDKUrls) -> PathBuf {
@@ -755,6 +755,45 @@ fn strip_generated_wrapper_args(args: &[String], build_crate: &str) -> Vec<Strin
     out
 }
 
+fn write_file_if_changed(path: &Path, data: &[u8]) -> Result<(), String> {
+    if fs::read(path)
+        .map(|existing| existing == data)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    fs::write(path, data).map_err(|e| format!("Can't write {:?}: {:?}", path, e))
+}
+
+fn android_phase_timings_enabled() -> bool {
+    std::env::var("MAKEPAD_ANDROID_TIMINGS")
+        .map(|value| {
+            let value = value.trim();
+            !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+        })
+        .unwrap_or(false)
+}
+
+fn timed_android_phase<T, F>(phase: &str, f: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    if !android_phase_timings_enabled() {
+        return f();
+    }
+
+    let started_at = Instant::now();
+    let result = f();
+    let status = if result.is_ok() { "ok" } else { "failed" };
+    eprintln!(
+        "MAKEPAD_ANDROID_TIMING phase={} status={} duration_ms={}",
+        phase,
+        status,
+        started_at.elapsed().as_millis()
+    );
+    result
+}
+
 fn generate_android_wrapper_manifest(
     build_crate: &str,
     target_root: &Path,
@@ -779,7 +818,6 @@ fn generate_android_wrapper_manifest(
     let wrapper_dir = target_root
         .join("makepad-android-wrapper")
         .join(build_crate.replace('-', "_"));
-    let _ = rmdir(&wrapper_dir);
     mkdir(&wrapper_dir)?;
 
     let mut wrapper_manifest = rewrite_wrapper_manifest_paths(&cargo_toml, &crate_dir);
@@ -801,13 +839,24 @@ fn generate_android_wrapper_manifest(
     }
 
     let wrapper_manifest_path = wrapper_dir.join("Cargo.toml");
-    fs::write(&wrapper_manifest_path, wrapper_manifest)
-        .map_err(|e| format!("Can't write {:?}: {:?}", wrapper_manifest_path, e))?;
+    write_file_if_changed(&wrapper_manifest_path, wrapper_manifest.as_bytes())?;
 
     if let Ok(lock_data) = fs::read(crate_dir.join("Cargo.lock"))
         .or_else(|_| fs::read(std::env::current_dir().unwrap().join("Cargo.lock")))
     {
-        let _ = fs::write(wrapper_dir.join("Cargo.lock"), lock_data);
+        let mut hasher = DefaultHasher::new();
+        lock_data.hash(&mut hasher);
+        let source_lock_hash = format!("{:016x}", hasher.finish());
+        let source_lock_hash_path = wrapper_dir.join(".makepad-source-lock.hash");
+        let wrapper_lock_path = wrapper_dir.join("Cargo.lock");
+        let source_lock_changed = fs::read_to_string(&source_lock_hash_path)
+            .map(|cached| cached.trim() != source_lock_hash)
+            .unwrap_or(true);
+
+        if source_lock_changed || !wrapper_lock_path.is_file() {
+            write_file_if_changed(&wrapper_lock_path, &lock_data)?;
+            write_file_if_changed(&source_lock_hash_path, source_lock_hash.as_bytes())?;
+        }
     }
 
     Ok(Some(wrapper_manifest_path))
@@ -2844,16 +2893,18 @@ pub fn build(
     std::env::set_var("JAVA_HOME", &resolved_sdk.java_home);
     std::env::set_var("ANDROID_NDK_PREBUILT_ROOT", &resolved_sdk.ndk_prebuilt_root);
 
-    rust_build(
-        sdk_dir,
-        host_os,
-        build_crate,
-        args,
-        android_targets,
-        variant,
-        urls,
-        true,
-    )?;
+    timed_android_phase("rust_build", || {
+        rust_build(
+            sdk_dir,
+            host_os,
+            build_crate,
+            args,
+            android_targets,
+            variant,
+            urls,
+            true,
+        )
+    })?;
     let debuggable = get_profile_from_args(args) != "release";
     let prep_opts = PrepareBuildOpts {
         build_crate,
@@ -2866,7 +2917,7 @@ pub fn build(
         version_name: &resolved.version_name,
         debuggable,
     };
-    let build_paths = prepare_build(&prep_opts)?;
+    let build_paths = timed_android_phase("prepare_build", || prepare_build(&prep_opts))?;
 
     eprintln!(
         "Building APK (package={}, label={}, versionCode={}, versionName={}, minSdkVersion={}, targetSdkVersion={}, debuggable={})",
@@ -2878,32 +2929,48 @@ pub fn build(
         urls.target_sdk_version,
         debuggable
     );
-    build_r_class(sdk_dir, host_os, &build_paths, urls)?;
-    compile_java(sdk_dir, host_os, &build_paths, urls)?;
-    build_dex(sdk_dir, host_os, &build_paths, urls)?;
-    build_unaligned_apk(sdk_dir, host_os, &build_paths, urls)?;
-    let build_dir = add_rust_library(
-        sdk_dir,
-        host_os,
-        &underscore_build_crate,
-        &build_paths,
-        android_targets,
-        args,
-        variant,
-        urls,
-    )?;
-    add_resources(
-        sdk_dir,
-        build_crate,
-        &build_paths,
-        &build_dir,
-        android_targets,
-        variant,
-        config,
-        urls,
-    )?;
-    build_zipaligned_apk(sdk_dir, &build_paths, urls)?;
-    sign_apk(sdk_dir, host_os, &build_paths, urls)?;
+    timed_android_phase("build_r_class", || {
+        build_r_class(sdk_dir, host_os, &build_paths, urls)
+    })?;
+    timed_android_phase("compile_java", || {
+        compile_java(sdk_dir, host_os, &build_paths, urls)
+    })?;
+    timed_android_phase("build_dex", || {
+        build_dex(sdk_dir, host_os, &build_paths, urls)
+    })?;
+    timed_android_phase("build_unaligned_apk", || {
+        build_unaligned_apk(sdk_dir, host_os, &build_paths, urls)
+    })?;
+    let build_dir = timed_android_phase("add_rust_library", || {
+        add_rust_library(
+            sdk_dir,
+            host_os,
+            &underscore_build_crate,
+            &build_paths,
+            android_targets,
+            args,
+            variant,
+            urls,
+        )
+    })?;
+    timed_android_phase("add_resources", || {
+        add_resources(
+            sdk_dir,
+            build_crate,
+            &build_paths,
+            &build_dir,
+            android_targets,
+            variant,
+            config,
+            urls,
+        )
+    })?;
+    timed_android_phase("build_zipaligned_apk", || {
+        build_zipaligned_apk(sdk_dir, &build_paths, urls)
+    })?;
+    timed_android_phase("sign_apk", || {
+        sign_apk(sdk_dir, host_os, &build_paths, urls)
+    })?;
 
     eprintln!("APK Build completed");
     Ok(BuildResult {

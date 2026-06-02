@@ -50,6 +50,10 @@ This branch currently carries:
   runs bundletool, and signs with jarsigner when a keystore is supplied. APK
   builds keep the existing side-load route and dynamic-std behavior.
 - Android packaging fixes for the tested Windows-to-Quest build lane.
+- Android generated-wrapper cache stability for no-change rebuilds: the
+  packager keeps the generated wrapper directory, wrapper manifest, and
+  generated patched lockfile stable when their inputs have not changed, and can
+  emit opt-in `MAKEPAD_ANDROID_TIMING` phase markers for APK packaging steps.
 - Dependent Rust shared-library bundling for Android APK output.
 - Windows path normalization for generated Android wrapper inputs.
 - A targeted Android Vulkan frame-fence wait before recreating
