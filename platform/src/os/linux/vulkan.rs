@@ -7,7 +7,7 @@ use crate::{
     draw_shader::DrawShaderAttrFormat,
     event::video_playback::{
         VideoTextureDescriptorShape, VideoTextureResourcePath, VideoTextureUpdateMetadata,
-        VideoYuvMetadata,
+        VideoTextureYcbcrConversionMetadata, VideoYuvMetadata,
     },
     geometry::GeometryId,
     makepad_live_id::*,
@@ -68,6 +68,29 @@ fn vulkan_descriptor_type_name(descriptor_type: vk::DescriptorType) -> &'static 
         vk::DescriptorType::STORAGE_BUFFER => "STORAGE_BUFFER",
         _ => "OTHER",
     }
+}
+
+fn ycbcr_component_swizzle_name(swizzle: vk::ComponentSwizzle) -> &'static str {
+    match swizzle {
+        vk::ComponentSwizzle::IDENTITY => "IDENTITY",
+        vk::ComponentSwizzle::ZERO => "ZERO",
+        vk::ComponentSwizzle::ONE => "ONE",
+        vk::ComponentSwizzle::R => "R",
+        vk::ComponentSwizzle::G => "G",
+        vk::ComponentSwizzle::B => "B",
+        vk::ComponentSwizzle::A => "A",
+        _ => "OTHER",
+    }
+}
+
+fn ycbcr_component_mapping_label(components: vk::ComponentMapping) -> String {
+    format!(
+        "r:{},g:{},b:{},a:{}",
+        ycbcr_component_swizzle_name(components.r),
+        ycbcr_component_swizzle_name(components.g),
+        ycbcr_component_swizzle_name(components.b),
+        ycbcr_component_swizzle_name(components.a),
+    )
 }
 
 fn reflected_vulkan_descriptor_type(
@@ -171,6 +194,12 @@ struct VulkanPipeline {
     sampler_handles: Vec<vk::Sampler>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct VulkanVideoCombinedImmutableSamplerKey {
+    texture_binding: u32,
+    sampler: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct VulkanRenderPassKey {
     color_formats: Vec<i32>,
@@ -204,6 +233,7 @@ struct VulkanPipelineKey {
     render_pass: VulkanRenderPassKey,
     alpha_blend: bool,
     backface_culling: bool,
+    video_combined_immutable_samplers: Vec<VulkanVideoCombinedImmutableSamplerKey>,
 }
 
 struct VulkanDrawPacket {
@@ -238,6 +268,7 @@ struct VulkanTextureResource {
     hardware_buffer: Option<*mut ndk_sys::AHardwareBuffer>,
     sampler: Option<vk::Sampler>,
     ycbcr_conversion: Option<vk::SamplerYcbcrConversion>,
+    ycbcr_conversion_metadata: Option<VideoTextureYcbcrConversionMetadata>,
     owns_image: bool,
 }
 
@@ -4092,6 +4123,7 @@ impl CxVulkan {
             hardware_buffer: None,
             sampler: None,
             ycbcr_conversion: None,
+            ycbcr_conversion_metadata: None,
             owns_image: true,
         })
     }
@@ -4227,6 +4259,7 @@ impl CxVulkan {
             hardware_buffer: None,
             sampler: None,
             ycbcr_conversion: None,
+            ycbcr_conversion_metadata: None,
             owns_image: true,
         })
     }
@@ -4407,6 +4440,7 @@ impl CxVulkan {
             hardware_buffer: None,
             sampler: None,
             ycbcr_conversion: None,
+            ycbcr_conversion_metadata: None,
             owns_image: true,
         })
     }
@@ -4518,6 +4552,7 @@ impl CxVulkan {
             hardware_buffer: None,
             sampler: None,
             ycbcr_conversion: None,
+            ycbcr_conversion_metadata: None,
             owns_image: true,
         })
     }
@@ -4720,12 +4755,11 @@ impl CxVulkan {
             layers: 1,
             is_cube: false,
             format: vk_format,
-            // Imported camera contents are produced externally; keeping the image in GENERAL
-            // avoids discarding those contents via an UNDEFINED->SHADER_READ transition.
-            layout: vk::ImageLayout::GENERAL,
+            layout: vk::ImageLayout::UNDEFINED,
             hardware_buffer: Some(hardware_buffer),
             sampler: None,
             ycbcr_conversion: None,
+            ycbcr_conversion_metadata: None,
             owns_image: true,
         };
         Ok(resource)
@@ -4736,7 +4770,15 @@ impl CxVulkan {
         hardware_buffer: *mut ndk_sys::AHardwareBuffer,
         width: u32,
         height: u32,
-    ) -> Result<(VulkanTextureResource, String, Option<u64>), String> {
+    ) -> Result<
+        (
+            VulkanTextureResource,
+            String,
+            Option<u64>,
+            Option<VideoTextureYcbcrConversionMetadata>,
+        ),
+        String,
+    > {
         if hardware_buffer.is_null() {
             return Err("Android Vulkan camera import failed: null AHardwareBuffer".to_string());
         }
@@ -4776,7 +4818,7 @@ impl CxVulkan {
                     width,
                     height,
                 )?;
-                return Ok((resource, format!("{vk_format:?}"), None));
+                return Ok((resource, format!("{vk_format:?}"), None, None));
             }
             return Err(
                 "Android Vulkan camera import failed: external-format camera buffer missing external format"
@@ -4850,11 +4892,31 @@ impl CxVulkan {
 
         let mut conversion_external_format =
             vk::ExternalFormatANDROID::default().external_format(external_format);
+        let suggested_ycbcr_model = format_props.suggested_ycbcr_model;
+        let suggested_ycbcr_range = format_props.suggested_ycbcr_range;
+        let effective_ycbcr_model = vk::SamplerYcbcrModelConversion::YCBCR_601;
+        let effective_ycbcr_range = vk::SamplerYcbcrRange::ITU_NARROW;
+        let ycbcr_components =
+            ycbcr_component_mapping_label(format_props.sampler_ycbcr_conversion_components);
+        let ycbcr_conversion_metadata = VideoTextureYcbcrConversionMetadata {
+            suggested_model: format!("{suggested_ycbcr_model:?}"),
+            suggested_range: format!("{suggested_ycbcr_range:?}"),
+            effective_model: format!("{effective_ycbcr_model:?}"),
+            effective_range: format!("{effective_ycbcr_range:?}"),
+            components: ycbcr_components.clone(),
+            suggested_x_chroma_offset: format!("{:?}", format_props.suggested_x_chroma_offset),
+            suggested_y_chroma_offset: format!("{:?}", format_props.suggested_y_chroma_offset),
+            conversion_mode: "forced-bt601-limited-cpuyuv-reference".to_string(),
+            sampler_binding_mode: "combined-immutable-sampler".to_string(),
+            sampler_binding_compliance: "pure-hwb-reference-combined-immutable".to_string(),
+            shader_sample_lowering: "textureSampleLevel_combined_image_sampler_same_binding"
+                .to_string(),
+        };
         let conversion_info = vk::SamplerYcbcrConversionCreateInfo::default()
             .push_next(&mut conversion_external_format)
             .format(vk::Format::UNDEFINED)
-            .ycbcr_model(format_props.suggested_ycbcr_model)
-            .ycbcr_range(format_props.suggested_ycbcr_range)
+            .ycbcr_model(effective_ycbcr_model)
+            .ycbcr_range(effective_ycbcr_range)
             .components(format_props.sampler_ycbcr_conversion_components)
             .x_chroma_offset(format_props.suggested_x_chroma_offset)
             .y_chroma_offset(format_props.suggested_y_chroma_offset)
@@ -4931,11 +4993,18 @@ impl CxVulkan {
             ndk_sys::AHardwareBuffer_acquire(hardware_buffer);
         }
         crate::log!(
-            "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_IMPORT schema=rusty.xr.makepad-vulkan-video-import.v1 path=external-ahardwarebuffer-ycbcr size={}x{} vkFormat={:?} externalFormat={} samplerYcbcrConversion=true resourceSampler=true resourceShape=image-view-plus-sampler-ycbcr-conversion",
+            "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_IMPORT schema=rusty.xr.makepad-vulkan-video-import.v1 path=external-ahardwarebuffer-ycbcr size={}x{} vkFormat={:?} externalFormat={} samplerYcbcrConversion=true resourceSampler=true resourceShape=image-view-plus-combined-immutable-sampler-ycbcr-conversion importImageLayout=shader-read-transition initialLayout=undefined descriptorImageLayout=shader-read-only-optimal suggestedYcbcrModel={:?} suggestedYcbcrRange={:?} effectiveYcbcrModel={:?} effectiveYcbcrRange={:?} ycbcrComponents={} suggestedXChromaOffset={:?} suggestedYChromaOffset={:?} conversionMode=forced-bt601-limited-cpuyuv-reference samplerBindingMode=combined-immutable-sampler samplerBindingCompliance=pure-hwb-reference-combined-immutable combinedImageSampler=true immutableSampler=true shaderSampleLowering=textureSampleLevel_combined_image_sampler_same_binding colorFixAttempt=hwb-external-combined-immutable-v4-default-sampler-remap",
             width.max(1),
             height.max(1),
             vk_format,
             external_format,
+            suggested_ycbcr_model,
+            suggested_ycbcr_range,
+            effective_ycbcr_model,
+            effective_ycbcr_range,
+            ycbcr_components,
+            format_props.suggested_x_chroma_offset,
+            format_props.suggested_y_chroma_offset,
         );
 
         Ok((
@@ -4949,14 +5018,16 @@ impl CxVulkan {
                 layers: 1,
                 is_cube: false,
                 format: vk::Format::UNDEFINED,
-                layout: vk::ImageLayout::GENERAL,
+                layout: vk::ImageLayout::UNDEFINED,
                 hardware_buffer: Some(hardware_buffer),
                 sampler: Some(sampler),
                 ycbcr_conversion: Some(ycbcr_conversion),
+                ycbcr_conversion_metadata: Some(ycbcr_conversion_metadata.clone()),
                 owns_image: true,
             },
             format!("{vk_format:?}"),
             Some(external_format),
+            Some(ycbcr_conversion_metadata),
         ))
     }
 
@@ -5240,6 +5311,7 @@ impl CxVulkan {
             hardware_buffer: Some(hardware_buffer),
             sampler: None,
             ycbcr_conversion: None,
+            ycbcr_conversion_metadata: None,
             owns_image: true,
         };
         let u_resource = VulkanTextureResource {
@@ -5256,6 +5328,7 @@ impl CxVulkan {
             hardware_buffer: None,
             sampler: None,
             ycbcr_conversion: None,
+            ycbcr_conversion_metadata: None,
             owns_image: false,
         };
         let v_resource = VulkanTextureResource {
@@ -5274,6 +5347,7 @@ impl CxVulkan {
             hardware_buffer: None,
             sampler: None,
             ycbcr_conversion: None,
+            ycbcr_conversion_metadata: None,
             owns_image: false,
         };
 
@@ -5326,22 +5400,34 @@ impl CxVulkan {
         let mut metadata = VideoTextureUpdateMetadata::default()
             .with_resource(
                 VideoTextureResourcePath::HardwareBufferExternal,
-                VideoTextureDescriptorShape::SampledImageAndSampler,
+                VideoTextureDescriptorShape::CombinedImmutableSamplerYcbcrConversion,
                 width,
                 height,
             )
             .with_resource_reused(same_source);
+        if same_source {
+            if let Some(ycbcr_conversion) = self
+                .textures
+                .get(&texture_key)
+                .and_then(|resource| resource.ycbcr_conversion_metadata.clone())
+            {
+                metadata = metadata.with_ycbcr_conversion(ycbcr_conversion);
+            }
+        }
         if !same_source {
             if let Some(old_resource) = self.textures.remove(&texture_key) {
                 self.destroy_texture_resource(old_resource);
             }
-            let (resource, vk_format, external_format) = self
+            let (resource, vk_format, external_format, ycbcr_conversion) = self
                 .create_imported_external_hardware_buffer_texture_resource(
                     hardware_buffer,
                     width,
                     height,
                 )?;
             metadata = metadata.with_vulkan_format(vk_format, external_format);
+            if let Some(ycbcr_conversion) = ycbcr_conversion {
+                metadata = metadata.with_ycbcr_conversion(ycbcr_conversion);
+            }
             self.textures.insert(texture_key, resource);
         }
 
@@ -5422,6 +5508,7 @@ impl CxVulkan {
         let (alloc_changed, updated, width, height, layers, is_cube, format) = {
             let cxtexture = &mut cx.textures[texture_id];
             if !cxtexture.format.is_vec() {
+                self.ensure_imported_texture_shader_read(texture_id);
                 return Ok(());
             }
             let alloc_changed = cxtexture.alloc_vec();
@@ -5589,6 +5676,40 @@ impl CxVulkan {
         }
 
         Ok(())
+    }
+
+    fn ensure_imported_texture_shader_read(&mut self, texture_id: TextureId) {
+        let texture_key = Self::texture_key(texture_id);
+        let Some((image, layers, layout, imported_hardware_buffer)) =
+            self.textures.get(&texture_key).map(|resource| {
+                (
+                    resource.image,
+                    resource.layers,
+                    resource.layout,
+                    resource.hardware_buffer.is_some(),
+                )
+            })
+        else {
+            return;
+        };
+        if !imported_hardware_buffer || layout != vk::ImageLayout::UNDEFINED {
+            return;
+        }
+
+        self.transition_image_layout(
+            image,
+            vk::ImageAspectFlags::COLOR,
+            layers,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        );
+        if let Some(resource) = self.textures.get_mut(&texture_key) {
+            resource.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        }
+        crate::log!(
+            "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_IMPORT schema=rusty.xr.makepad-vulkan-video-import.v1 phase=layout-transition status=ok textureKey={} importImageLayout=shader-read-transition oldLayout=undefined newLayout=shader-read-only-optimal",
+            texture_key,
+        );
     }
 
     fn record_draw_list(
@@ -5785,6 +5906,83 @@ impl CxVulkan {
         Ok(())
     }
 
+    fn pipeline_video_sampler_key(
+        samplers: &[(u32, vk::Sampler)],
+    ) -> Vec<VulkanVideoCombinedImmutableSamplerKey> {
+        let mut key = samplers
+            .iter()
+            .map(
+                |(texture_binding, sampler)| VulkanVideoCombinedImmutableSamplerKey {
+                    texture_binding: *texture_binding,
+                    sampler: sampler.as_raw(),
+                },
+            )
+            .collect::<Vec<_>>();
+        key.sort_by_key(|entry| (entry.texture_binding, entry.sampler));
+        key.dedup();
+        key
+    }
+
+    fn collect_packet_video_combined_immutable_samplers(
+        &self,
+        cx: &Cx,
+        packet: &VulkanDrawPacket,
+    ) -> Result<Vec<(u32, vk::Sampler)>, String> {
+        let sh = &cx.draw_shaders.shaders[packet.shader_index];
+        let os_shader_id = sh
+            .os_shader_id
+            .ok_or_else(|| format!("shader {} missing os_shader_id", packet.shader_index))?;
+        let os_shader = &cx.draw_shaders.os_shaders[os_shader_id];
+        let vk_shader = os_shader.vulkan_shader[packet.shader_variant]
+            .as_ref()
+            .ok_or_else(|| format!("shader {} missing Vulkan binary", packet.shader_index))?;
+
+        let null_texture_key = Self::texture_key(cx.null_texture.texture_id());
+        let null_cube_texture_key = Self::texture_key(cx.null_cube_texture.texture_id());
+        let null_texture_resource = self.textures.get(&null_texture_key);
+        let null_cube_texture_resource = self.textures.get(&null_cube_texture_key);
+        let mut samplers = Vec::new();
+        for (slot, texture_id) in packet.texture_ids.iter().enumerate() {
+            let texture_binding = vk_shader.texture_binding_base + slot as u32;
+            if !vk_shader
+                .video_combined_image_sampler_remaps
+                .iter()
+                .any(|remap| remap.texture_binding == texture_binding)
+            {
+                continue;
+            }
+            let expected_cube = packet
+                .texture_types
+                .get(slot)
+                .map(|tex_type| {
+                    matches!(
+                        tex_type,
+                        TextureType::TextureCube | TextureType::TextureCubeArray
+                    )
+                })
+                .unwrap_or(false);
+            let fallback = if expected_cube {
+                null_cube_texture_resource
+            } else {
+                null_texture_resource
+            };
+            let texture_key = Self::texture_key(*texture_id);
+            let Some(resource) = self.textures.get(&texture_key).or(fallback) else {
+                continue;
+            };
+            if resource.ycbcr_conversion.is_none() {
+                continue;
+            }
+            if let Some(sampler) = resource.sampler {
+                samplers.push((texture_binding, sampler));
+            }
+        }
+        Ok(Self::pipeline_video_sampler_key(&samplers)
+            .into_iter()
+            .map(|entry| (entry.texture_binding, vk::Sampler::from_raw(entry.sampler)))
+            .collect())
+    }
+
     fn record_draw_packet(
         &mut self,
         cx: &Cx,
@@ -5796,6 +5994,8 @@ impl CxVulkan {
         draw_list_uniforms: &[f32],
         xr_depth_view: vk::ImageView,
     ) -> Result<(), String> {
+        let video_combined_immutable_samplers =
+            self.collect_packet_video_combined_immutable_samplers(cx, packet)?;
         self.ensure_pipeline(
             cx,
             packet.shader_index,
@@ -5803,6 +6003,7 @@ impl CxVulkan {
             render_pass_key,
             packet.alpha_blend,
             packet.backface_culling,
+            &video_combined_immutable_samplers,
         )?;
         let (
             pipeline_handle,
@@ -5817,6 +6018,9 @@ impl CxVulkan {
                 render_pass: render_pass_key.clone(),
                 alpha_blend: packet.alpha_blend,
                 backface_culling: packet.backface_culling,
+                video_combined_immutable_samplers: Self::pipeline_video_sampler_key(
+                    &video_combined_immutable_samplers,
+                ),
             };
             let pipeline = self.pipelines.get(&pipeline_key).ok_or_else(|| {
                 format!("missing Vulkan pipeline for shader {}", packet.shader_index)
@@ -5965,6 +6169,7 @@ impl CxVulkan {
         let mut texture_bindings = Vec::new();
         let mut texture_descriptor_types = Vec::new();
         let mut texture_infos = Vec::new();
+        let mut combined_immutable_sampler_bindings = HashSet::new();
         let mut video_sampler_overrides = std::collections::HashMap::<usize, vk::Sampler>::new();
         let null_texture_key = Self::texture_key(cx.null_texture.texture_id());
         let null_cube_texture_key = Self::texture_key(cx.null_cube_texture.texture_id());
@@ -5999,27 +6204,49 @@ impl CxVulkan {
                 .unwrap_or(0);
             let texture_binding = vk_shader.texture_binding_base + slot as u32;
             texture_bindings.push(texture_binding);
-            let descriptor_type = reflected_vulkan_descriptor_type(
-                vk_shader,
-                texture_binding,
-                vk::DescriptorType::SAMPLED_IMAGE,
-            );
+            let combined_remap = vk_shader
+                .video_combined_image_sampler_remaps
+                .iter()
+                .find(|remap| remap.texture_binding == texture_binding);
+            let combined_immutable_video = combined_remap.is_some()
+                && resource.sampler.is_some()
+                && resource.ycbcr_conversion.is_some();
+            let descriptor_type = if combined_immutable_video {
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+            } else {
+                reflected_vulkan_descriptor_type(
+                    vk_shader,
+                    texture_binding,
+                    vk::DescriptorType::SAMPLED_IMAGE,
+                )
+            };
             texture_descriptor_types.push(descriptor_type);
 
-            let image_info = vk::DescriptorImageInfo::default()
+            let mut image_info = vk::DescriptorImageInfo::default()
                 .image_view(resource.view)
                 .image_layout(resource.layout);
+            if combined_immutable_video {
+                image_info = image_info.sampler(resource.sampler.unwrap());
+                combined_immutable_sampler_bindings.insert(combined_remap.unwrap().sampler_binding);
+            }
             if resource.sampler.is_some() && resource.ycbcr_conversion.is_some() {
                 let report_key = (packet.shader_index, slot, texture_key, sampler_index);
                 if self.reported_video_descriptor_shapes.insert(report_key) {
                     let sampler_binding = vk_shader.sampler_binding_base + sampler_index as u32;
-                    let sampler_descriptor_type = reflected_vulkan_descriptor_type(
-                        vk_shader,
-                        sampler_binding,
-                        vk::DescriptorType::SAMPLER,
-                    );
+                    let remapped_sampler_binding = combined_remap
+                        .map(|remap| remap.sampler_binding)
+                        .unwrap_or(sampler_binding);
+                    let sampler_descriptor_type = if combined_immutable_video {
+                        vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+                    } else {
+                        reflected_vulkan_descriptor_type(
+                            vk_shader,
+                            sampler_binding,
+                            vk::DescriptorType::SAMPLER,
+                        )
+                    };
                     crate::log!(
-                        "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_DESCRIPTOR_SHAPE schema=rusty.xr.makepad-vulkan-video-descriptor-shape.v1 shaderIndex={} slot={} textureKey={} textureType={:?} textureBinding={} shaderTextureResourceKind={} textureDescriptorType={} samplerIndex={} samplerBinding={} shaderSamplerResourceKind={} samplerDescriptorType={} resourceSamplerOverride=true samplerYcbcrConversion=true combinedImageSampler=false shaderSampleLowering=textureSampleLevel_separate_texture_sampler",
+                        "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_DESCRIPTOR_SHAPE schema=rusty.xr.makepad-vulkan-video-descriptor-shape.v1 shaderIndex={} slot={} textureKey={} textureType={:?} textureBinding={} shaderTextureResourceKind={} textureDescriptorType={} samplerIndex={} samplerBinding={} remappedSamplerBinding={} shaderSamplerResourceKind={} samplerDescriptorType={} resourceSamplerOverride={} samplerYcbcrConversion=true combinedImageSampler={} immutableSampler={} samplerBindingMode={} samplerBindingCompliance={} effectiveYcbcrModel={} effectiveYcbcrRange={} conversionMode={} shaderSampleLowering={} colorFixAttempt=hwb-external-combined-immutable-v4-default-sampler-remap",
                         packet.shader_index,
                         slot,
                         texture_key,
@@ -6029,8 +6256,46 @@ impl CxVulkan {
                         vulkan_descriptor_type_name(descriptor_type),
                         sampler_index,
                         sampler_binding,
-                        reflected_shader_descriptor_kind_name(vk_shader, sampler_binding),
+                        remapped_sampler_binding,
+                        if combined_immutable_video {
+                            "remapped-sampler-same-binding"
+                        } else {
+                            reflected_shader_descriptor_kind_name(vk_shader, sampler_binding)
+                        },
                         vulkan_descriptor_type_name(sampler_descriptor_type),
+                        !combined_immutable_video,
+                        combined_immutable_video,
+                        combined_immutable_video,
+                        if combined_immutable_video {
+                            "combined-immutable-sampler"
+                        } else {
+                            "separate-sampled-image-and-mutable-sampler"
+                        },
+                        if combined_immutable_video {
+                            "pure-hwb-reference-combined-immutable"
+                        } else {
+                            "diagnostic-not-combined-immutable"
+                        },
+                        resource
+                            .ycbcr_conversion_metadata
+                            .as_ref()
+                            .map(|metadata| metadata.effective_model.as_str())
+                            .unwrap_or("unspecified"),
+                        resource
+                            .ycbcr_conversion_metadata
+                            .as_ref()
+                            .map(|metadata| metadata.effective_range.as_str())
+                            .unwrap_or("unspecified"),
+                        resource
+                            .ycbcr_conversion_metadata
+                            .as_ref()
+                            .map(|metadata| metadata.conversion_mode.as_str())
+                            .unwrap_or("unspecified"),
+                        if combined_immutable_video {
+                            "textureSampleLevel_combined_image_sampler_same_binding"
+                        } else {
+                            "textureSampleLevel_separate_texture_sampler"
+                        },
                     );
                 }
             }
@@ -6044,6 +6309,9 @@ impl CxVulkan {
         let mut sampler_infos = Vec::new();
         for (sampler_index, sampler) in pipeline_samplers.iter().enumerate() {
             let sampler_binding = vk_shader.sampler_binding_base + sampler_index as u32;
+            if combined_immutable_sampler_bindings.contains(&sampler_binding) {
+                continue;
+            }
             sampler_bindings.push(sampler_binding);
             let sampler = video_sampler_overrides
                 .get(&sampler_index)
@@ -6166,6 +6434,7 @@ impl CxVulkan {
         render_pass_key: &VulkanRenderPassKey,
         alpha_blend: bool,
         backface_culling: bool,
+        video_combined_immutable_samplers: &[(u32, vk::Sampler)],
     ) -> Result<(), String> {
         let pipeline_key = VulkanPipelineKey {
             shader_index,
@@ -6173,10 +6442,17 @@ impl CxVulkan {
             render_pass: render_pass_key.clone(),
             alpha_blend,
             backface_culling,
+            video_combined_immutable_samplers: Self::pipeline_video_sampler_key(
+                video_combined_immutable_samplers,
+            ),
         };
         if self.pipelines.contains_key(&pipeline_key) {
             return Ok(());
         }
+        let video_immutable_sampler_by_binding = video_combined_immutable_samplers
+            .iter()
+            .copied()
+            .collect::<HashMap<u32, vk::Sampler>>();
 
         let sh = &cx.draw_shaders.shaders[shader_index];
         let os_shader_id = sh
@@ -6216,6 +6492,7 @@ impl CxVulkan {
             || vk_shader.xr_depth_binding != 0;
 
         let mut descriptor_bindings: Vec<(u32, vk::DescriptorType)> = Vec::new();
+        let mut combined_immutable_sampler_bindings = HashSet::new();
         for (_, idx) in &sh.mapping.uniform_buffer_bindings.bindings {
             let binding = *idx as u32;
             descriptor_bindings.push((
@@ -6256,11 +6533,21 @@ impl CxVulkan {
         }
         for (slot, texture) in sh.mapping.textures.iter().enumerate() {
             let texture_binding = vk_shader.texture_binding_base + slot as u32;
-            let texture_descriptor_type = reflected_vulkan_descriptor_type(
-                vk_shader,
-                texture_binding,
-                vk::DescriptorType::SAMPLED_IMAGE,
-            );
+            let remap = vk_shader
+                .video_combined_image_sampler_remaps
+                .iter()
+                .find(|remap| remap.texture_binding == texture_binding);
+            let combined_immutable_video = remap.is_some()
+                && video_immutable_sampler_by_binding.contains_key(&texture_binding);
+            let texture_descriptor_type = if combined_immutable_video {
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+            } else {
+                reflected_vulkan_descriptor_type(
+                    vk_shader,
+                    texture_binding,
+                    vk::DescriptorType::SAMPLED_IMAGE,
+                )
+            };
             descriptor_bindings.push((texture_binding, texture_descriptor_type));
             if texture.tex_type == TextureType::TextureVideo {
                 let sampler_index = sh
@@ -6270,13 +6557,23 @@ impl CxVulkan {
                     .copied()
                     .unwrap_or(0);
                 let sampler_binding = vk_shader.sampler_binding_base + sampler_index as u32;
-                let sampler_descriptor_type = reflected_vulkan_descriptor_type(
-                    vk_shader,
-                    sampler_binding,
-                    vk::DescriptorType::SAMPLER,
-                );
+                let remapped_sampler_binding = remap
+                    .map(|remap| remap.sampler_binding)
+                    .unwrap_or(sampler_binding);
+                if combined_immutable_video {
+                    combined_immutable_sampler_bindings.insert(remapped_sampler_binding);
+                }
+                let sampler_descriptor_type = if combined_immutable_video {
+                    vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+                } else {
+                    reflected_vulkan_descriptor_type(
+                        vk_shader,
+                        sampler_binding,
+                        vk::DescriptorType::SAMPLER,
+                    )
+                };
                 crate::log!(
-                    "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_SHADER_INTERFACE schema=rusty.xr.makepad-vulkan-video-shader-interface.v1 shaderIndex={} shaderVariant={} slot={} textureBinding={} shaderTextureResourceKind={} textureDescriptorType={} samplerIndex={} samplerBinding={} shaderSamplerResourceKind={} samplerDescriptorType={} combinedImageSamplerExpected=false wgslTextureType=texture_2d_f32 shaderSampleLowering=textureSampleLevel_separate_texture_sampler",
+                    "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_SHADER_INTERFACE schema=rusty.xr.makepad-vulkan-video-shader-interface.v1 shaderIndex={} shaderVariant={} slot={} textureBinding={} shaderTextureResourceKind={} textureDescriptorType={} samplerIndex={} samplerBinding={} remappedSamplerBinding={} shaderSamplerResourceKind={} samplerDescriptorType={} combinedImageSamplerExpected={} immutableSamplerExpected={} samplerBindingMode={} samplerBindingCompliance={} wgslTextureType=texture_2d_f32 shaderSampleLowering={} colorFixAttempt=hwb-external-combined-immutable-v4-default-sampler-remap",
                     shader_index,
                     shader_variant,
                     slot,
@@ -6285,13 +6582,38 @@ impl CxVulkan {
                     vulkan_descriptor_type_name(texture_descriptor_type),
                     sampler_index,
                     sampler_binding,
-                    reflected_shader_descriptor_kind_name(vk_shader, sampler_binding),
+                    remapped_sampler_binding,
+                    if combined_immutable_video {
+                        "remapped-sampler-same-binding"
+                    } else {
+                        reflected_shader_descriptor_kind_name(vk_shader, sampler_binding)
+                    },
                     vulkan_descriptor_type_name(sampler_descriptor_type),
+                    combined_immutable_video,
+                    combined_immutable_video,
+                    if combined_immutable_video {
+                        "combined-immutable-sampler"
+                    } else {
+                        "separate-sampled-image-and-mutable-sampler"
+                    },
+                    if combined_immutable_video {
+                        "pure-hwb-reference-combined-immutable"
+                    } else {
+                        "diagnostic-not-combined-immutable"
+                    },
+                    if combined_immutable_video {
+                        "textureSampleLevel_combined_image_sampler_same_binding"
+                    } else {
+                        "textureSampleLevel_separate_texture_sampler"
+                    },
                 );
             }
         }
         for sampler_index in 0..sh.mapping.samplers.len() {
             let binding = vk_shader.sampler_binding_base + sampler_index as u32;
+            if combined_immutable_sampler_bindings.contains(&binding) {
+                continue;
+            }
             descriptor_bindings.push((
                 binding,
                 reflected_vulkan_descriptor_type(vk_shader, binding, vk::DescriptorType::SAMPLER),
@@ -6310,14 +6632,27 @@ impl CxVulkan {
 
         let descriptor_set_layout = {
             let mut dsl_bindings = Vec::new();
-            for (binding, descriptor_type) in &descriptor_bindings {
-                dsl_bindings.push(
-                    vk::DescriptorSetLayoutBinding::default()
-                        .binding(*binding)
-                        .descriptor_count(1)
-                        .descriptor_type(*descriptor_type)
-                        .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
-                );
+            let immutable_sampler_storage = descriptor_bindings
+                .iter()
+                .map(|(binding, _)| {
+                    video_immutable_sampler_by_binding
+                        .get(binding)
+                        .map(|sampler| [*sampler])
+                })
+                .collect::<Vec<_>>();
+            for ((binding, descriptor_type), immutable_samplers) in descriptor_bindings
+                .iter()
+                .zip(immutable_sampler_storage.iter())
+            {
+                let mut layout_binding = vk::DescriptorSetLayoutBinding::default()
+                    .binding(*binding)
+                    .descriptor_count(1)
+                    .descriptor_type(*descriptor_type)
+                    .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT);
+                if let Some(immutable_samplers) = immutable_samplers {
+                    layout_binding = layout_binding.immutable_samplers(immutable_samplers);
+                }
+                dsl_bindings.push(layout_binding);
             }
             let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&dsl_bindings);
             unsafe { self.device.create_descriptor_set_layout(&info, None) }

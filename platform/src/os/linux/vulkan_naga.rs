@@ -1,6 +1,8 @@
 use {
     crate::makepad_script::{
-        shader::ShaderOutput, shader_wgsl::compile_draw_shader_wgsl_source, value::ScriptObject,
+        shader::ShaderOutput,
+        shader_wgsl::{compile_draw_shader_wgsl_source, WgslCombinedImageSamplerBindingRemap},
+        value::ScriptObject,
         vm::ScriptVm,
     },
     std::fmt::Write,
@@ -17,6 +19,13 @@ pub struct CxVulkanShaderBinary {
     pub geometry_slots: usize,
     pub instance_slots: usize,
     pub resource_interface: CxVulkanShaderResourceInterface,
+    pub video_combined_image_sampler_remaps: Vec<CxVulkanCombinedImageSamplerBindingRemap>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CxVulkanCombinedImageSamplerBindingRemap {
+    pub sampler_binding: u32,
+    pub texture_binding: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +85,7 @@ impl CxVulkanShaderResourceInterface {
 
 fn compile_wgsl_to_spirv(
     wgsl: &str,
+    video_combined_image_sampler_remaps: &[WgslCombinedImageSamplerBindingRemap],
 ) -> Result<
     (
         Option<Vec<u32>>,
@@ -125,13 +135,32 @@ fn compile_wgsl_to_spirv(
     let module_info = validator
         .validate(&module)
         .map_err(|e| format!("WGSL validation error: {e}"))?;
-    let resource_interface = reflect_shader_resource_interface(&module);
+    let mut resource_interface = reflect_shader_resource_interface(&module);
+    let mut binding_map = spv::BindingMap::default();
+    for remap in video_combined_image_sampler_remaps {
+        binding_map.insert(
+            naga::ResourceBinding {
+                group: 0,
+                binding: remap.sampler_binding,
+            },
+            spv::BindingInfo {
+                descriptor_set: 0,
+                binding: remap.texture_binding,
+                binding_array_size: None,
+            },
+        );
+        for resource in &mut resource_interface.bindings {
+            if resource.group == 0 && resource.binding == remap.sampler_binding {
+                resource.binding = remap.texture_binding;
+            }
+        }
+    }
 
     let options = spv::Options {
         lang_version: (1, 3),
         flags: spv::WriterFlags::empty(),
         fake_missing_bindings: true,
-        binding_map: spv::BindingMap::default(),
+        binding_map,
         capabilities: None,
         bounds_check_policies: naga::proc::BoundsCheckPolicies::default(),
         zero_initialize_workgroup_memory: spv::ZeroInitializeWorkgroupMemoryMode::None,
@@ -236,10 +265,11 @@ pub(crate) fn compile_draw_shader_wgsl_to_spirv(
         crate::log!("---- Vulkan WGSL ({variant}) ----\n{}", wgsl_source.wgsl);
     }
 
-    let (vertex_spirv, fragment_spirv, resource_interface) =
-        compile_wgsl_to_spirv(&wgsl_source.wgsl).map_err(|err| {
-            format!("{err}\nSet MAKEPAD_DUMP_VULKAN_WGSL=1 to dump generated WGSL.")
-        })?;
+    let (vertex_spirv, fragment_spirv, resource_interface) = compile_wgsl_to_spirv(
+        &wgsl_source.wgsl,
+        &wgsl_source.video_combined_image_sampler_remaps,
+    )
+    .map_err(|err| format!("{err}\nSet MAKEPAD_DUMP_VULKAN_WGSL=1 to dump generated WGSL."))?;
 
     Ok(CxVulkanShaderBinary {
         vertex_spirv,
@@ -251,5 +281,13 @@ pub(crate) fn compile_draw_shader_wgsl_to_spirv(
         geometry_slots: wgsl_source.geometry_slots,
         instance_slots: wgsl_source.instance_slots,
         resource_interface,
+        video_combined_image_sampler_remaps: wgsl_source
+            .video_combined_image_sampler_remaps
+            .iter()
+            .map(|remap| CxVulkanCombinedImageSamplerBindingRemap {
+                sampler_binding: remap.sampler_binding,
+                texture_binding: remap.texture_binding,
+            })
+            .collect(),
     })
 }

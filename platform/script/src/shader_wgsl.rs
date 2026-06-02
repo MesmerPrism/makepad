@@ -23,6 +23,13 @@ pub struct WgslDrawShaderSource {
     pub xr_depth_binding: u32,
     pub geometry_slots: usize,
     pub instance_slots: usize,
+    pub video_combined_image_sampler_remaps: Vec<WgslCombinedImageSamplerBindingRemap>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WgslCombinedImageSamplerBindingRemap {
+    pub sampler_binding: u32,
+    pub texture_binding: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -391,7 +398,14 @@ fn build_draw_shader_wgsl(
     vm: &ScriptVm,
     output: &mut ShaderOutput,
     xr_multiview: bool,
-) -> (String, u32, u32, u32, u32) {
+) -> (
+    String,
+    u32,
+    u32,
+    u32,
+    u32,
+    Vec<WgslCombinedImageSamplerBindingRemap>,
+) {
     let mut out = String::new();
 
     let geometry_fields = wgsl_collect_geometry_fields(output, vm);
@@ -431,6 +445,8 @@ fn build_draw_shader_wgsl(
     let mut next_binding = max_reserved_binding + 1;
     let mut texture_binding_base: Option<u32> = None;
     let mut sampler_binding_base: Option<u32> = None;
+    let mut texture_bindings = Vec::<(String, TextureType, u32)>::new();
+    let mut sampler_bindings = Vec::<(usize, u32)>::new();
 
     output.create_struct_defs(vm, &mut out);
 
@@ -578,6 +594,7 @@ fn build_draw_shader_wgsl(
                 if texture_binding_base.is_none() {
                     texture_binding_base = Some(next_binding);
                 }
+                texture_bindings.push((format!("tex_{io_name}"), tex_type, next_binding));
                 writeln!(
                     out,
                     "@group(0) @binding({}) var tex_{}: {};",
@@ -609,6 +626,7 @@ fn build_draw_shader_wgsl(
         if sampler_binding_base.is_none() {
             sampler_binding_base = Some(next_binding);
         }
+        sampler_bindings.push((sampler_index, next_binding));
         writeln!(
             out,
             "@group(0) @binding({}) var {}: sampler;",
@@ -630,6 +648,28 @@ fn build_draw_shader_wgsl(
         }
     )
     .ok();
+
+    let mut video_combined_image_sampler_remaps = Vec::new();
+    for (texture_name, tex_type, texture_binding) in &texture_bindings {
+        if *tex_type != TextureType::TextureVideo {
+            continue;
+        }
+        let sampler_index = output
+            .texture_sampler_bindings
+            .iter()
+            .find(|(bound_texture, _)| bound_texture == texture_name)
+            .map(|(_, sampler_index)| *sampler_index)
+            .unwrap_or(0);
+        if let Some((_, sampler_binding)) = sampler_bindings
+            .iter()
+            .find(|(candidate_index, _)| *candidate_index == sampler_index)
+        {
+            video_combined_image_sampler_remaps.push(WgslCombinedImageSamplerBindingRemap {
+                sampler_binding: *sampler_binding,
+                texture_binding: *texture_binding,
+            });
+        }
+    }
 
     writeln!(out, "struct VertexMainIn {{").ok();
     if xr_multiview {
@@ -1023,6 +1063,7 @@ fn build_draw_shader_wgsl(
         texture_binding_base.unwrap_or(0),
         sampler_binding_base.unwrap_or(0),
         xr_depth_binding,
+        video_combined_image_sampler_remaps,
     )
 }
 
@@ -1103,8 +1144,14 @@ pub fn compile_draw_shader_wgsl_source(
         .map(|field| field.offset + field.slots)
         .unwrap_or(0);
 
-    let (wgsl, dyn_uniform_binding, texture_binding_base, sampler_binding_base, xr_depth_binding) =
-        build_draw_shader_wgsl(vm, &mut output, xr_multiview);
+    let (
+        wgsl,
+        dyn_uniform_binding,
+        texture_binding_base,
+        sampler_binding_base,
+        xr_depth_binding,
+        video_combined_image_sampler_remaps,
+    ) = build_draw_shader_wgsl(vm, &mut output, xr_multiview);
 
     Ok(WgslDrawShaderSource {
         wgsl,
@@ -1114,5 +1161,6 @@ pub fn compile_draw_shader_wgsl_source(
         xr_depth_binding,
         geometry_slots,
         instance_slots,
+        video_combined_image_sampler_remaps,
     })
 }

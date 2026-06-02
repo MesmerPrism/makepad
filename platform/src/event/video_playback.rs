@@ -90,6 +90,8 @@ pub enum VideoTextureDescriptorShape {
     CpuYuvPlaneTextures,
     ImportedYuvPlaneTextures,
     SampledImageAndSampler,
+    SampledImageAndSamplerYcbcrConversion,
+    CombinedImmutableSamplerYcbcrConversion,
     SurfaceTextureExternalOes,
 }
 
@@ -100,9 +102,30 @@ impl VideoTextureDescriptorShape {
             Self::CpuYuvPlaneTextures => "cpu-yuv-plane-textures",
             Self::ImportedYuvPlaneTextures => "imported-yuv-plane-textures",
             Self::SampledImageAndSampler => "sampled-image-and-sampler",
+            Self::SampledImageAndSamplerYcbcrConversion => {
+                "sampled-image-and-sampler-ycbcr-conversion"
+            }
+            Self::CombinedImmutableSamplerYcbcrConversion => {
+                "combined-immutable-sampler-ycbcr-conversion"
+            }
             Self::SurfaceTextureExternalOes => "surface-texture-external-oes",
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VideoTextureYcbcrConversionMetadata {
+    pub suggested_model: String,
+    pub suggested_range: String,
+    pub effective_model: String,
+    pub effective_range: String,
+    pub components: String,
+    pub suggested_x_chroma_offset: String,
+    pub suggested_y_chroma_offset: String,
+    pub conversion_mode: String,
+    pub sampler_binding_mode: String,
+    pub sampler_binding_compliance: String,
+    pub shader_sample_lowering: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -123,6 +146,7 @@ pub struct VideoTextureUpdateMetadata {
     pub height: u32,
     pub vulkan_format: Option<String>,
     pub vulkan_external_format: Option<u64>,
+    pub ycbcr_conversion: Option<VideoTextureYcbcrConversionMetadata>,
     pub resource_reused: Option<bool>,
     pub fallback_active: bool,
     pub fallback_reason: Option<String>,
@@ -186,6 +210,14 @@ impl VideoTextureUpdateMetadata {
     ) -> Self {
         self.vulkan_format = Some(vulkan_format.into());
         self.vulkan_external_format = external_format;
+        self
+    }
+
+    pub fn with_ycbcr_conversion(
+        mut self,
+        ycbcr_conversion: VideoTextureYcbcrConversionMetadata,
+    ) -> Self {
+        self.ycbcr_conversion = Some(ycbcr_conversion);
         self
     }
 
