@@ -344,6 +344,8 @@ pub struct ChartView {
     plot_rect: Rect,
 
     // Pan/zoom interaction
+    #[live(false)]
+    pub read_only: bool,
     #[rust]
     drag_start_abs: Option<DVec2>,
     #[rust]
@@ -391,6 +393,9 @@ pub struct ChartView {
 
 impl Widget for ChartView {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, _scope: &mut Scope) {
+        if self.read_only {
+            return;
+        }
         match event.hits_with_capture_overload(cx, self.draw_bg.area(), true) {
             Hit::FingerDown(fe) if fe.is_primary_hit() => {
                 self.drag_start_abs = Some(fe.abs);
