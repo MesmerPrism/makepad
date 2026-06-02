@@ -183,6 +183,7 @@ struct VulkanXrInFlightFrame {
     fence: vk::Fence,
     timestamp_query_pool: vk::QueryPool,
     pending_timestamp_query: bool,
+    submit_serial: u64,
 }
 
 struct VulkanPipeline {
@@ -270,6 +271,11 @@ struct VulkanTextureResource {
     ycbcr_conversion: Option<vk::SamplerYcbcrConversion>,
     ycbcr_conversion_metadata: Option<VideoTextureYcbcrConversionMetadata>,
     owns_image: bool,
+}
+
+struct RetiredTextureResource {
+    retire_after_submit_serial: u64,
+    resource: VulkanTextureResource,
 }
 
 #[derive(Clone, Copy)]
@@ -393,6 +399,7 @@ pub struct CxVulkan {
     offscreen_render_passes: HashMap<VulkanRenderPassKey, vk::RenderPass>,
     geometries: HashMap<GeometryId, VulkanGeometryResource>,
     textures: HashMap<VulkanTextureKey, VulkanTextureResource>,
+    retired_texture_resources: Vec<RetiredTextureResource>,
     reported_video_descriptor_shapes: HashSet<(usize, usize, usize, usize)>,
     frame_resources: FrameResources,
     command_pool: vk::CommandPool,
@@ -400,6 +407,9 @@ pub struct CxVulkan {
     image_available_semaphore: vk::Semaphore,
     render_finished_semaphore: vk::Semaphore,
     in_flight_fence: vk::Fence,
+    window_in_flight_submit_serial: u64,
+    gpu_submit_serial: u64,
+    gpu_completed_submit_serial: u64,
     window: *mut ndk_sys::ANativeWindow,
     requested_width: u32,
     requested_height: u32,
@@ -719,6 +729,7 @@ impl CxVulkan {
             offscreen_render_passes: HashMap::new(),
             geometries: HashMap::new(),
             textures: HashMap::new(),
+            retired_texture_resources: Vec::new(),
             reported_video_descriptor_shapes: HashSet::new(),
             frame_resources: FrameResources::default(),
             command_pool,
@@ -726,6 +737,9 @@ impl CxVulkan {
             image_available_semaphore,
             render_finished_semaphore,
             in_flight_fence,
+            window_in_flight_submit_serial: 0,
+            gpu_submit_serial: 0,
+            gpu_completed_submit_serial: 0,
             window,
             requested_width: width.max(1),
             requested_height: height.max(1),
@@ -1117,6 +1131,7 @@ impl CxVulkan {
             offscreen_render_passes: HashMap::new(),
             geometries: HashMap::new(),
             textures: HashMap::new(),
+            retired_texture_resources: Vec::new(),
             reported_video_descriptor_shapes: HashSet::new(),
             frame_resources: FrameResources::default(),
             command_pool,
@@ -1124,6 +1139,9 @@ impl CxVulkan {
             image_available_semaphore,
             render_finished_semaphore,
             in_flight_fence,
+            window_in_flight_submit_serial: 0,
+            gpu_submit_serial: 0,
+            gpu_completed_submit_serial: 0,
             window,
             requested_width: width.max(1),
             requested_height: height.max(1),
@@ -1228,6 +1246,7 @@ impl CxVulkan {
                 fence,
                 timestamp_query_pool: self.create_xr_timestamp_query_pool(),
                 pending_timestamp_query: false,
+                submit_serial: 0,
             });
         }
         Ok(frames)
@@ -1370,6 +1389,10 @@ impl CxVulkan {
                 .wait_for_fences(&[frame.fence], true, u64::MAX)
                 .map_err(|e| format!("wait_for_fences(openxr inflight) failed: {e:?}"))?;
         }
+        self.gpu_completed_submit_serial =
+            self.gpu_completed_submit_serial.max(frame.submit_serial);
+        frame.submit_serial = 0;
+        self.collect_retired_texture_resources();
 
         if frame.pending_timestamp_query && frame.timestamp_query_pool != vk::QueryPool::null() {
             let mut timestamps = [0u64; 2];
@@ -1427,6 +1450,7 @@ impl CxVulkan {
                     fence: vk::Fence::null(),
                     timestamp_query_pool: vk::QueryPool::null(),
                     pending_timestamp_query: false,
+                    submit_serial: 0,
                 },
             );
             let result = if frame.fence != vk::Fence::null() {
@@ -2470,6 +2494,7 @@ impl CxVulkan {
                     fence: vk::Fence::null(),
                     timestamp_query_pool: vk::QueryPool::null(),
                     pending_timestamp_query: false,
+                    submit_serial: 0,
                 },
             );
             Some((frame_index, frame))
@@ -2647,6 +2672,8 @@ impl CxVulkan {
             std::mem::swap(&mut self.command_buffer, &mut frame.command_buffer);
             std::mem::swap(&mut self.in_flight_fence, &mut frame.fence);
             if result.is_ok() {
+                self.gpu_submit_serial = self.gpu_submit_serial.saturating_add(1);
+                frame.submit_serial = self.gpu_submit_serial;
                 frame.pending_timestamp_query = timestamp_query_pool.is_some();
                 self.xr_in_flight_index = (frame_index + 1) % self.xr_in_flight_frames.len();
             }
@@ -2717,6 +2744,11 @@ impl CxVulkan {
             self.device
                 .wait_for_fences(&[self.in_flight_fence], true, u64::MAX)
                 .map_err(|e| format!("wait_for_fences failed: {e:?}"))?;
+            self.gpu_completed_submit_serial = self
+                .gpu_completed_submit_serial
+                .max(self.window_in_flight_submit_serial);
+            self.window_in_flight_submit_serial = 0;
+            self.collect_retired_texture_resources();
             self.device
                 .reset_fences(&[self.in_flight_fence])
                 .map_err(|e| format!("reset_fences failed: {e:?}"))?;
@@ -2961,6 +2993,8 @@ impl CxVulkan {
                 .queue_submit(self.queue, &[submit_info], self.in_flight_fence)
                 .map_err(|e| format!("queue_submit failed: {e:?}"))?;
         }
+        self.gpu_submit_serial = self.gpu_submit_serial.saturating_add(1);
+        self.window_in_flight_submit_serial = self.gpu_submit_serial;
 
         if capture_swapchain {
             unsafe {
@@ -2968,6 +3002,11 @@ impl CxVulkan {
                     .wait_for_fences(&[self.in_flight_fence], true, u64::MAX)
                     .map_err(|e| format!("wait_for_fences(swapchain capture) failed: {e:?}"))?;
             }
+            self.gpu_completed_submit_serial = self
+                .gpu_completed_submit_serial
+                .max(self.window_in_flight_submit_serial);
+            self.window_in_flight_submit_serial = 0;
+            self.collect_retired_texture_resources();
             let width = self.swapchain_extent.width.max(1);
             let height = self.swapchain_extent.height.max(1);
             let rgba = self.read_swapchain_color_image_rgba(image_index as usize)?;
@@ -3059,7 +3098,7 @@ impl CxVulkan {
 
         if needs_recreate {
             if let Some(old_resource) = self.textures.remove(&texture_key) {
-                self.destroy_texture_resource(old_resource);
+                self.retire_texture_resource(old_resource);
             }
             let resource = self.create_color_target_resource(
                 target_width,
@@ -3117,7 +3156,7 @@ impl CxVulkan {
 
         if needs_recreate {
             if let Some(old_resource) = self.textures.remove(&texture_key) {
-                self.destroy_texture_resource(old_resource);
+                self.retire_texture_resource(old_resource);
             }
             let resource = self.create_depth_target(target_width, target_height, format)?;
             self.textures.insert(texture_key, resource);
@@ -4606,6 +4645,77 @@ impl CxVulkan {
         }
     }
 
+    fn retire_texture_resource(&mut self, resource: VulkanTextureResource) {
+        let retire_after_submit_serial = self.gpu_submit_serial;
+        let hardware_buffer_resource = resource.hardware_buffer.is_some();
+        if self.gpu_completed_submit_serial >= retire_after_submit_serial {
+            if hardware_buffer_resource {
+                crate::log!(
+                    "RUSTY_XR_MAKEPAD_VULKAN_RESOURCE_RETIRE schema=rusty.xr.makepad-vulkan-resource-retire.v1 phase=retire status=destroy-now resourceKind=hardware-buffer retireAfterSubmitSerial={} completedSubmitSerial={} pendingRetiredTextureCount={}",
+                    retire_after_submit_serial,
+                    self.gpu_completed_submit_serial,
+                    self.retired_texture_resources.len(),
+                );
+            }
+            self.destroy_texture_resource(resource);
+            return;
+        }
+        let pending_before = self.retired_texture_resources.len();
+        if hardware_buffer_resource {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_VULKAN_RESOURCE_RETIRE schema=rusty.xr.makepad-vulkan-resource-retire.v1 phase=retire status=deferred resourceKind=hardware-buffer retireAfterSubmitSerial={} completedSubmitSerial={} pendingBefore={} pendingAfter={}",
+                retire_after_submit_serial,
+                self.gpu_completed_submit_serial,
+                pending_before,
+                pending_before + 1,
+            );
+        }
+        self.retired_texture_resources.push(RetiredTextureResource {
+            retire_after_submit_serial,
+            resource,
+        });
+    }
+
+    fn collect_retired_texture_resources(&mut self) {
+        if self.retired_texture_resources.is_empty() {
+            return;
+        }
+        let completed = self.gpu_completed_submit_serial;
+        let mut pending = Vec::new();
+        let mut ready = Vec::new();
+        for retired in self.retired_texture_resources.drain(..) {
+            if retired.retire_after_submit_serial <= completed {
+                ready.push(retired.resource);
+            } else {
+                pending.push(retired);
+            }
+        }
+        let ready_count = ready.len();
+        let ready_hardware_buffer_count = ready
+            .iter()
+            .filter(|resource| resource.hardware_buffer.is_some())
+            .count();
+        let pending_count = pending.len();
+        let pending_hardware_buffer_count = pending
+            .iter()
+            .filter(|retired| retired.resource.hardware_buffer.is_some())
+            .count();
+        self.retired_texture_resources = pending;
+        if ready_hardware_buffer_count > 0 {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_VULKAN_RESOURCE_RETIRE schema=rusty.xr.makepad-vulkan-resource-retire.v1 phase=collect status=destroy-ready readyCount={} readyHardwareBufferCount={} pendingCount={} pendingHardwareBufferCount={} completedSubmitSerial={}",
+                ready_count,
+                ready_hardware_buffer_count,
+                pending_count,
+                pending_hardware_buffer_count,
+                completed,
+            );
+        }
+        for resource in ready {
+            self.destroy_texture_resource(resource);
+        }
+    }
+
     fn create_imported_hardware_buffer_texture_resource(
         &mut self,
         hardware_buffer: *mut ndk_sys::AHardwareBuffer,
@@ -5352,13 +5462,13 @@ impl CxVulkan {
         };
 
         if let Some(old_resource) = self.textures.remove(&tex_v_key) {
-            self.destroy_texture_resource(old_resource);
+            self.retire_texture_resource(old_resource);
         }
         if let Some(old_resource) = self.textures.remove(&tex_u_key) {
-            self.destroy_texture_resource(old_resource);
+            self.retire_texture_resource(old_resource);
         }
         if let Some(old_resource) = self.textures.remove(&tex_y_key) {
-            self.destroy_texture_resource(old_resource);
+            self.retire_texture_resource(old_resource);
         }
         self.textures.insert(tex_y_key, y_resource);
         self.textures.insert(tex_u_key, u_resource);
@@ -5416,7 +5526,7 @@ impl CxVulkan {
         }
         if !same_source {
             if let Some(old_resource) = self.textures.remove(&texture_key) {
-                self.destroy_texture_resource(old_resource);
+                self.retire_texture_resource(old_resource);
             }
             let (resource, vk_format, external_format, ycbcr_conversion) = self
                 .create_imported_external_hardware_buffer_texture_resource(
@@ -5452,7 +5562,7 @@ impl CxVulkan {
         }
 
         if let Some(old_resource) = self.textures.remove(&texture_key) {
-            self.destroy_texture_resource(old_resource);
+            self.retire_texture_resource(old_resource);
         }
         let resource =
             self.create_imported_hardware_buffer_texture_resource(hardware_buffer, width, height)?;
@@ -5542,7 +5652,7 @@ impl CxVulkan {
 
         if needs_recreate {
             if let Some(old_resource) = self.textures.remove(&texture_key) {
-                self.destroy_texture_resource(old_resource);
+                self.retire_texture_resource(old_resource);
             }
             let resource = self.create_texture_resource(width, height, layers, is_cube, format)?;
             self.textures.insert(texture_key, resource);
@@ -7639,6 +7749,14 @@ impl CxVulkan {
     }
 
     fn destroy_texture_resources(&mut self) {
+        let retired: Vec<VulkanTextureResource> = self
+            .retired_texture_resources
+            .drain(..)
+            .map(|retired| retired.resource)
+            .collect();
+        for resource in retired {
+            self.destroy_texture_resource(resource);
+        }
         let mut resources: Vec<VulkanTextureResource> =
             self.textures.drain().map(|(_, r)| r).collect();
         resources.sort_by_key(|resource| resource.owns_image);
