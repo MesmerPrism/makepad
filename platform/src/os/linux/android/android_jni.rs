@@ -15,7 +15,10 @@ use {
     },
     makepad_android_state::{get_activity, get_java_vm},
     std::ffi::c_uint,
-    std::sync::{Arc, Condvar, Mutex},
+    std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Condvar, Mutex,
+    },
     std::time::Duration,
     std::{
         cell::Cell,
@@ -199,6 +202,27 @@ pub enum FromJavaMessage {
         timestamp_ns: u64,
         hardware_buffer: *mut ndk_sys::AHardwareBuffer,
     },
+    VideoHardwareBufferStereoFrame {
+        left_video_id: u64,
+        left_width: u32,
+        left_height: u32,
+        left_position_ms: u128,
+        left_frame_sequence: u64,
+        left_timestamp_ns: u64,
+        left_hardware_buffer: *mut ndk_sys::AHardwareBuffer,
+        right_video_id: u64,
+        right_width: u32,
+        right_height: u32,
+        right_position_ms: u128,
+        right_frame_sequence: u64,
+        right_timestamp_ns: u64,
+        right_hardware_buffer: *mut ndk_sys::AHardwareBuffer,
+        pair_delta_ns: u64,
+        pair_index: u64,
+    },
+    VideoHardwareBufferStereoFrameReady {
+        pair_index: u64,
+    },
     VideoPlaybackCompleted {
         video_id: u64,
     },
@@ -252,6 +276,9 @@ pub enum FromJavaMessage {
 unsafe impl Send for FromJavaMessage {}
 
 static MESSAGES_TX: Mutex<Option<mpsc::Sender<FromJavaMessage>>> = Mutex::new(None);
+static LATEST_VIDEO_HARDWARE_BUFFER_STEREO_FRAME: Mutex<Option<FromJavaMessage>> = Mutex::new(None);
+static LATEST_VIDEO_HARDWARE_BUFFER_STEREO_REPLACED_COUNT: AtomicU64 = AtomicU64::new(0);
+static LATEST_VIDEO_HARDWARE_BUFFER_STEREO_TAKEN_COUNT: AtomicU64 = AtomicU64::new(0);
 
 pub fn send_from_java_message(message: FromJavaMessage) {
     if let Ok(mut tx) = MESSAGES_TX.lock() {
@@ -263,6 +290,65 @@ pub fn send_from_java_message(message: FromJavaMessage) {
                 message
             );
         }
+    }
+}
+
+fn release_video_hardware_buffer_stereo_frame_message(message: FromJavaMessage) {
+    if let FromJavaMessage::VideoHardwareBufferStereoFrame {
+        left_hardware_buffer,
+        right_hardware_buffer,
+        ..
+    } = message
+    {
+        unsafe {
+            ndk_sys::AHardwareBuffer_release(left_hardware_buffer);
+            ndk_sys::AHardwareBuffer_release(right_hardware_buffer);
+        }
+    }
+}
+
+pub fn replace_latest_video_hardware_buffer_stereo_frame(message: FromJavaMessage) {
+    let Ok(mut latest) = LATEST_VIDEO_HARDWARE_BUFFER_STEREO_FRAME.lock() else {
+        release_video_hardware_buffer_stereo_frame_message(message);
+        return;
+    };
+    if let Some(previous) = latest.replace(message) {
+        release_video_hardware_buffer_stereo_frame_message(previous);
+        let replaced =
+            LATEST_VIDEO_HARDWARE_BUFFER_STEREO_REPLACED_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        if replaced <= 8 || replaced % 120 == 0 {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_BROKER_H264_STEREO_HARDWARE_BUFFER_LATEST_SLOT schema=rusty.xr.makepad-broker-h264-stereo-hardware-buffer-latest-slot.v1 phase=replace status=drop-old replaced={} policy=latest-native-slot",
+                replaced
+            );
+        }
+    }
+}
+
+pub fn take_latest_video_hardware_buffer_stereo_frame() -> Option<FromJavaMessage> {
+    let Ok(mut latest) = LATEST_VIDEO_HARDWARE_BUFFER_STEREO_FRAME.lock() else {
+        return None;
+    };
+    let message = latest.take();
+    if message.is_some() {
+        let taken =
+            LATEST_VIDEO_HARDWARE_BUFFER_STEREO_TAKEN_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        if taken <= 8 || taken % 120 == 0 {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_BROKER_H264_STEREO_HARDWARE_BUFFER_LATEST_SLOT schema=rusty.xr.makepad-broker-h264-stereo-hardware-buffer-latest-slot.v1 phase=take status=ok taken={} policy=latest-native-slot",
+                taken
+            );
+        }
+    }
+    message
+}
+
+pub fn clear_latest_video_hardware_buffer_stereo_frame() {
+    let Ok(mut latest) = LATEST_VIDEO_HARDWARE_BUFFER_STEREO_FRAME.lock() else {
+        return;
+    };
+    if let Some(previous) = latest.take() {
+        release_video_hardware_buffer_stereo_frame_message(previous);
     }
 }
 
@@ -1140,6 +1226,67 @@ pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoHardwareB
         frame_sequence: frame_sequence.max(0) as u64,
         timestamp_ns: timestamp_ns.max(0) as u64,
         hardware_buffer,
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoHardwareBufferStereoFrame(
+    env: *mut jni_sys::JNIEnv,
+    _: jni_sys::jobject,
+    left_video_id: jni_sys::jlong,
+    left_width: jni_sys::jint,
+    left_height: jni_sys::jint,
+    left_position_ms: jni_sys::jlong,
+    left_frame_sequence: jni_sys::jlong,
+    left_timestamp_ns: jni_sys::jlong,
+    left_hardware_buffer_obj: jni_sys::jobject,
+    right_video_id: jni_sys::jlong,
+    right_width: jni_sys::jint,
+    right_height: jni_sys::jint,
+    right_position_ms: jni_sys::jlong,
+    right_frame_sequence: jni_sys::jlong,
+    right_timestamp_ns: jni_sys::jlong,
+    right_hardware_buffer_obj: jni_sys::jobject,
+    pair_delta_ns: jni_sys::jlong,
+    pair_index: jni_sys::jlong,
+) {
+    if left_hardware_buffer_obj.is_null() || right_hardware_buffer_obj.is_null() {
+        return;
+    }
+    let left_hardware_buffer =
+        ndk_sys::AHardwareBuffer_fromHardwareBuffer(env, left_hardware_buffer_obj);
+    if left_hardware_buffer.is_null() {
+        return;
+    }
+    let right_hardware_buffer =
+        ndk_sys::AHardwareBuffer_fromHardwareBuffer(env, right_hardware_buffer_obj);
+    if right_hardware_buffer.is_null() {
+        return;
+    }
+    ndk_sys::AHardwareBuffer_acquire(left_hardware_buffer);
+    ndk_sys::AHardwareBuffer_acquire(right_hardware_buffer);
+    replace_latest_video_hardware_buffer_stereo_frame(
+        FromJavaMessage::VideoHardwareBufferStereoFrame {
+            left_video_id: left_video_id as u64,
+            left_width: left_width.max(0) as u32,
+            left_height: left_height.max(0) as u32,
+            left_position_ms: left_position_ms.max(0) as u128,
+            left_frame_sequence: left_frame_sequence.max(0) as u64,
+            left_timestamp_ns: left_timestamp_ns.max(0) as u64,
+            left_hardware_buffer,
+            right_video_id: right_video_id as u64,
+            right_width: right_width.max(0) as u32,
+            right_height: right_height.max(0) as u32,
+            right_position_ms: right_position_ms.max(0) as u128,
+            right_frame_sequence: right_frame_sequence.max(0) as u64,
+            right_timestamp_ns: right_timestamp_ns.max(0) as u64,
+            right_hardware_buffer,
+            pair_delta_ns: pair_delta_ns.max(0) as u64,
+            pair_index: pair_index.max(0) as u64,
+        },
+    );
+    send_from_java_message(FromJavaMessage::VideoHardwareBufferStereoFrameReady {
+        pair_index: pair_index.max(0) as u64,
     });
 }
 

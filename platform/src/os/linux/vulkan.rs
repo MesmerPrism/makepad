@@ -14,6 +14,7 @@ use crate::{
     makepad_script::shader::TextureType,
     os::linux::{
         android::ndk_sys,
+        libc_sys::{dlopen, dlsym, RTLD_LAZY, RTLD_LOCAL},
         openxr_sys::{
             LibOpenXr, VkDeviceCreateInfo, VkInstanceCreateInfo, XrInstance, XrResult, XrSystemId,
             XrVulkanDeviceCreateInfoKHR, XrVulkanGraphicsDeviceGetInfoKHR,
@@ -29,6 +30,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::CStr,
     os::raw::{c_char, c_void},
+    sync::OnceLock,
     time::Instant,
 };
 
@@ -38,6 +40,7 @@ extern "C" {
 }
 
 const XR_FRAGMENT_DENSITY_MAP_FORMAT: vk::Format = vk::Format::R8G8_UNORM;
+const VIDEO_HARDWARE_BUFFER_TEXTURE_CACHE_LIMIT: usize = 16;
 const XR_MAX_FRAMES_IN_FLIGHT: u32 = 3;
 const XR_MAX_FRAMES_IN_FLIGHT_LIMIT: u32 = 8;
 
@@ -297,6 +300,16 @@ struct RetiredTextureResource {
     resource: VulkanTextureResource,
 }
 
+struct VideoHardwareBufferTextureCacheEntry {
+    texture_key: VulkanTextureKey,
+    hardware_buffer_key: u64,
+    resource: VulkanTextureResource,
+    last_used_submit_serial: u64,
+}
+
+type AHardwareBufferGetIdFn =
+    unsafe extern "C" fn(*const ndk_sys::AHardwareBuffer, *mut u64) -> i32;
+
 #[derive(Clone, Copy)]
 struct ImportedYuvPlaneLayout {
     biplanar: bool,
@@ -418,6 +431,10 @@ pub struct CxVulkan {
     offscreen_render_passes: HashMap<VulkanRenderPassKey, vk::RenderPass>,
     geometries: HashMap<GeometryId, VulkanGeometryResource>,
     textures: HashMap<VulkanTextureKey, VulkanTextureResource>,
+    video_hardware_buffer_texture_cache: Vec<VideoHardwareBufferTextureCacheEntry>,
+    video_hardware_buffer_texture_cache_hit_count: u64,
+    video_hardware_buffer_texture_cache_miss_count: u64,
+    video_hardware_buffer_texture_cache_evict_count: u64,
     retired_texture_resources: Vec<RetiredTextureResource>,
     external_ycbcr_samplers: HashMap<VulkanExternalYcbcrSamplerKey, VulkanExternalYcbcrSampler>,
     reported_video_descriptor_shapes: HashSet<(usize, usize, usize, usize)>,
@@ -749,6 +766,10 @@ impl CxVulkan {
             offscreen_render_passes: HashMap::new(),
             geometries: HashMap::new(),
             textures: HashMap::new(),
+            video_hardware_buffer_texture_cache: Vec::new(),
+            video_hardware_buffer_texture_cache_hit_count: 0,
+            video_hardware_buffer_texture_cache_miss_count: 0,
+            video_hardware_buffer_texture_cache_evict_count: 0,
             retired_texture_resources: Vec::new(),
             external_ycbcr_samplers: HashMap::new(),
             reported_video_descriptor_shapes: HashSet::new(),
@@ -1152,6 +1173,10 @@ impl CxVulkan {
             offscreen_render_passes: HashMap::new(),
             geometries: HashMap::new(),
             textures: HashMap::new(),
+            video_hardware_buffer_texture_cache: Vec::new(),
+            video_hardware_buffer_texture_cache_hit_count: 0,
+            video_hardware_buffer_texture_cache_miss_count: 0,
+            video_hardware_buffer_texture_cache_evict_count: 0,
             retired_texture_resources: Vec::new(),
             external_ycbcr_samplers: HashMap::new(),
             reported_video_descriptor_shapes: HashSet::new(),
@@ -4638,6 +4663,169 @@ impl CxVulkan {
         Ok(self.xr_depth_dummy_multiview.as_ref().unwrap().view)
     }
 
+    fn ahardware_buffer_get_id_fn() -> Option<AHardwareBufferGetIdFn> {
+        static GET_ID_FN: OnceLock<Option<AHardwareBufferGetIdFn>> = OnceLock::new();
+        *GET_ID_FN.get_or_init(|| unsafe {
+            let library = CStr::from_bytes_with_nul_unchecked(b"libandroid.so\0");
+            let symbol = CStr::from_bytes_with_nul_unchecked(b"AHardwareBuffer_getId\0");
+            let handle = dlopen(library.as_ptr(), RTLD_LAZY | RTLD_LOCAL);
+            if handle.is_null() {
+                return None;
+            }
+            let symbol = dlsym(handle, symbol.as_ptr());
+            if symbol.is_null() {
+                None
+            } else {
+                Some(std::mem::transmute::<*mut c_void, AHardwareBufferGetIdFn>(
+                    symbol,
+                ))
+            }
+        })
+    }
+
+    fn hardware_buffer_cache_key(hardware_buffer: *mut ndk_sys::AHardwareBuffer) -> Option<u64> {
+        if hardware_buffer.is_null() {
+            return None;
+        }
+        if let Some(get_id) = Self::ahardware_buffer_get_id_fn() {
+            let mut native_id = 0u64;
+            let id_result = unsafe {
+                get_id(
+                    hardware_buffer as *const ndk_sys::AHardwareBuffer,
+                    &mut native_id,
+                )
+            };
+            if id_result == 0 && native_id != 0 {
+                return Some(native_id);
+            }
+        }
+        Some(hardware_buffer as usize as u64)
+    }
+
+    fn texture_resource_hardware_buffer_cache_key(resource: &VulkanTextureResource) -> Option<u64> {
+        resource
+            .hardware_buffer
+            .and_then(Self::hardware_buffer_cache_key)
+    }
+
+    fn should_log_video_hardware_buffer_cache_count(count: u64) -> bool {
+        count <= 8 || count % 100 == 0
+    }
+
+    fn take_cached_video_hardware_buffer_texture_resource(
+        &mut self,
+        texture_key: VulkanTextureKey,
+        hardware_buffer_key: u64,
+    ) -> Option<VulkanTextureResource> {
+        let position = self
+            .video_hardware_buffer_texture_cache
+            .iter()
+            .position(|entry| {
+                entry.texture_key == texture_key && entry.hardware_buffer_key == hardware_buffer_key
+            });
+        if let Some(position) = position {
+            let entry = self.video_hardware_buffer_texture_cache.remove(position);
+            self.video_hardware_buffer_texture_cache_hit_count = self
+                .video_hardware_buffer_texture_cache_hit_count
+                .saturating_add(1);
+            if Self::should_log_video_hardware_buffer_cache_count(
+                self.video_hardware_buffer_texture_cache_hit_count,
+            ) {
+                crate::log!(
+                    "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_HARDWARE_BUFFER_CACHE schema=rusty.xr.makepad-vulkan-video-hardware-buffer-cache.v1 phase=lookup status=hit textureKey={} hardwareBufferKey={} hitCount={} missCount={} evictCount={} cacheSize={} cacheLimit={}",
+                    texture_key,
+                    hardware_buffer_key,
+                    self.video_hardware_buffer_texture_cache_hit_count,
+                    self.video_hardware_buffer_texture_cache_miss_count,
+                    self.video_hardware_buffer_texture_cache_evict_count,
+                    self.video_hardware_buffer_texture_cache.len(),
+                    VIDEO_HARDWARE_BUFFER_TEXTURE_CACHE_LIMIT,
+                );
+            }
+            Some(entry.resource)
+        } else {
+            self.video_hardware_buffer_texture_cache_miss_count = self
+                .video_hardware_buffer_texture_cache_miss_count
+                .saturating_add(1);
+            if Self::should_log_video_hardware_buffer_cache_count(
+                self.video_hardware_buffer_texture_cache_miss_count,
+            ) {
+                crate::log!(
+                    "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_HARDWARE_BUFFER_CACHE schema=rusty.xr.makepad-vulkan-video-hardware-buffer-cache.v1 phase=lookup status=miss textureKey={} hardwareBufferKey={} hitCount={} missCount={} evictCount={} cacheSize={} cacheLimit={}",
+                    texture_key,
+                    hardware_buffer_key,
+                    self.video_hardware_buffer_texture_cache_hit_count,
+                    self.video_hardware_buffer_texture_cache_miss_count,
+                    self.video_hardware_buffer_texture_cache_evict_count,
+                    self.video_hardware_buffer_texture_cache.len(),
+                    VIDEO_HARDWARE_BUFFER_TEXTURE_CACHE_LIMIT,
+                );
+            }
+            None
+        }
+    }
+
+    fn cache_video_hardware_buffer_texture_resource(
+        &mut self,
+        texture_key: VulkanTextureKey,
+        resource: VulkanTextureResource,
+    ) {
+        let Some(hardware_buffer_key) = Self::texture_resource_hardware_buffer_cache_key(&resource)
+        else {
+            self.retire_texture_resource(resource);
+            return;
+        };
+        if let Some(position) = self
+            .video_hardware_buffer_texture_cache
+            .iter()
+            .position(|entry| {
+                entry.texture_key == texture_key && entry.hardware_buffer_key == hardware_buffer_key
+            })
+        {
+            let old = self.video_hardware_buffer_texture_cache.remove(position);
+            self.retire_texture_resource(old.resource);
+        }
+        self.video_hardware_buffer_texture_cache
+            .push(VideoHardwareBufferTextureCacheEntry {
+                texture_key,
+                hardware_buffer_key,
+                resource,
+                last_used_submit_serial: self.gpu_submit_serial,
+            });
+        self.trim_video_hardware_buffer_texture_cache();
+    }
+
+    fn trim_video_hardware_buffer_texture_cache(&mut self) {
+        while self.video_hardware_buffer_texture_cache.len()
+            > VIDEO_HARDWARE_BUFFER_TEXTURE_CACHE_LIMIT
+        {
+            let evict_position = self
+                .video_hardware_buffer_texture_cache
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, entry)| entry.last_used_submit_serial)
+                .map(|(index, _)| index)
+                .unwrap_or(0);
+            let entry = self
+                .video_hardware_buffer_texture_cache
+                .remove(evict_position);
+            self.video_hardware_buffer_texture_cache_evict_count = self
+                .video_hardware_buffer_texture_cache_evict_count
+                .saturating_add(1);
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_HARDWARE_BUFFER_CACHE schema=rusty.xr.makepad-vulkan-video-hardware-buffer-cache.v1 phase=evict status=retire textureKey={} hardwareBufferKey={} hitCount={} missCount={} evictCount={} cacheSize={} cacheLimit={}",
+                entry.texture_key,
+                entry.hardware_buffer_key,
+                self.video_hardware_buffer_texture_cache_hit_count,
+                self.video_hardware_buffer_texture_cache_miss_count,
+                self.video_hardware_buffer_texture_cache_evict_count,
+                self.video_hardware_buffer_texture_cache.len(),
+                VIDEO_HARDWARE_BUFFER_TEXTURE_CACHE_LIMIT,
+            );
+            self.retire_texture_resource(entry.resource);
+        }
+    }
+
     fn destroy_texture_resource(&self, resource: VulkanTextureResource) {
         unsafe {
             if resource.owns_sampler_ycbcr_conversion {
@@ -5648,11 +5836,15 @@ impl CxVulkan {
         height: u32,
     ) -> Result<(VideoYuvMetadata, VideoTextureUpdateMetadata), String> {
         let texture_key = Self::texture_key(texture_id);
+        let hardware_buffer_key =
+            Self::hardware_buffer_cache_key(hardware_buffer).ok_or_else(|| {
+                "Android Vulkan camera import failed: null AHardwareBuffer".to_string()
+            })?;
         let same_source = self
             .textures
             .get(&texture_key)
-            .and_then(|resource| resource.hardware_buffer)
-            == Some(hardware_buffer);
+            .and_then(Self::texture_resource_hardware_buffer_cache_key)
+            == Some(hardware_buffer_key);
         let mut metadata = VideoTextureUpdateMetadata::default()
             .with_resource(
                 VideoTextureResourcePath::HardwareBufferExternal,
@@ -5671,20 +5863,36 @@ impl CxVulkan {
             }
         }
         if !same_source {
-            if let Some(old_resource) = self.textures.remove(&texture_key) {
-                self.retire_texture_resource(old_resource);
+            if let Some(cached_resource) = self.take_cached_video_hardware_buffer_texture_resource(
+                texture_key,
+                hardware_buffer_key,
+            ) {
+                if let Some(old_resource) = self.textures.remove(&texture_key) {
+                    self.cache_video_hardware_buffer_texture_resource(texture_key, old_resource);
+                }
+                if let Some(ycbcr_conversion) = cached_resource.ycbcr_conversion_metadata.clone() {
+                    metadata = metadata.with_ycbcr_conversion(ycbcr_conversion);
+                }
+                metadata = metadata
+                    .with_vulkan_format(format!("{:?}", cached_resource.format), None)
+                    .with_resource_reused(true);
+                self.textures.insert(texture_key, cached_resource);
+            } else {
+                if let Some(old_resource) = self.textures.remove(&texture_key) {
+                    self.cache_video_hardware_buffer_texture_resource(texture_key, old_resource);
+                }
+                let (resource, vk_format, external_format, ycbcr_conversion) = self
+                    .create_imported_external_hardware_buffer_texture_resource(
+                        hardware_buffer,
+                        width,
+                        height,
+                    )?;
+                metadata = metadata.with_vulkan_format(vk_format, external_format);
+                if let Some(ycbcr_conversion) = ycbcr_conversion {
+                    metadata = metadata.with_ycbcr_conversion(ycbcr_conversion);
+                }
+                self.textures.insert(texture_key, resource);
             }
-            let (resource, vk_format, external_format, ycbcr_conversion) = self
-                .create_imported_external_hardware_buffer_texture_resource(
-                    hardware_buffer,
-                    width,
-                    height,
-                )?;
-            metadata = metadata.with_vulkan_format(vk_format, external_format);
-            if let Some(ycbcr_conversion) = ycbcr_conversion {
-                metadata = metadata.with_ycbcr_conversion(ycbcr_conversion);
-            }
-            self.textures.insert(texture_key, resource);
         }
 
         Ok((VideoYuvMetadata::disabled(), metadata))
@@ -7901,6 +8109,14 @@ impl CxVulkan {
             .map(|retired| retired.resource)
             .collect();
         for resource in retired {
+            self.destroy_texture_resource(resource);
+        }
+        let cached_video_hardware_buffer_resources: Vec<VulkanTextureResource> = self
+            .video_hardware_buffer_texture_cache
+            .drain(..)
+            .map(|entry| entry.resource)
+            .collect();
+        for resource in cached_video_hardware_buffer_resources {
             self.destroy_texture_resource(resource);
         }
         let mut resources: Vec<VulkanTextureResource> =

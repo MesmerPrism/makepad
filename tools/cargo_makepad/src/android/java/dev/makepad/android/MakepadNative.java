@@ -71,6 +71,10 @@ public class MakepadNative {
     public static native void onVideoPlaybackMetadata(long videoId, String metadataJson);
     public static native void onVideoYuvFrame(long videoId, int width, int height, long positionMs, byte[] y, byte[] u, byte[] v);
     public static native void onVideoHardwareBufferFrame(long videoId, int width, int height, long positionMs, long frameSequence, long timestampNs, HardwareBuffer hardwareBuffer);
+    public static native void onVideoHardwareBufferStereoFrame(
+        long leftVideoId, int leftWidth, int leftHeight, long leftPositionMs, long leftFrameSequence, long leftTimestampNs, HardwareBuffer leftHardwareBuffer,
+        long rightVideoId, int rightWidth, int rightHeight, long rightPositionMs, long rightFrameSequence, long rightTimestampNs, HardwareBuffer rightHardwareBuffer,
+        long pairDeltaNs, long pairIndex);
     public static native void onVideoPlaybackCompleted(long videoId);
     public static native void onVideoPlayerReleased(long videoId);
     public static native void onVideoDecodingError(long videoId, String error);

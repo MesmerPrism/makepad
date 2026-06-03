@@ -43,17 +43,32 @@ impl Cx {
         from_java_rx: &mpsc::Receiver<FromJavaMessage>,
     ) -> bool {
         if self.os.openxr.session.is_some() {
+            let mut pending_touch_move: Option<FromJavaMessage> = None;
+            let mut pending_stereo_hardware_buffer_frame: Option<FromJavaMessage> = None;
+            let mut dropped_stereo_hardware_buffer_frames = 0;
             loop {
                 match from_java_rx.try_recv() {
                     Ok(FromJavaMessage::RenderLoop) => {} // ignore this one
                     Ok(message) => {
-                        self.handle_message(message);
+                        self.handle_coalesced_android_java_message(
+                            "openxr-java-drain",
+                            message,
+                            &mut pending_touch_move,
+                            &mut pending_stereo_hardware_buffer_frame,
+                            &mut dropped_stereo_hardware_buffer_frames,
+                        );
                     }
                     Err(_) => {
                         break;
                     }
                 }
             }
+            self.flush_coalesced_android_java_messages(
+                "openxr-java-drain",
+                &mut pending_touch_move,
+                &mut pending_stereo_hardware_buffer_frame,
+                &mut dropped_stereo_hardware_buffer_frames,
+            );
             self.openxr_handle_events();
             let pre_frame_events_started = Instant::now();
             self.handle_other_events_before_openxr_frame();

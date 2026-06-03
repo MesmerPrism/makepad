@@ -367,34 +367,28 @@ impl Cx {
             // This ensures we're in sync with the Android Choreographer when we receive a RenderLoop message.
             match from_java_rx.recv() {
                 Ok(FromJavaMessage::RenderLoop) => {
-                    // Drain all pending messages, coalescing consecutive touch-move
-                    // events to avoid redundant event dispatch before painting.
-                    // Start/Stop events are never dropped — only pure-Move events
-                    // are replaced by the next one.
+                    // Drain all pending messages, coalescing high-rate updates
+                    // before painting. Start/Stop touch events are never dropped;
+                    // only pure-Move events and superseded stereo HWB pairs are
+                    // replaced by a newer value.
                     let mut pending_touch_move: Option<FromJavaMessage> = None;
+                    let mut pending_stereo_hardware_buffer_frame: Option<FromJavaMessage> = None;
+                    let mut dropped_stereo_hardware_buffer_frames = 0;
                     while let Ok(msg) = from_java_rx.try_recv() {
-                        if let FromJavaMessage::Touch(ref touches) = msg {
-                            if touches
-                                .iter()
-                                .all(|t| t.state == crate::event::finger::TouchState::Move)
-                            {
-                                // This is a pure move event — defer it; a newer one
-                                // may arrive and supersede it.
-                                pending_touch_move = Some(msg);
-                                continue;
-                            }
-                        }
-                        // A non-touch or non-pure-move message arrived.
-                        // Flush the deferred move first (if any) so ordering is preserved.
-                        if let Some(deferred) = pending_touch_move.take() {
-                            self.handle_message(deferred);
-                        }
-                        self.handle_message(msg);
+                        self.handle_coalesced_android_java_message(
+                            "android-renderloop-java-drain",
+                            msg,
+                            &mut pending_touch_move,
+                            &mut pending_stereo_hardware_buffer_frame,
+                            &mut dropped_stereo_hardware_buffer_frames,
+                        );
                     }
-                    // Flush the last deferred move (if any).
-                    if let Some(deferred) = pending_touch_move.take() {
-                        self.handle_message(deferred);
-                    }
+                    self.flush_coalesced_android_java_messages(
+                        "android-renderloop-java-drain",
+                        &mut pending_touch_move,
+                        &mut pending_stereo_hardware_buffer_frame,
+                        &mut dropped_stereo_hardware_buffer_frames,
+                    );
                     self.handle_other_events();
                     if self.os.in_xr_mode && self.os.openxr.session.is_none() {
                         if !self.os.openxr.logged_waiting_for_session {
@@ -521,6 +515,148 @@ impl Cx {
         self.os.refresh_surface_snapshot_after_first_present = false;
         unsafe {
             android_jni::to_java_request_surface_snapshot_refresh();
+        }
+    }
+
+    #[cfg(use_vulkan)]
+    fn update_android_video_external_hardware_buffer_frame(
+        &mut self,
+        video_id: u64,
+        width: u32,
+        height: u32,
+        frame_sequence: u64,
+        timestamp_ns: u64,
+        hardware_buffer: *mut ndk_sys::AHardwareBuffer,
+    ) -> Result<
+        (
+            crate::event::video_playback::VideoYuvMetadata,
+            VideoTextureUpdateMetadata,
+        ),
+        String,
+    > {
+        let live_id = LiveId(video_id);
+        let config = self
+            .os
+            .video_configs
+            .get(&live_id)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "Android broker H.264 hardware-buffer frame for unknown video_id={video_id}"
+                )
+            })?;
+        let (yuv, metadata) = self
+            .os
+            .vulkan
+            .as_mut()
+            .ok_or_else(|| {
+                "Android broker H.264 hardware-buffer texture requested without Vulkan backend"
+                    .to_string()
+            })?
+            .update_video_external_hardware_buffer_texture(
+                config.texture_id,
+                hardware_buffer,
+                width,
+                height,
+            )?;
+        let frame_sequence = frame_sequence.max(1);
+        let timestamp_ns = if timestamp_ns > 0 {
+            timestamp_ns
+        } else {
+            android_video_diagnostic_time_ns()
+        };
+        let metadata = metadata
+            .with_camera_frame(frame_sequence, timestamp_ns, None)
+            .with_hardware_buffer_import(frame_sequence, android_video_diagnostic_time_ns());
+        Ok((yuv, metadata))
+    }
+
+    fn is_pure_touch_move_message(msg: &FromJavaMessage) -> bool {
+        if let FromJavaMessage::Touch(touches) = msg {
+            touches
+                .iter()
+                .all(|t| t.state == crate::event::finger::TouchState::Move)
+        } else {
+            false
+        }
+    }
+
+    fn is_video_hardware_buffer_stereo_frame_message(msg: &FromJavaMessage) -> bool {
+        matches!(
+            msg,
+            FromJavaMessage::VideoHardwareBufferStereoFrame { .. }
+                | FromJavaMessage::VideoHardwareBufferStereoFrameReady { .. }
+        )
+    }
+
+    fn release_coalesced_video_hardware_buffer_stereo_message(msg: FromJavaMessage) {
+        if let FromJavaMessage::VideoHardwareBufferStereoFrame {
+            left_hardware_buffer,
+            right_hardware_buffer,
+            ..
+        } = msg
+        {
+            unsafe {
+                ndk_sys::AHardwareBuffer_release(left_hardware_buffer);
+                ndk_sys::AHardwareBuffer_release(right_hardware_buffer);
+            }
+        }
+    }
+
+    pub(crate) fn handle_coalesced_android_java_message(
+        &mut self,
+        phase: &str,
+        msg: FromJavaMessage,
+        pending_touch_move: &mut Option<FromJavaMessage>,
+        pending_stereo_hardware_buffer_frame: &mut Option<FromJavaMessage>,
+        dropped_stereo_hardware_buffer_frames: &mut u64,
+    ) {
+        if Self::is_pure_touch_move_message(&msg) {
+            *pending_touch_move = Some(msg);
+            return;
+        }
+        if Self::is_video_hardware_buffer_stereo_frame_message(&msg) {
+            if let Some(previous) = pending_stereo_hardware_buffer_frame.replace(msg) {
+                Self::release_coalesced_video_hardware_buffer_stereo_message(previous);
+                *dropped_stereo_hardware_buffer_frames =
+                    dropped_stereo_hardware_buffer_frames.saturating_add(1);
+            }
+            return;
+        }
+        self.flush_coalesced_android_java_messages(
+            phase,
+            pending_touch_move,
+            pending_stereo_hardware_buffer_frame,
+            dropped_stereo_hardware_buffer_frames,
+        );
+        self.handle_message(msg);
+    }
+
+    pub(crate) fn flush_coalesced_android_java_messages(
+        &mut self,
+        phase: &str,
+        pending_touch_move: &mut Option<FromJavaMessage>,
+        pending_stereo_hardware_buffer_frame: &mut Option<FromJavaMessage>,
+        dropped_stereo_hardware_buffer_frames: &mut u64,
+    ) {
+        if let Some(deferred) = pending_touch_move.take() {
+            self.handle_message(deferred);
+        }
+        let kept_stereo_hardware_buffer_frame =
+            if let Some(deferred) = pending_stereo_hardware_buffer_frame.take() {
+                self.handle_message(deferred);
+                true
+            } else {
+                false
+            };
+        if *dropped_stereo_hardware_buffer_frames > 0 {
+            crate::log!(
+                "RUSTY_XR_MAKEPAD_BROKER_H264_STEREO_HARDWARE_BUFFER_COALESCE schema=rusty.xr.makepad-broker-h264-stereo-hardware-buffer-coalesce.v1 phase={} status=drop-old dropped={} kept={} policy=latest-pair-per-drain",
+                phase,
+                *dropped_stereo_hardware_buffer_frames,
+                if kept_stereo_hardware_buffer_frame { 1 } else { 0 },
+            );
+            *dropped_stereo_hardware_buffer_frames = 0;
         }
     }
 
@@ -1287,6 +1423,142 @@ impl Cx {
                     }));
                 }
             }
+            FromJavaMessage::VideoHardwareBufferStereoFrame {
+                left_video_id,
+                left_width,
+                left_height,
+                left_position_ms,
+                left_frame_sequence,
+                left_timestamp_ns,
+                left_hardware_buffer,
+                right_video_id,
+                right_width,
+                right_height,
+                right_position_ms,
+                right_frame_sequence,
+                right_timestamp_ns,
+                right_hardware_buffer,
+                pair_delta_ns,
+                pair_index,
+            } => {
+                #[cfg(use_vulkan)]
+                {
+                    let left_result = self.update_android_video_external_hardware_buffer_frame(
+                        left_video_id,
+                        left_width,
+                        left_height,
+                        left_frame_sequence,
+                        left_timestamp_ns,
+                        left_hardware_buffer,
+                    );
+                    let right_result = self.update_android_video_external_hardware_buffer_frame(
+                        right_video_id,
+                        right_width,
+                        right_height,
+                        right_frame_sequence,
+                        right_timestamp_ns,
+                        right_hardware_buffer,
+                    );
+                    match (left_result, right_result) {
+                        (Ok((left_yuv, left_metadata)), Ok((right_yuv, right_metadata))) => {
+                            crate::log!(
+                                "RUSTY_XR_MAKEPAD_BROKER_H264_STEREO_HARDWARE_BUFFER_FRAME schema=rusty.xr.makepad-broker-h264-stereo-hardware-buffer-frame.v1 phase=texture-updated status=ok pairIndex={} pairDeltaNs={} leftVideoId={} rightVideoId={} leftFrameSeq={} rightFrameSeq={} leftTimestampNs={} rightTimestampNs={} leftWidth={} leftHeight={} rightWidth={} rightHeight={}",
+                                pair_index,
+                                pair_delta_ns,
+                                left_video_id,
+                                right_video_id,
+                                left_frame_sequence.max(1),
+                                right_frame_sequence.max(1),
+                                left_timestamp_ns,
+                                right_timestamp_ns,
+                                left_width,
+                                left_height,
+                                right_width,
+                                right_height,
+                            );
+                            self.call_event_handler(&Event::VideoTextureUpdated(
+                                VideoTextureUpdatedEvent {
+                                    video_id: LiveId(left_video_id),
+                                    current_position_ms: left_position_ms,
+                                    yuv: left_yuv,
+                                    metadata: left_metadata,
+                                },
+                            ));
+                            self.call_event_handler(&Event::VideoTextureUpdated(
+                                VideoTextureUpdatedEvent {
+                                    video_id: LiveId(right_video_id),
+                                    current_position_ms: right_position_ms,
+                                    yuv: right_yuv,
+                                    metadata: right_metadata,
+                                },
+                            ));
+                        }
+                        (Err(left_error), Err(right_error)) => {
+                            self.call_event_handler(&Event::VideoDecodingError(
+                                VideoDecodingErrorEvent {
+                                    video_id: LiveId(left_video_id),
+                                    error: left_error,
+                                },
+                            ));
+                            self.call_event_handler(&Event::VideoDecodingError(
+                                VideoDecodingErrorEvent {
+                                    video_id: LiveId(right_video_id),
+                                    error: right_error,
+                                },
+                            ));
+                        }
+                        (Err(error), Ok(_)) => {
+                            self.call_event_handler(&Event::VideoDecodingError(
+                                VideoDecodingErrorEvent {
+                                    video_id: LiveId(left_video_id),
+                                    error,
+                                },
+                            ));
+                        }
+                        (Ok(_), Err(error)) => {
+                            self.call_event_handler(&Event::VideoDecodingError(
+                                VideoDecodingErrorEvent {
+                                    video_id: LiveId(right_video_id),
+                                    error,
+                                },
+                            ));
+                        }
+                    }
+                    unsafe {
+                        ndk_sys::AHardwareBuffer_release(left_hardware_buffer);
+                        ndk_sys::AHardwareBuffer_release(right_hardware_buffer);
+                    }
+                }
+                #[cfg(not(use_vulkan))]
+                {
+                    unsafe {
+                        ndk_sys::AHardwareBuffer_release(left_hardware_buffer);
+                        ndk_sys::AHardwareBuffer_release(right_hardware_buffer);
+                    }
+                    self.call_event_handler(&Event::VideoDecodingError(VideoDecodingErrorEvent {
+                        video_id: LiveId(left_video_id),
+                        error:
+                            "Android broker H.264 stereo hardware-buffer texture requires Vulkan backend"
+                                .to_string(),
+                    }));
+                    self.call_event_handler(&Event::VideoDecodingError(VideoDecodingErrorEvent {
+                        video_id: LiveId(right_video_id),
+                        error:
+                            "Android broker H.264 stereo hardware-buffer texture requires Vulkan backend"
+                                .to_string(),
+                    }));
+                }
+            }
+            FromJavaMessage::VideoHardwareBufferStereoFrameReady { pair_index } => {
+                if let Some(frame) = android_jni::take_latest_video_hardware_buffer_stereo_frame() {
+                    self.handle_message(frame);
+                } else if pair_index < 8 || pair_index % 120 == 0 {
+                    crate::log!(
+                        "RUSTY_XR_MAKEPAD_BROKER_H264_STEREO_HARDWARE_BUFFER_LATEST_SLOT schema=rusty.xr.makepad-broker-h264-stereo-hardware-buffer-latest-slot.v1 phase=take status=empty pairIndex={} policy=latest-native-slot",
+                        pair_index
+                    );
+                }
+            }
             FromJavaMessage::VideoPlaybackCompleted { video_id } => {
                 let e = Event::VideoPlaybackCompleted(VideoPlaybackCompletedEvent {
                     video_id: LiveId(video_id),
@@ -1415,6 +1687,7 @@ impl Cx {
                 self.call_event_handler(&Event::Background);
             }
             FromJavaMessage::Destroy => {
+                android_jni::clear_latest_video_hardware_buffer_stereo_frame();
                 if !self.os.ignore_destroy {
                     self.call_event_handler(&Event::Shutdown);
                     self.os.quit = true;

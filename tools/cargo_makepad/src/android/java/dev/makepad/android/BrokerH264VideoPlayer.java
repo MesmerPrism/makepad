@@ -26,6 +26,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -42,8 +43,10 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private static final int MAX_STREAM_HEADER_METADATA_BYTES = 256 * 1024;
     private static final int MAX_STREAM_PACKETS = 2400;
     private static final int DEQUEUE_TIMEOUT_US = 10000;
-    private static final int HARDWARE_BUFFER_READER_MAX_IMAGES = 3;
-    private static final int HARDWARE_BUFFER_WAIT_MS = 50;
+    private static final int HARDWARE_BUFFER_READER_MAX_IMAGES = 4;
+    private static final int HARDWARE_BUFFER_WAIT_MS = 250;
+    private static final int STEREO_HARDWARE_BUFFER_QUEUE_LIMIT = 4;
+    private static final long STEREO_HARDWARE_BUFFER_STALE_NS = 250_000_000L;
     private static final long PROGRESS_LOG_INTERVAL_MS = 2000L;
     private static final String DEFAULT_CAMERA_PROJECTION_GEOMETRY_PROFILE = "full-frame-diagnostic";
     private static final String CAMERA_PROJECTION_GEOMETRY_PROFILE = "camera-projection";
@@ -53,6 +56,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private static final String DECODE_OUTPUT_HARDWARE_BUFFER = "hardware-buffer";
     private static final String SOURCE_SAMPLING_TARGET_LOCAL_RASTER = "target-local-raster";
     private static final String SOURCE_SAMPLING_SCREEN_TO_CAMERA_HOMOGRAPHY = "screen-to-camera-homography";
+    private static final Object STEREO_HARDWARE_BUFFER_PAIRER_LOCK = new Object();
+    private static final Map<String, StereoHardwareBufferPairer> STEREO_HARDWARE_BUFFER_PAIRERS =
+        new HashMap<String, StereoHardwareBufferPairer>();
 
     private final Config mConfig;
     private final AtomicBoolean mStarted = new AtomicBoolean(false);
@@ -344,13 +350,18 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         JSONObject command = new JSONObject();
         command.put("type", "command");
         command.put("schema", "rusty.xr.broker.command.v1");
-        command.put("request_id", "makepad-h264-video-" + System.currentTimeMillis());
+        String clientLabel = mConfig.stereoPairRole.length() > 0
+            ? mConfig.stereoPairRole
+            : Long.toString(mVideoId);
+        command.put(
+            "request_id",
+            "makepad-h264-video-" + clientLabel + "-" + mVideoId + "-" + System.currentTimeMillis());
         command.put(
             "command",
             "broker-synthetic".equals(sourceMode)
                 ? "media.start_synthetic_h264_stream"
                 : "camera_provider.start_app_camera_h264_stream");
-        command.put("client_id", "makepad-broker-h264-video");
+        command.put("client_id", "makepad-broker-h264-video-" + clientLabel);
         command.put("app_label", "Makepad XR app");
         command.put("app_version", "source-example");
         command.put("params", params);
@@ -403,7 +414,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         mDecoder = decoder;
         decoder.configure(format, mDecodeSurface, null, 0);
         decoder.start();
-        requestDecoderLowLatency(decoder);
+        boolean lowLatencyParameterSucceeded = requestDecoderLowLatency(decoder);
+        Log.i(TAG, String.format(
+            Locale.US,
+            "Broker H.264 decoder started videoId=%d decoder=%s lowLatencyRequested=%s",
+            mVideoId,
+            decoder.getName(),
+            lowLatencyParameterSucceeded));
         notifyPrepared(header);
 
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
@@ -517,6 +534,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             if (hardwareBufferOutput && mHardwareBufferTarget != null) {
                 if (mHardwareBufferTarget.awaitAndEmitFrame(
                     mVideoId,
+                    mConfig,
                     HARDWARE_BUFFER_WAIT_MS,
                     decodedFrameSequence,
                     info.presentationTimeUs,
@@ -888,14 +906,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     }
 
     private static boolean requestDecoderLowLatency(MediaCodec decoder) {
+        Bundle params = new Bundle();
+        params.putInt(MediaCodec.PARAMETER_KEY_LOW_LATENCY, 1);
         try {
-            MediaCodecInfo.CodecCapabilities capabilities =
-                decoder.getCodecInfo().getCapabilitiesForType("video/avc");
-            if (!capabilities.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)) {
-                return false;
-            }
-            Bundle params = new Bundle();
-            params.putInt(MediaCodec.PARAMETER_KEY_LOW_LATENCY, 1);
             decoder.setParameters(params);
             return true;
         } catch (Exception ignored) {
@@ -1254,6 +1267,226 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         return message != null ? message : ex.toString();
     }
 
+    private static StereoHardwareBufferPairer stereoHardwareBufferPairer(Config config) {
+        if (config == null || !config.usesStereoHardwareBufferPairing()) {
+            return null;
+        }
+        synchronized (STEREO_HARDWARE_BUFFER_PAIRER_LOCK) {
+            StereoHardwareBufferPairer pairer = STEREO_HARDWARE_BUFFER_PAIRERS.get(config.stereoPairId);
+            if (pairer == null) {
+                pairer = new StereoHardwareBufferPairer(
+                    config.stereoPairId,
+                    Math.max(1L, config.stereoPairMaxDeltaNs));
+                STEREO_HARDWARE_BUFFER_PAIRERS.put(config.stereoPairId, pairer);
+            }
+            return pairer;
+        }
+    }
+
+    private static void clearStereoHardwareBufferPairerIfUnused(Config config) {
+        if (config == null || config.stereoPairId.length() == 0) {
+            return;
+        }
+        synchronized (STEREO_HARDWARE_BUFFER_PAIRER_LOCK) {
+            StereoHardwareBufferPairer pairer = STEREO_HARDWARE_BUFFER_PAIRERS.remove(config.stereoPairId);
+            if (pairer != null) {
+                pairer.close();
+            }
+        }
+    }
+
+    private static final class HardwareBufferFrame {
+        final long videoId;
+        final String role;
+        final int width;
+        final int height;
+        final long positionMs;
+        final long frameSequence;
+        final long timestampNs;
+        final long retainedElapsedNs;
+        HardwareBuffer buffer;
+
+        HardwareBufferFrame(
+            long videoId,
+            String role,
+            int width,
+            int height,
+            long positionMs,
+            long frameSequence,
+            long timestampNs,
+            HardwareBuffer buffer) {
+            this.videoId = videoId;
+            this.role = role;
+            this.width = width;
+            this.height = height;
+            this.positionMs = positionMs;
+            this.frameSequence = frameSequence;
+            this.timestampNs = timestampNs;
+            this.retainedElapsedNs = SystemClock.elapsedRealtimeNanos();
+            this.buffer = buffer;
+        }
+
+        void close() {
+            HardwareBuffer toClose = buffer;
+            buffer = null;
+            if (toClose != null) {
+                try {
+                    toClose.close();
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+    }
+
+    private static final class StereoHardwareBufferPairer {
+        private final String pairId;
+        private final long maxDeltaNs;
+        private final ArrayDeque<HardwareBufferFrame> leftFrames =
+            new ArrayDeque<HardwareBufferFrame>();
+        private final ArrayDeque<HardwareBufferFrame> rightFrames =
+            new ArrayDeque<HardwareBufferFrame>();
+        private long pairCount;
+        private long dropCount;
+
+        StereoHardwareBufferPairer(String pairId, long maxDeltaNs) {
+            this.pairId = pairId;
+            this.maxDeltaNs = maxDeltaNs;
+        }
+
+        synchronized boolean offer(HardwareBufferFrame frame) {
+            ArrayDeque<HardwareBufferFrame> queue = "right".equals(frame.role)
+                ? rightFrames
+                : leftFrames;
+            queue.addLast(frame);
+            while (queue.size() > STEREO_HARDWARE_BUFFER_QUEUE_LIMIT) {
+                dropFrame(queue.removeFirst(), "queue-limit");
+            }
+            deliverAvailablePairs();
+            return true;
+        }
+
+        synchronized void close() {
+            closeQueue(leftFrames);
+            closeQueue(rightFrames);
+        }
+
+        private void deliverAvailablePairs() {
+            while (true) {
+                long nowNs = SystemClock.elapsedRealtimeNanos();
+                dropStaleFrames(leftFrames, nowNs);
+                dropStaleFrames(rightFrames, nowNs);
+                if (leftFrames.isEmpty() || rightFrames.isEmpty()) {
+                    return;
+                }
+
+                HardwareBufferFrame left = null;
+                HardwareBufferFrame right = null;
+                long bestDeltaNs = Long.MAX_VALUE;
+                for (HardwareBufferFrame leftCandidate : leftFrames) {
+                    for (HardwareBufferFrame rightCandidate : rightFrames) {
+                        long deltaNs = Math.abs(leftCandidate.timestampNs - rightCandidate.timestampNs);
+                        if (deltaNs < bestDeltaNs) {
+                            bestDeltaNs = deltaNs;
+                            left = leftCandidate;
+                            right = rightCandidate;
+                        }
+                    }
+                }
+                if (left == null || right == null) {
+                    return;
+                }
+                if (bestDeltaNs > maxDeltaNs) {
+                    if (left.timestampNs <= right.timestampNs) {
+                        leftFrames.remove(left);
+                        dropFrame(left, "skew");
+                    } else {
+                        rightFrames.remove(right);
+                        dropFrame(right, "skew");
+                    }
+                    continue;
+                }
+
+                leftFrames.remove(left);
+                rightFrames.remove(right);
+                deliverPair(left, right, bestDeltaNs);
+            }
+        }
+
+        private void deliverPair(HardwareBufferFrame left, HardwareBufferFrame right, long deltaNs) {
+            long pairIndex = pairCount++;
+            try {
+                MakepadNative.onVideoHardwareBufferStereoFrame(
+                    left.videoId,
+                    left.width,
+                    left.height,
+                    left.positionMs,
+                    left.frameSequence,
+                    left.timestampNs,
+                    left.buffer,
+                    right.videoId,
+                    right.width,
+                    right.height,
+                    right.positionMs,
+                    right.frameSequence,
+                    right.timestampNs,
+                    right.buffer,
+                    deltaNs,
+                    pairIndex);
+                if (pairIndex < 8 || pairIndex % 120 == 0) {
+                    Log.i(TAG, String.format(
+                        Locale.US,
+                        "Broker H.264 stereo hardware-buffer pair delivered pairId=%s pairIndex=%d deltaNs=%d leftVideoId=%d rightVideoId=%d leftSeq=%d rightSeq=%d dropped=%d",
+                        pairId,
+                        pairIndex,
+                        deltaNs,
+                        left.videoId,
+                        right.videoId,
+                        left.frameSequence,
+                        right.frameSequence,
+                        dropCount));
+                }
+            } catch (RuntimeException error) {
+                Log.w(TAG, "Could not emit broker H.264 stereo hardware-buffer pair: " + safeMessage(error), error);
+            } finally {
+                left.close();
+                right.close();
+            }
+        }
+
+        private void dropStaleFrames(ArrayDeque<HardwareBufferFrame> queue, long nowNs) {
+            while (!queue.isEmpty()) {
+                HardwareBufferFrame frame = queue.peekFirst();
+                long ageNs = Math.max(0L, nowNs - frame.retainedElapsedNs);
+                if (ageNs <= STEREO_HARDWARE_BUFFER_STALE_NS) {
+                    return;
+                }
+                dropFrame(queue.removeFirst(), "stale");
+            }
+        }
+
+        private void dropFrame(HardwareBufferFrame frame, String reason) {
+            dropCount++;
+            if (dropCount < 8 || dropCount % 120 == 0) {
+                Log.w(TAG, String.format(
+                    Locale.US,
+                    "Broker H.264 stereo hardware-buffer frame dropped pairId=%s reason=%s role=%s seq=%d ts=%d dropped=%d",
+                    pairId,
+                    reason,
+                    frame.role,
+                    frame.frameSequence,
+                    frame.timestampNs,
+                    dropCount));
+            }
+            frame.close();
+        }
+
+        private static void closeQueue(ArrayDeque<HardwareBufferFrame> queue) {
+            while (!queue.isEmpty()) {
+                queue.removeFirst().close();
+            }
+        }
+    }
+
     private static final class DecodeHardwareBufferTarget {
         private final ImageReader reader;
         private final int width;
@@ -1282,6 +1515,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
         boolean awaitAndEmitFrame(
             long videoId,
+            Config config,
             int timeoutMs,
             long frameSequence,
             long presentationTimeUs,
@@ -1315,6 +1549,20 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 }
                 if (timestampNs <= 0L) {
                     timestampNs = SystemClock.elapsedRealtimeNanos();
+                }
+                if (config != null && config.usesStereoHardwareBufferPairing()) {
+                    HardwareBufferFrame frame = new HardwareBufferFrame(
+                        videoId,
+                        config.stereoPairRole,
+                        image.getWidth() > 0 ? image.getWidth() : width,
+                        image.getHeight() > 0 ? image.getHeight() : height,
+                        Math.max(0L, presentationTimeUs / 1000L),
+                        Math.max(0L, frameSequence),
+                        timestampNs,
+                        buffer);
+                    buffer = null;
+                    StereoHardwareBufferPairer pairer = stereoHardwareBufferPairer(config);
+                    return pairer != null && pairer.offer(frame);
                 }
                 MakepadNative.onVideoHardwareBufferFrame(
                     videoId,
@@ -1424,6 +1672,11 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
         boolean isUnboundedLiveStream() {
             return liveStream && captureMs == 0 && maxPackets == 0;
+        }
+
+        boolean usesStereoHardwareBufferPairing() {
+            return stereoPairId.length() > 0 &&
+                ("left".equals(stereoPairRole) || "right".equals(stereoPairRole));
         }
 
         static Config defaults() {
