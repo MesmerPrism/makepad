@@ -78,7 +78,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             String sourceSamplingMode = normalizeSourceSamplingMode(mConfig.sourceSamplingMode);
             Log.i(TAG, String.format(
                 Locale.US,
-                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s sourceSamplingMode=%s syntheticProjectionProfile=%s",
+                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s sourceSamplingMode=%s targetScreenUvRect=%s syntheticProjectionProfile=%s",
                 mVideoId,
                 sourceMode,
                 mConfig.streamPort,
@@ -92,6 +92,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 mConfig.preferredHeight,
                 projectionGeometryProfile,
                 sourceSamplingMode,
+                mConfig.targetScreenUvRect,
                 mConfig.syntheticProjectionProfile));
             if (usesSurfaceTextureOutput()) {
                 mSurfaceTexture = new SurfaceTexture(mExternalTextureHandle);
@@ -317,6 +318,10 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         if (sourceSamplingMode.length() > 0) {
             params.put("source_sampling_mode", sourceSamplingMode);
             params.put("sourceSamplingMode", sourceSamplingMode);
+        }
+        if (mConfig.targetScreenUvRect.length() > 0) {
+            params.put("target_screen_uv_rect", mConfig.targetScreenUvRect);
+            params.put("targetScreenUvRect", mConfig.targetScreenUvRect);
         }
         if ("broker-synthetic".equals(sourceMode)) {
             params.put("source_mode", "synthetic_surface");
@@ -1325,6 +1330,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         final String syntheticPattern;
         final String syntheticProjectionProfile;
         final String sourceSamplingMode;
+        final String targetScreenUvRect;
         final String cameraId;
         final int preferredWidth;
         final int preferredHeight;
@@ -1346,6 +1352,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             String syntheticPattern,
             String syntheticProjectionProfile,
             String sourceSamplingMode,
+            String targetScreenUvRect,
             String cameraId,
             int preferredWidth,
             int preferredHeight,
@@ -1369,6 +1376,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 ? normalizeCameraProjectionGeometryProfile(syntheticProjectionProfile)
                 : normalizeSyntheticProjectionProfile(syntheticProjectionProfile);
             this.sourceSamplingMode = normalizeSourceSamplingMode(sourceSamplingMode);
+            this.targetScreenUvRect = targetScreenUvRect != null ? targetScreenUvRect.trim() : "";
             this.cameraId = cameraId != null ? cameraId.trim() : "";
             this.preferredWidth = clamp(preferredWidth, 16, 4096);
             this.preferredHeight = clamp(preferredHeight, 16, 4096);
