@@ -1992,6 +1992,7 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
     let decode_output_mode = CString::new(source.decode_output_mode).unwrap();
     let synthetic_pattern = CString::new(source.synthetic_pattern).unwrap();
     let synthetic_projection_profile = CString::new(source.synthetic_projection_profile).unwrap();
+    let source_sampling_mode = CString::new(source.source_sampling_mode).unwrap();
     let camera_id = CString::new(source.camera_id).unwrap();
     let broker_host = ((**env).NewStringUTF.unwrap())(env, broker_host.as_ptr());
     let source_mode = ((**env).NewStringUTF.unwrap())(env, source_mode.as_ptr());
@@ -1999,13 +2000,14 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
     let synthetic_pattern = ((**env).NewStringUTF.unwrap())(env, synthetic_pattern.as_ptr());
     let synthetic_projection_profile =
         ((**env).NewStringUTF.unwrap())(env, synthetic_projection_profile.as_ptr());
+    let source_sampling_mode = ((**env).NewStringUTF.unwrap())(env, source_sampling_mode.as_ptr());
     let camera_id = ((**env).NewStringUTF.unwrap())(env, camera_id.as_ptr());
 
     ndk_utils::call_void_method!(
         env,
         get_activity(),
         "prepareBrokerH264VideoPlayback",
-        "(JLjava/lang/String;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIIIIIIIIIZZZ)V",
+        "(JLjava/lang/String;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIIIIIIIIIZZZ)V",
         video_id.get_value() as jni_sys::jlong,
         broker_host,
         source.broker_port as jni_sys::jint,
@@ -2014,6 +2016,7 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
         decode_output_mode,
         synthetic_pattern,
         synthetic_projection_profile,
+        source_sampling_mode,
         camera_id,
         source.preferred_width as jni_sys::jint,
         source.preferred_height as jni_sys::jint,
@@ -2035,6 +2038,7 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
     (**env).DeleteLocalRef.unwrap()(env, decode_output_mode);
     (**env).DeleteLocalRef.unwrap()(env, synthetic_pattern);
     (**env).DeleteLocalRef.unwrap()(env, synthetic_projection_profile);
+    (**env).DeleteLocalRef.unwrap()(env, source_sampling_mode);
     (**env).DeleteLocalRef.unwrap()(env, camera_id);
 }
 

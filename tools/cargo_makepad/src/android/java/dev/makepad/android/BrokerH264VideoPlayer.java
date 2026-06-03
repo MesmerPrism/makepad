@@ -51,6 +51,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private static final String DECODE_OUTPUT_CPU_YUV = "cpu-yuv";
     private static final String DECODE_OUTPUT_SURFACE_TEXTURE = "surface-texture";
     private static final String DECODE_OUTPUT_HARDWARE_BUFFER = "hardware-buffer";
+    private static final String SOURCE_SAMPLING_TARGET_LOCAL_RASTER = "target-local-raster";
+    private static final String SOURCE_SAMPLING_SCREEN_TO_CAMERA_HOMOGRAPHY = "screen-to-camera-homography";
 
     private final Config mConfig;
     private final AtomicBoolean mStarted = new AtomicBoolean(false);
@@ -73,9 +75,10 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             String sourceMode = normalizeSourceMode(mConfig.sourceMode);
             String projectionGeometryProfile =
                 projectionGeometryProfileForSource(sourceMode, mConfig.syntheticProjectionProfile);
+            String sourceSamplingMode = normalizeSourceSamplingMode(mConfig.sourceSamplingMode);
             Log.i(TAG, String.format(
                 Locale.US,
-                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s syntheticProjectionProfile=%s",
+                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s sourceSamplingMode=%s syntheticProjectionProfile=%s",
                 mVideoId,
                 sourceMode,
                 mConfig.streamPort,
@@ -88,6 +91,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 mConfig.preferredWidth,
                 mConfig.preferredHeight,
                 projectionGeometryProfile,
+                sourceSamplingMode,
                 mConfig.syntheticProjectionProfile));
             if (usesSurfaceTextureOutput()) {
                 mSurfaceTexture = new SurfaceTexture(mExternalTextureHandle);
@@ -309,6 +313,11 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         params.put("live_stream", mConfig.liveStream);
         params.put("projection_geometry_profile", projectionGeometryProfile);
         params.put("projectionGeometryProfile", projectionGeometryProfile);
+        String sourceSamplingMode = normalizeSourceSamplingMode(mConfig.sourceSamplingMode);
+        if (sourceSamplingMode.length() > 0) {
+            params.put("source_sampling_mode", sourceSamplingMode);
+            params.put("sourceSamplingMode", sourceSamplingMode);
+        }
         if ("broker-synthetic".equals(sourceMode)) {
             params.put("source_mode", "synthetic_surface");
             params.put("synthetic_pattern", normalizeSyntheticPattern(mConfig.syntheticPattern));
@@ -1180,6 +1189,29 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         return normalizeSyntheticProjectionProfile(value);
     }
 
+    private static String normalizeSourceSamplingMode(String value) {
+        if (value == null || value.trim().length() == 0) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.US).replace('_', '-');
+        if ("target-local-raster".equals(normalized) ||
+                "target-local".equals(normalized) ||
+                "target-raster".equals(normalized) ||
+                "local-raster".equals(normalized) ||
+                "raster".equals(normalized)) {
+            return SOURCE_SAMPLING_TARGET_LOCAL_RASTER;
+        }
+        if ("screen-to-camera-homography".equals(normalized) ||
+                "screen-camera-homography".equals(normalized) ||
+                "screen-to-source-homography".equals(normalized) ||
+                "camera-homography".equals(normalized) ||
+                "camera-projection".equals(normalized) ||
+                "homography".equals(normalized)) {
+            return SOURCE_SAMPLING_SCREEN_TO_CAMERA_HOMOGRAPHY;
+        }
+        throw new IllegalArgumentException("Unsupported broker H.264 source sampling mode: " + value);
+    }
+
     private static void closeQuietly(Socket socket) {
         if (socket != null) {
             try {
@@ -1292,6 +1324,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         final String decodeOutputMode;
         final String syntheticPattern;
         final String syntheticProjectionProfile;
+        final String sourceSamplingMode;
         final String cameraId;
         final int preferredWidth;
         final int preferredHeight;
@@ -1312,6 +1345,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             String decodeOutputMode,
             String syntheticPattern,
             String syntheticProjectionProfile,
+            String sourceSamplingMode,
             String cameraId,
             int preferredWidth,
             int preferredHeight,
@@ -1334,6 +1368,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.syntheticProjectionProfile = "broker-camera".equals(this.sourceMode)
                 ? normalizeCameraProjectionGeometryProfile(syntheticProjectionProfile)
                 : normalizeSyntheticProjectionProfile(syntheticProjectionProfile);
+            this.sourceSamplingMode = normalizeSourceSamplingMode(sourceSamplingMode);
             this.cameraId = cameraId != null ? cameraId.trim() : "";
             this.preferredWidth = clamp(preferredWidth, 16, 4096);
             this.preferredHeight = clamp(preferredHeight, 16, 4096);
@@ -1360,6 +1395,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 DECODE_OUTPUT_AUTO,
                 "diagnostic-grid",
                 "head-anchored-virtual-camera",
+                "",
                 "",
                 1280,
                 1280,
