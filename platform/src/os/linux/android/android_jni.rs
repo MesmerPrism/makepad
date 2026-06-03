@@ -190,6 +190,15 @@ pub enum FromJavaMessage {
         u: Vec<u8>,
         v: Vec<u8>,
     },
+    VideoHardwareBufferFrame {
+        video_id: u64,
+        width: u32,
+        height: u32,
+        position_ms: u128,
+        frame_sequence: u64,
+        timestamp_ns: u64,
+        hardware_buffer: *mut ndk_sys::AHardwareBuffer,
+    },
     VideoPlaybackCompleted {
         video_id: u64,
     },
@@ -1104,6 +1113,37 @@ pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoYuvFrame(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoHardwareBufferFrame(
+    env: *mut jni_sys::JNIEnv,
+    _: jni_sys::jobject,
+    video_id: jni_sys::jlong,
+    width: jni_sys::jint,
+    height: jni_sys::jint,
+    position_ms: jni_sys::jlong,
+    frame_sequence: jni_sys::jlong,
+    timestamp_ns: jni_sys::jlong,
+    hardware_buffer_obj: jni_sys::jobject,
+) {
+    if hardware_buffer_obj.is_null() {
+        return;
+    }
+    let hardware_buffer = ndk_sys::AHardwareBuffer_fromHardwareBuffer(env, hardware_buffer_obj);
+    if hardware_buffer.is_null() {
+        return;
+    }
+    ndk_sys::AHardwareBuffer_acquire(hardware_buffer);
+    send_from_java_message(FromJavaMessage::VideoHardwareBufferFrame {
+        video_id: video_id as u64,
+        width: width.max(0) as u32,
+        height: height.max(0) as u32,
+        position_ms: position_ms.max(0) as u128,
+        frame_sequence: frame_sequence.max(0) as u64,
+        timestamp_ns: timestamp_ns.max(0) as u64,
+        hardware_buffer,
+    });
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn Java_dev_makepad_android_MakepadNative_onVideoPlaybackCompleted(
     _env: *mut jni_sys::JNIEnv,
     _: jni_sys::jobject,
@@ -1949,11 +1989,13 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
 ) {
     let broker_host = CString::new(source.broker_host).unwrap();
     let source_mode = CString::new(source.source_mode).unwrap();
+    let decode_output_mode = CString::new(source.decode_output_mode).unwrap();
     let synthetic_pattern = CString::new(source.synthetic_pattern).unwrap();
     let synthetic_projection_profile = CString::new(source.synthetic_projection_profile).unwrap();
     let camera_id = CString::new(source.camera_id).unwrap();
     let broker_host = ((**env).NewStringUTF.unwrap())(env, broker_host.as_ptr());
     let source_mode = ((**env).NewStringUTF.unwrap())(env, source_mode.as_ptr());
+    let decode_output_mode = ((**env).NewStringUTF.unwrap())(env, decode_output_mode.as_ptr());
     let synthetic_pattern = ((**env).NewStringUTF.unwrap())(env, synthetic_pattern.as_ptr());
     let synthetic_projection_profile =
         ((**env).NewStringUTF.unwrap())(env, synthetic_projection_profile.as_ptr());
@@ -1963,12 +2005,13 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
         env,
         get_activity(),
         "prepareBrokerH264VideoPlayback",
-        "(JLjava/lang/String;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIIIIIIIIIZZZ)V",
+        "(JLjava/lang/String;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIIIIIIIIIZZZ)V",
         video_id.get_value() as jni_sys::jlong,
         broker_host,
         source.broker_port as jni_sys::jint,
         source.stream_port as jni_sys::jint,
         source_mode,
+        decode_output_mode,
         synthetic_pattern,
         synthetic_projection_profile,
         camera_id,
@@ -1989,6 +2032,7 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
 
     (**env).DeleteLocalRef.unwrap()(env, broker_host);
     (**env).DeleteLocalRef.unwrap()(env, source_mode);
+    (**env).DeleteLocalRef.unwrap()(env, decode_output_mode);
     (**env).DeleteLocalRef.unwrap()(env, synthetic_pattern);
     (**env).DeleteLocalRef.unwrap()(env, synthetic_projection_profile);
     (**env).DeleteLocalRef.unwrap()(env, camera_id);

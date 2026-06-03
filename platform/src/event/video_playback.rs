@@ -254,6 +254,9 @@ pub struct BrokerH264VideoSource {
     pub broker_port: u16,
     pub stream_port: u16,
     pub source_mode: String,
+    /// `auto` keeps the historical Android behavior: SurfaceTexture when an
+    /// external texture handle is supplied, otherwise CPU-YUV plane callbacks.
+    pub decode_output_mode: String,
     pub synthetic_pattern: String,
     pub synthetic_projection_profile: String,
     pub camera_id: String,
@@ -276,6 +279,7 @@ impl Default for BrokerH264VideoSource {
             broker_port: 8765,
             stream_port: 8879,
             source_mode: "broker-synthetic".to_string(),
+            decode_output_mode: "auto".to_string(),
             synthetic_pattern: "diagnostic-grid".to_string(),
             synthetic_projection_profile: "head-anchored-virtual-camera".to_string(),
             camera_id: String::new(),

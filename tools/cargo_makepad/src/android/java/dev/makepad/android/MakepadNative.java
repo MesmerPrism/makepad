@@ -1,5 +1,6 @@
 package dev.makepad.android;
 
+import android.hardware.HardwareBuffer;
 import android.view.Surface;
 import android.view.MotionEvent;
 
@@ -69,6 +70,7 @@ public class MakepadNative {
     public static native void onVideoPlaybackPrepared(long videoId, int videoWidth, int videoHeight, long duration, VideoPlayer surfaceTexture);
     public static native void onVideoPlaybackMetadata(long videoId, String metadataJson);
     public static native void onVideoYuvFrame(long videoId, int width, int height, long positionMs, byte[] y, byte[] u, byte[] v);
+    public static native void onVideoHardwareBufferFrame(long videoId, int width, int height, long positionMs, long frameSequence, long timestampNs, HardwareBuffer hardwareBuffer);
     public static native void onVideoPlaybackCompleted(long videoId);
     public static native void onVideoPlayerReleased(long videoId);
     public static native void onVideoDecodingError(long videoId, String error);

@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(use_vulkan)]
 use self::super::super::vulkan::CxVulkan;
@@ -1190,6 +1191,100 @@ impl Cx {
                             metadata: VideoTextureUpdateMetadata::default(),
                         },
                     ));
+                }
+            }
+            FromJavaMessage::VideoHardwareBufferFrame {
+                video_id,
+                width,
+                height,
+                position_ms,
+                frame_sequence,
+                timestamp_ns,
+                hardware_buffer,
+            } => {
+                let live_id = LiveId(video_id);
+                #[cfg(use_vulkan)]
+                {
+                    let update_result = if let Some(config) =
+                        self.os.video_configs.get(&live_id).cloned()
+                    {
+                        self.os
+                            .vulkan
+                            .as_mut()
+                            .ok_or_else(|| {
+                                "Android broker H.264 hardware-buffer texture requested without Vulkan backend"
+                                    .to_string()
+                            })
+                            .and_then(|vk| {
+                                vk.update_video_external_hardware_buffer_texture(
+                                    config.texture_id,
+                                    hardware_buffer,
+                                    width,
+                                    height,
+                                )
+                            })
+                    } else {
+                        Err(format!(
+                            "Android broker H.264 hardware-buffer frame for unknown video_id={video_id}"
+                        ))
+                    };
+
+                    match update_result {
+                        Ok((yuv, metadata)) => {
+                            let frame_sequence = frame_sequence.max(1);
+                            let timestamp_ns = if timestamp_ns > 0 {
+                                timestamp_ns
+                            } else {
+                                android_video_diagnostic_time_ns()
+                            };
+                            let metadata = metadata
+                                .with_camera_frame(frame_sequence, timestamp_ns, None)
+                                .with_hardware_buffer_import(
+                                    frame_sequence,
+                                    android_video_diagnostic_time_ns(),
+                                );
+                            crate::log!(
+                                "RUSTY_XR_MAKEPAD_BROKER_H264_HARDWARE_BUFFER_FRAME schema=rusty.xr.makepad-broker-h264-hardware-buffer-frame.v1 phase=texture-updated status=ok videoId={} frameSeq={} timestampNs={} width={} height={} positionMs={}",
+                                video_id,
+                                frame_sequence,
+                                timestamp_ns,
+                                width,
+                                height,
+                                position_ms,
+                            );
+                            self.call_event_handler(&Event::VideoTextureUpdated(
+                                VideoTextureUpdatedEvent {
+                                    video_id: live_id,
+                                    current_position_ms: position_ms,
+                                    yuv,
+                                    metadata,
+                                },
+                            ));
+                        }
+                        Err(error) => {
+                            self.call_event_handler(&Event::VideoDecodingError(
+                                VideoDecodingErrorEvent {
+                                    video_id: live_id,
+                                    error,
+                                },
+                            ));
+                        }
+                    }
+                    unsafe {
+                        ndk_sys::AHardwareBuffer_release(hardware_buffer);
+                    }
+                }
+                #[cfg(not(use_vulkan))]
+                {
+                    unsafe {
+                        ndk_sys::AHardwareBuffer_release(hardware_buffer);
+                    }
+                    self.call_event_handler(&Event::VideoDecodingError(VideoDecodingErrorEvent {
+                        video_id: live_id,
+                        error:
+                            "Android broker H.264 hardware-buffer texture requires Vulkan backend"
+                                .to_string(),
+                    }));
                 }
             }
             FromJavaMessage::VideoPlaybackCompleted { video_id } => {
@@ -3432,6 +3527,13 @@ pub(crate) struct AndroidSoftwarePlayer {
     pub tex_u_id: TextureId,
     pub tex_v_id: TextureId,
     pub yuv_matrix: f32,
+}
+
+fn android_video_diagnostic_time_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos().min(u64::MAX as u128) as u64)
+        .unwrap_or(0)
 }
 
 fn replace_r8_plane_texture(

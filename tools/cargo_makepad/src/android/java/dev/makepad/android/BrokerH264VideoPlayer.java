@@ -2,7 +2,10 @@ package dev.makepad.android;
 
 import android.app.Activity;
 import android.graphics.SurfaceTexture;
+import android.graphics.ImageFormat;
+import android.hardware.HardwareBuffer;
 import android.media.Image;
+import android.media.ImageReader;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
@@ -24,8 +27,10 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -37,9 +42,15 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private static final int MAX_STREAM_HEADER_METADATA_BYTES = 256 * 1024;
     private static final int MAX_STREAM_PACKETS = 2400;
     private static final int DEQUEUE_TIMEOUT_US = 10000;
+    private static final int HARDWARE_BUFFER_READER_MAX_IMAGES = 3;
+    private static final int HARDWARE_BUFFER_WAIT_MS = 50;
     private static final long PROGRESS_LOG_INTERVAL_MS = 2000L;
     private static final String DEFAULT_CAMERA_PROJECTION_GEOMETRY_PROFILE = "full-frame-diagnostic";
     private static final String CAMERA_PROJECTION_GEOMETRY_PROFILE = "camera-projection";
+    private static final String DECODE_OUTPUT_AUTO = "auto";
+    private static final String DECODE_OUTPUT_CPU_YUV = "cpu-yuv";
+    private static final String DECODE_OUTPUT_SURFACE_TEXTURE = "surface-texture";
+    private static final String DECODE_OUTPUT_HARDWARE_BUFFER = "hardware-buffer";
 
     private final Config mConfig;
     private final AtomicBoolean mStarted = new AtomicBoolean(false);
@@ -48,6 +59,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private volatile Socket mStreamSocket;
     private volatile MediaCodec mDecoder;
     private Surface mDecodeSurface;
+    private DecodeHardwareBufferTarget mHardwareBufferTarget;
     private Thread mDecodeThread;
 
     BrokerH264VideoPlayer(Activity activity, long videoId, Config config) {
@@ -63,19 +75,21 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 projectionGeometryProfileForSource(sourceMode, mConfig.syntheticProjectionProfile);
             Log.i(TAG, String.format(
                 Locale.US,
-                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s syntheticProjectionProfile=%s",
+                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s syntheticProjectionProfile=%s",
                 mVideoId,
                 sourceMode,
                 mConfig.streamPort,
                 mConfig.cameraId,
                 mConfig.liveStream,
                 mAutoplay,
-                usesExternalTexture(),
+                hasExternalTextureHandle(),
+                mConfig.decodeOutputMode,
+                effectiveDecodeOutputMode(),
                 mConfig.preferredWidth,
                 mConfig.preferredHeight,
                 projectionGeometryProfile,
                 mConfig.syntheticProjectionProfile));
-            if (usesExternalTexture()) {
+            if (usesSurfaceTextureOutput()) {
                 mSurfaceTexture = new SurfaceTexture(mExternalTextureHandle);
                 mSurfaceTexture.setDefaultBufferSize(
                     Math.max(1, mConfig.preferredWidth),
@@ -89,6 +103,11 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 }, mGlHandler);
 
                 mDecodeSurface = new Surface(mSurfaceTexture);
+            } else if (usesHardwareBufferOutput()) {
+                mHardwareBufferTarget = DecodeHardwareBufferTarget.create(
+                    mConfig.preferredWidth,
+                    mConfig.preferredHeight);
+                mDecodeSurface = mHardwareBufferTarget.surface();
             }
             mIsPrepared = true;
             if (mAutoplay || mConfig.liveStream) {
@@ -106,12 +125,14 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         }
         Log.i(TAG, String.format(
             Locale.US,
-            "Broker H.264 begin videoId=%d sourceMode=%s streamPort=%d liveStream=%s externalTexture=%s",
+            "Broker H.264 begin videoId=%d sourceMode=%s streamPort=%d liveStream=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s",
             mVideoId,
             normalizeSourceMode(mConfig.sourceMode),
             mConfig.streamPort,
             mConfig.liveStream,
-            usesExternalTexture()));
+            hasExternalTextureHandle(),
+            mConfig.decodeOutputMode,
+            effectiveDecodeOutputMode()));
         mRunning = true;
         mDecodeThread = new Thread(this::runDecode, "MakepadBrokerH264Decode");
         mDecodeThread.start();
@@ -153,6 +174,10 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             }
             mDecodeSurface = null;
         }
+        if (mHardwareBufferTarget != null) {
+            mHardwareBufferTarget.close();
+            mHardwareBufferTarget = null;
+        }
         super.stopAndCleanup();
     }
 
@@ -179,8 +204,32 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         return !"existing-stream".equals(normalizeSourceMode(mConfig.sourceMode));
     }
 
-    private boolean usesExternalTexture() {
+    private boolean hasExternalTextureHandle() {
         return mExternalTextureHandle > 0;
+    }
+
+    private boolean usesSurfaceTextureOutput() {
+        String outputMode = effectiveDecodeOutputMode();
+        return DECODE_OUTPUT_SURFACE_TEXTURE.equals(outputMode);
+    }
+
+    private boolean usesHardwareBufferOutput() {
+        String outputMode = effectiveDecodeOutputMode();
+        return DECODE_OUTPUT_HARDWARE_BUFFER.equals(outputMode);
+    }
+
+    private boolean usesCpuYuvOutput() {
+        String outputMode = effectiveDecodeOutputMode();
+        return DECODE_OUTPUT_CPU_YUV.equals(outputMode);
+    }
+
+    private String effectiveDecodeOutputMode() {
+        if (DECODE_OUTPUT_AUTO.equals(mConfig.decodeOutputMode)) {
+            return hasExternalTextureHandle()
+                ? DECODE_OUTPUT_SURFACE_TEXTURE
+                : DECODE_OUTPUT_CPU_YUV;
+        }
+        return mConfig.decodeOutputMode;
     }
 
     private JSONObject sendStartCommand() throws Exception {
@@ -318,7 +367,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1);
         } catch (Exception ignored) {
         }
-        if (!usesExternalTexture()) {
+        if (usesCpuYuvOutput()) {
             try {
                 format.setInteger(
                     MediaFormat.KEY_COLOR_FORMAT,
@@ -343,7 +392,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int decodedFrameCount = 0;
         int outputFormatChangedCount = 0;
         int yuvFrameEmitCount = 0;
+        int hardwareBufferFrameEmitCount = 0;
         long yuvCopyTimeMs = 0L;
+        Map<Long, Long> sourceElapsedByPts = new HashMap<Long, Long>();
         long progressStartMs = SystemClock.elapsedRealtime();
         long lastProgressMs = progressStartMs;
         long deadline = mConfig.isUnboundedLiveStream()
@@ -373,6 +424,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                         }
                     }
                     if (packet != null) {
+                        recordQueuedPacketTiming(sourceElapsedByPts, packet);
                         queuePacket(decoder, inputIndex, packet, hasCompleteCsd);
                         inputQueuedCount++;
                         lastPtsUs = packet.ptsUs;
@@ -398,6 +450,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     inputQueuedCount,
                     decodedFrameCount,
                     yuvFrameEmitCount,
+                    hardwareBufferFrameEmitCount,
                     yuvCopyTimeMs,
                     outputFormatChangedCount,
                     inputEosQueued,
@@ -414,9 +467,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
             boolean codecConfig = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
             boolean eos = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
-            boolean renderToSurface = usesExternalTexture() && !codecConfig && !eos;
+            boolean hardwareBufferOutput = usesHardwareBufferOutput() && !codecConfig && !eos;
+            boolean renderToSurface = (usesSurfaceTextureOutput() || hardwareBufferOutput) &&
+                !codecConfig &&
+                !eos;
+            long decodedFrameSequence = decodedFrameCount + 1L;
             if (!codecConfig && !eos) {
-                if (!usesExternalTexture()) {
+                if (usesCpuYuvOutput()) {
                     Image image = decoder.getOutputImage(outputIndex);
                     if (image != null) {
                         try {
@@ -434,6 +491,16 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 decodedFrameCount++;
             }
             decoder.releaseOutputBuffer(outputIndex, renderToSurface);
+            if (hardwareBufferOutput && mHardwareBufferTarget != null) {
+                if (mHardwareBufferTarget.awaitAndEmitFrame(
+                    mVideoId,
+                    HARDWARE_BUFFER_WAIT_MS,
+                    decodedFrameSequence,
+                    info.presentationTimeUs,
+                    sourceElapsedNsForPts(sourceElapsedByPts, info.presentationTimeUs))) {
+                    hardwareBufferFrameEmitCount++;
+                }
+            }
             outputEosSeen = eos;
             lastProgressMs = maybeLogProgress(
                 "progress",
@@ -443,6 +510,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 inputQueuedCount,
                 decodedFrameCount,
                 yuvFrameEmitCount,
+                hardwareBufferFrameEmitCount,
                 yuvCopyTimeMs,
                 outputFormatChangedCount,
                 inputEosQueued,
@@ -456,6 +524,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             inputQueuedCount,
             decodedFrameCount,
             yuvFrameEmitCount,
+            hardwareBufferFrameEmitCount,
             yuvCopyTimeMs,
             outputFormatChangedCount,
             inputEosQueued,
@@ -474,6 +543,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int inputQueuedCount,
         int decodedFrameCount,
         int yuvFrameEmitCount,
+        int hardwareBufferFrameEmitCount,
         long yuvCopyTimeMs,
         int outputFormatChangedCount,
         boolean inputEosQueued,
@@ -489,6 +559,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             inputQueuedCount,
             decodedFrameCount,
             yuvFrameEmitCount,
+            hardwareBufferFrameEmitCount,
             yuvCopyTimeMs,
             outputFormatChangedCount,
             inputEosQueued,
@@ -503,6 +574,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int inputQueuedCount,
         int decodedFrameCount,
         int yuvFrameEmitCount,
+        int hardwareBufferFrameEmitCount,
         long yuvCopyTimeMs,
         int outputFormatChangedCount,
         boolean inputEosQueued,
@@ -514,12 +586,14 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             : 0.0;
         Log.i(TAG, String.format(
             Locale.US,
-            "Broker H.264 playback progress videoId=%d phase=%s status=ok sourceMode=%s streamPort=%d cameraId=%s preferredWidth=%d preferredHeight=%d requestedFrameRateHz=%d packetsRead=%d inputQueuedCount=%d decodedFrameCount=%d yuvFrameEmitCount=%d yuvCopyTimeMs=%d yuvCopyAvgMs=%.2f outputFormatChangedCount=%d inputEosQueued=%s outputEosSeen=%s elapsedMs=%d packetReadRateHz=%.2f inputQueueRateHz=%.2f decodedFrameRateHz=%.2f yuvFrameEmitRateHz=%.2f",
+            "Broker H.264 playback progress videoId=%d phase=%s status=ok sourceMode=%s streamPort=%d cameraId=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d requestedFrameRateHz=%d packetsRead=%d inputQueuedCount=%d decodedFrameCount=%d yuvFrameEmitCount=%d hardwareBufferFrameEmitCount=%d yuvCopyTimeMs=%d yuvCopyAvgMs=%.2f outputFormatChangedCount=%d inputEosQueued=%s outputEosSeen=%s elapsedMs=%d packetReadRateHz=%.2f inputQueueRateHz=%.2f decodedFrameRateHz=%.2f yuvFrameEmitRateHz=%.2f hardwareBufferFrameEmitRateHz=%.2f",
             mVideoId,
             phase,
             normalizeSourceMode(mConfig.sourceMode),
             mConfig.streamPort,
             mConfig.cameraId,
+            mConfig.decodeOutputMode,
+            effectiveDecodeOutputMode(),
             mConfig.preferredWidth,
             mConfig.preferredHeight,
             mConfig.frameRateHz,
@@ -527,6 +601,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             inputQueuedCount,
             decodedFrameCount,
             yuvFrameEmitCount,
+            hardwareBufferFrameEmitCount,
             yuvCopyTimeMs,
             averageYuvCopyMs,
             outputFormatChangedCount,
@@ -536,7 +611,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             packetsRead / elapsedSeconds,
             inputQueuedCount / elapsedSeconds,
             decodedFrameCount / elapsedSeconds,
-            yuvFrameEmitCount / elapsedSeconds));
+            yuvFrameEmitCount / elapsedSeconds,
+            hardwareBufferFrameEmitCount / elapsedSeconds));
     }
 
     private StreamHeader readHeader(DataInputStream input) throws Exception {
@@ -639,13 +715,42 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         if (size < 0 || size > MAX_PACKET_BYTES) {
             throw new IllegalStateException("Broker stream packet size is out of range: " + size);
         }
+        long sourceElapsedNs = 0L;
+        long sourceUnixNs = 0L;
         if (schemaVersion >= 2) {
-            input.readLong();
-            input.readLong();
+            sourceElapsedNs = input.readLong();
+            sourceUnixNs = input.readLong();
         }
         byte[] payload = new byte[size];
         input.readFully(payload);
-        return new Packet(ptsUs, flags, payload);
+        return new Packet(ptsUs, flags, sourceElapsedNs, sourceUnixNs, payload);
+    }
+
+    private static void recordQueuedPacketTiming(Map<Long, Long> sourceElapsedByPts, Packet packet) {
+        if (packet.sourceElapsedNs > 0L) {
+            sourceElapsedByPts.put(Long.valueOf(packet.ptsUs), Long.valueOf(packet.sourceElapsedNs));
+        }
+    }
+
+    private static long sourceElapsedNsForPts(Map<Long, Long> sourceElapsedByPts, long ptsUs) {
+        Long exact = sourceElapsedByPts.get(Long.valueOf(ptsUs));
+        if (exact != null && exact.longValue() > 0L) {
+            return exact.longValue();
+        }
+        long closest = 0L;
+        long closestDelta = Long.MAX_VALUE;
+        for (Map.Entry<Long, Long> entry : sourceElapsedByPts.entrySet()) {
+            long value = entry.getValue().longValue();
+            if (value <= 0L) {
+                continue;
+            }
+            long delta = Math.abs(entry.getKey().longValue() - ptsUs);
+            if (delta < closestDelta) {
+                closestDelta = delta;
+                closest = value;
+            }
+        }
+        return closest;
     }
 
     private static void queuePacket(
@@ -729,7 +834,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         String metadataJson = header.projectionMetadataJson != null
             ? header.projectionMetadataJson
             : "";
-        VideoPlayer preparedSurface = usesExternalTexture() ? BrokerH264VideoPlayer.this : null;
+        VideoPlayer preparedSurface = usesSurfaceTextureOutput() ? BrokerH264VideoPlayer.this : null;
         if (activity != null) {
             activity.runOnUiThread(() -> {
                 if (metadataJson.length() > 0) {
@@ -982,6 +1087,37 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         return "broker-synthetic";
     }
 
+    private static String normalizeDecodeOutputMode(String value) {
+        if (value == null || value.trim().length() == 0) {
+            return DECODE_OUTPUT_AUTO;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US).replace('_', '-');
+        if ("auto".equals(normalized) || "default".equals(normalized)) {
+            return DECODE_OUTPUT_AUTO;
+        }
+        if ("cpu".equals(normalized) ||
+            "yuv".equals(normalized) ||
+            "cpu-yuv".equals(normalized) ||
+            "software-yuv".equals(normalized)) {
+            return DECODE_OUTPUT_CPU_YUV;
+        }
+        if ("hwb".equals(normalized) ||
+            "hardware-buffer".equals(normalized) ||
+            "hardware-buffer-external".equals(normalized) ||
+            "image-reader".equals(normalized) ||
+            "imagereader".equals(normalized)) {
+            return DECODE_OUTPUT_HARDWARE_BUFFER;
+        }
+        if ("oes".equals(normalized) ||
+            "external-oes".equals(normalized) ||
+            "surface".equals(normalized) ||
+            "surface-texture".equals(normalized) ||
+            "surfacetexture".equals(normalized)) {
+            return DECODE_OUTPUT_SURFACE_TEXTURE;
+        }
+        return DECODE_OUTPUT_AUTO;
+    }
+
     private static String normalizeSyntheticPattern(String value) {
         if (value == null || value.trim().length() == 0) {
             return "diagnostic-grid";
@@ -1058,11 +1194,102 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         return message != null ? message : ex.toString();
     }
 
+    private static final class DecodeHardwareBufferTarget {
+        private final ImageReader reader;
+        private final int width;
+        private final int height;
+
+        private DecodeHardwareBufferTarget(ImageReader reader, int width, int height) {
+            this.reader = reader;
+            this.width = width;
+            this.height = height;
+        }
+
+        static DecodeHardwareBufferTarget create(int width, int height) {
+            int safeWidth = Math.max(1, width);
+            int safeHeight = Math.max(1, height);
+            ImageReader reader = ImageReader.newInstance(
+                safeWidth,
+                safeHeight,
+                ImageFormat.PRIVATE,
+                HARDWARE_BUFFER_READER_MAX_IMAGES);
+            return new DecodeHardwareBufferTarget(reader, safeWidth, safeHeight);
+        }
+
+        Surface surface() {
+            return reader.getSurface();
+        }
+
+        boolean awaitAndEmitFrame(
+            long videoId,
+            int timeoutMs,
+            long frameSequence,
+            long presentationTimeUs,
+            long sourceElapsedNs) {
+            long deadline = SystemClock.elapsedRealtime() + Math.max(1, timeoutMs);
+            Image image = null;
+            while (SystemClock.elapsedRealtime() < deadline) {
+                try {
+                    image = reader.acquireNextImage();
+                } catch (IllegalStateException error) {
+                    return false;
+                }
+                if (image != null) {
+                    break;
+                }
+                SystemClock.sleep(2);
+            }
+            if (image == null) {
+                return false;
+            }
+
+            HardwareBuffer buffer = null;
+            try {
+                buffer = image.getHardwareBuffer();
+                if (buffer == null) {
+                    return false;
+                }
+                long timestampNs = sourceElapsedNs > 0L ? sourceElapsedNs : image.getTimestamp();
+                if (timestampNs <= 0L && presentationTimeUs > 0L) {
+                    timestampNs = presentationTimeUs * 1000L;
+                }
+                if (timestampNs <= 0L) {
+                    timestampNs = SystemClock.elapsedRealtimeNanos();
+                }
+                MakepadNative.onVideoHardwareBufferFrame(
+                    videoId,
+                    image.getWidth() > 0 ? image.getWidth() : width,
+                    image.getHeight() > 0 ? image.getHeight() : height,
+                    Math.max(0L, presentationTimeUs / 1000L),
+                    Math.max(0L, frameSequence),
+                    timestampNs,
+                    buffer);
+                return true;
+            } catch (Exception error) {
+                Log.w(TAG, "Could not emit broker H.264 hardware-buffer frame: " + safeMessage(error), error);
+                return false;
+            } finally {
+                if (buffer != null) {
+                    try {
+                        buffer.close();
+                    } catch (Exception ignored) {
+                    }
+                }
+                image.close();
+            }
+        }
+
+        void close() {
+            reader.close();
+        }
+    }
+
     static final class Config {
         final String brokerHost;
         final int brokerPort;
         final int streamPort;
         final String sourceMode;
+        final String decodeOutputMode;
         final String syntheticPattern;
         final String syntheticProjectionProfile;
         final String cameraId;
@@ -1082,6 +1309,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             int brokerPort,
             int streamPort,
             String sourceMode,
+            String decodeOutputMode,
             String syntheticPattern,
             String syntheticProjectionProfile,
             String cameraId,
@@ -1101,6 +1329,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.brokerPort = clamp(brokerPort, 1, 65535);
             this.streamPort = clamp(streamPort, 1, 65535);
             this.sourceMode = normalizeSourceMode(sourceMode);
+            this.decodeOutputMode = normalizeDecodeOutputMode(decodeOutputMode);
             this.syntheticPattern = normalizeSyntheticPattern(syntheticPattern);
             this.syntheticProjectionProfile = "broker-camera".equals(this.sourceMode)
                 ? normalizeCameraProjectionGeometryProfile(syntheticProjectionProfile)
@@ -1128,6 +1357,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 8765,
                 8879,
                 "broker-synthetic",
+                DECODE_OUTPUT_AUTO,
                 "diagnostic-grid",
                 "head-anchored-virtual-camera",
                 "",
@@ -1181,11 +1411,15 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private static final class Packet {
         final long ptsUs;
         final int flags;
+        final long sourceElapsedNs;
+        final long sourceUnixNs;
         final byte[] payload;
 
-        Packet(long ptsUs, int flags, byte[] payload) {
+        Packet(long ptsUs, int flags, long sourceElapsedNs, long sourceUnixNs, byte[] payload) {
             this.ptsUs = ptsUs;
             this.flags = flags;
+            this.sourceElapsedNs = sourceElapsedNs;
+            this.sourceUnixNs = sourceUnixNs;
             this.payload = payload;
         }
 
