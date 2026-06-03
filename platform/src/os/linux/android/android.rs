@@ -4,7 +4,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(use_vulkan)]
 use self::super::super::vulkan::CxVulkan;
+#[cfg(use_vulkan)]
+use self::super::android_camera::AndroidCameraHardwareBufferFrame;
 use crate::event::LongPressEvent;
+#[cfg(use_vulkan)]
+use crate::event::VideoYuvMetadata;
 #[allow(unused)]
 use makepad_jni_sys as jni_sys;
 
@@ -569,6 +573,233 @@ impl Cx {
             .with_camera_frame(frame_sequence, timestamp_ns, None)
             .with_hardware_buffer_import(frame_sequence, android_video_diagnostic_time_ns());
         Ok((yuv, metadata))
+    }
+
+    #[cfg(use_vulkan)]
+    fn update_android_direct_camera_hardware_buffer_frame(
+        &mut self,
+        player: &mut AndroidCameraPlayer,
+        frame: &AndroidCameraHardwareBufferFrame,
+    ) -> Result<(VideoYuvMetadata, VideoTextureUpdateMetadata), String> {
+        let try_yuv_plane_import = player.should_try_hardware_buffer_yuv_plane_import();
+        let texture_id = player.texture_id();
+        let tex_y_id = player.tex_y_id();
+        let tex_u_id = player.tex_u_id();
+        let tex_v_id = player.tex_v_id();
+        let video_id = player.video_id.0;
+        let mut disable_yuv_plane_import = false;
+        let update_result = self
+            .os
+            .vulkan
+            .as_mut()
+            .ok_or_else(|| {
+                "Android direct camera hardware-buffer texture requested without Vulkan backend"
+                    .to_string()
+            })
+            .and_then(|vk| {
+                if try_yuv_plane_import {
+                    match vk.update_video_yuv_hardware_buffer_textures(
+                        tex_y_id,
+                        tex_u_id,
+                        tex_v_id,
+                        frame.buffer,
+                        frame.width,
+                        frame.height,
+                    ) {
+                        Ok(yuv) => return Ok(yuv),
+                        Err(yuv_error) => {
+                            disable_yuv_plane_import =
+                                yuv_error.contains("undefined Vulkan format")
+                                    || yuv_error.contains("unsupported YUV Vulkan format");
+                            crate::warning!(
+                                "Android headset camera: YUV plane hardware-buffer import unavailable, falling back to external conversion video_id={} error={}",
+                                video_id,
+                                yuv_error,
+                            );
+                        }
+                    }
+                }
+                vk.update_video_external_hardware_buffer_texture(
+                    texture_id,
+                    frame.buffer,
+                    frame.width,
+                    frame.height,
+                )
+            });
+        if disable_yuv_plane_import {
+            player.disable_hardware_buffer_yuv_plane_import();
+        }
+        update_result
+    }
+
+    #[cfg(use_vulkan)]
+    fn push_android_direct_camera_hardware_buffer_texture_update(
+        events: &mut Vec<Event>,
+        player: &mut AndroidCameraPlayer,
+        frame: &AndroidCameraHardwareBufferFrame,
+        mut yuv: VideoYuvMetadata,
+        metadata: VideoTextureUpdateMetadata,
+    ) {
+        yuv.rotation_steps = player.yuv_rotation_steps();
+        let metadata = player.hardware_buffer_update_metadata(metadata, frame);
+        events.push(Event::VideoTextureUpdated(VideoTextureUpdatedEvent {
+            video_id: player.video_id,
+            current_position_ms: 0,
+            yuv,
+            metadata,
+        }));
+    }
+
+    #[cfg(use_vulkan)]
+    fn push_android_direct_camera_hardware_buffer_import_error(
+        events: &mut Vec<Event>,
+        player: &mut AndroidCameraPlayer,
+        error: String,
+    ) {
+        let should_fallback = error.contains("undefined Vulkan format")
+            || error.contains("unsupported YUV Vulkan format");
+        if should_fallback {
+            crate::warning!(
+                "Android headset camera: Vulkan import unsupported, falling back to cpu-yuv video_id={} error={}",
+                player.video_id.0,
+                error,
+            );
+            if let Err(fallback_error) = player.fallback_to_cpu_yuv() {
+                events.push(Event::VideoDecodingError(VideoDecodingErrorEvent {
+                    video_id: player.video_id,
+                    error: format!("{error}; cpu fallback failed: {fallback_error}"),
+                }));
+            }
+        } else {
+            events.push(Event::VideoDecodingError(VideoDecodingErrorEvent {
+                video_id: player.video_id,
+                error,
+            }));
+        }
+    }
+
+    #[cfg(use_vulkan)]
+    fn flush_android_direct_camera_hardware_buffer_pair(
+        &mut self,
+        active_hardware_buffer_video_ids: &[LiveId],
+        players: &mut HashMap<LiveId, AndroidCameraPlayer>,
+        events: &mut Vec<Event>,
+    ) {
+        if active_hardware_buffer_video_ids.len() != 2 {
+            return;
+        }
+        let first_video_id = active_hardware_buffer_video_ids[0];
+        let second_video_id = active_hardware_buffer_video_ids[1];
+        if !self
+            .os
+            .pending_direct_camera_hardware_buffer_frames
+            .contains_key(&first_video_id)
+            || !self
+                .os
+                .pending_direct_camera_hardware_buffer_frames
+                .contains_key(&second_video_id)
+        {
+            return;
+        }
+        let first_frame = self
+            .os
+            .pending_direct_camera_hardware_buffer_frames
+            .remove(&first_video_id)
+            .unwrap();
+        let second_frame = self
+            .os
+            .pending_direct_camera_hardware_buffer_frames
+            .remove(&second_video_id)
+            .unwrap();
+        let pair_index = self
+            .os
+            .direct_camera_hardware_buffer_pair_index
+            .saturating_add(1);
+        self.os.direct_camera_hardware_buffer_pair_index = pair_index;
+        let pair_delta_ns = first_frame.timestamp_ns.abs_diff(second_frame.timestamp_ns);
+
+        let first_result = {
+            let first_player = players.get_mut(&first_video_id).unwrap();
+            self.update_android_direct_camera_hardware_buffer_frame(first_player, &first_frame)
+        };
+        let second_result = {
+            let second_player = players.get_mut(&second_video_id).unwrap();
+            self.update_android_direct_camera_hardware_buffer_frame(second_player, &second_frame)
+        };
+
+        match (first_result, second_result) {
+            (Ok((first_yuv, first_metadata)), Ok((second_yuv, second_metadata))) => {
+                crate::log!(
+                    "RUSTY_XR_MAKEPAD_DIRECT_STEREO_HARDWARE_BUFFER_FRAME schema=rusty.xr.makepad-direct-stereo-hardware-buffer-frame.v1 phase=texture-updated status=ok pairIndex={} pairDeltaNs={} firstVideoId={} secondVideoId={} firstFrameSeq={} secondFrameSeq={} firstTimestampNs={} secondTimestampNs={} firstWidth={} firstHeight={} secondWidth={} secondHeight={} policy=latest-complete-stereo-pair",
+                    pair_index,
+                    pair_delta_ns,
+                    first_video_id.0,
+                    second_video_id.0,
+                    first_frame.sequence,
+                    second_frame.sequence,
+                    first_frame.timestamp_ns,
+                    second_frame.timestamp_ns,
+                    first_frame.width,
+                    first_frame.height,
+                    second_frame.width,
+                    second_frame.height,
+                );
+                {
+                    let first_player = players.get_mut(&first_video_id).unwrap();
+                    Self::push_android_direct_camera_hardware_buffer_texture_update(
+                        events,
+                        first_player,
+                        &first_frame,
+                        first_yuv,
+                        first_metadata,
+                    );
+                }
+                {
+                    let second_player = players.get_mut(&second_video_id).unwrap();
+                    Self::push_android_direct_camera_hardware_buffer_texture_update(
+                        events,
+                        second_player,
+                        &second_frame,
+                        second_yuv,
+                        second_metadata,
+                    );
+                }
+            }
+            (Err(first_error), Err(second_error)) => {
+                if let Some(first_player) = players.get_mut(&first_video_id) {
+                    Self::push_android_direct_camera_hardware_buffer_import_error(
+                        events,
+                        first_player,
+                        first_error,
+                    );
+                }
+                if let Some(second_player) = players.get_mut(&second_video_id) {
+                    Self::push_android_direct_camera_hardware_buffer_import_error(
+                        events,
+                        second_player,
+                        second_error,
+                    );
+                }
+            }
+            (Err(error), Ok(_)) => {
+                if let Some(first_player) = players.get_mut(&first_video_id) {
+                    Self::push_android_direct_camera_hardware_buffer_import_error(
+                        events,
+                        first_player,
+                        error,
+                    );
+                }
+            }
+            (Ok(_), Err(error)) => {
+                if let Some(second_player) = players.get_mut(&second_video_id) {
+                    Self::push_android_direct_camera_hardware_buffer_import_error(
+                        events,
+                        second_player,
+                        error,
+                    );
+                }
+            }
+        }
     }
 
     fn is_pure_touch_move_message(msg: &FromJavaMessage) -> bool {
@@ -2087,6 +2318,25 @@ impl Cx {
             None
         };
         let mut events = Vec::new();
+        #[cfg(use_vulkan)]
+        let mut active_hardware_buffer_video_ids: Vec<LiveId> = players
+            .iter()
+            .filter_map(|(video_id, player)| {
+                player.uses_hardware_buffer_texture().then_some(*video_id)
+            })
+            .collect();
+        #[cfg(use_vulkan)]
+        active_hardware_buffer_video_ids.sort_by_key(|video_id| video_id.0);
+        #[cfg(use_vulkan)]
+        let pair_direct_hardware_buffer_frames = active_hardware_buffer_video_ids.len() == 2;
+        #[cfg(use_vulkan)]
+        if pair_direct_hardware_buffer_frames {
+            self.os
+                .pending_direct_camera_hardware_buffer_frames
+                .retain(|video_id, _| active_hardware_buffer_video_ids.contains(video_id));
+        } else {
+            self.os.pending_direct_camera_hardware_buffer_frames.clear();
+        }
 
         for (_video_id, player) in players.iter_mut() {
             match player.check_prepared() {
@@ -2120,90 +2370,45 @@ impl Cx {
             #[cfg(use_vulkan)]
             if player.uses_hardware_buffer_texture() {
                 if let Some(frame) = player.take_hardware_buffer_frame() {
-                    let try_yuv_plane_import = player.should_try_hardware_buffer_yuv_plane_import();
-                    let texture_id = player.texture_id();
-                    let tex_y_id = player.tex_y_id();
-                    let tex_u_id = player.tex_u_id();
-                    let tex_v_id = player.tex_v_id();
-                    let video_id = player.video_id.0;
-                    let mut disable_yuv_plane_import = false;
-                    let update_result = self
-                        .os
-                        .vulkan
-                        .as_mut()
-                        .ok_or_else(|| {
-                            "Android camera hardware-buffer texture requested without Vulkan backend"
-                                .to_string()
-                        })
-                        .and_then(|vk| {
-                            if try_yuv_plane_import {
-                                match vk.update_video_yuv_hardware_buffer_textures(
-                                    tex_y_id,
-                                    tex_u_id,
-                                    tex_v_id,
-                                    frame.buffer,
-                                    frame.width,
-                                    frame.height,
-                                ) {
-                                    Ok(yuv) => return Ok(yuv),
-                                    Err(yuv_error) => {
-                                        disable_yuv_plane_import =
-                                            yuv_error.contains("undefined Vulkan format")
-                                                || yuv_error
-                                                    .contains("unsupported YUV Vulkan format");
-                                        crate::warning!(
-                                            "Android headset camera: YUV plane hardware-buffer import unavailable, falling back to external conversion video_id={} error={}",
-                                            video_id,
-                                            yuv_error,
-                                        );
-                                    }
-                                }
-                            }
-                            vk.update_video_external_hardware_buffer_texture(
-                                texture_id,
-                                frame.buffer,
-                                frame.width,
-                                frame.height,
-                            )
-                        });
-                    if disable_yuv_plane_import {
-                        player.disable_hardware_buffer_yuv_plane_import();
-                    }
-                    match update_result {
-                        Ok((mut yuv, metadata)) => {
-                            yuv.rotation_steps = player.yuv_rotation_steps();
-                            let metadata = player.hardware_buffer_update_metadata(metadata, &frame);
-                            events.push(Event::VideoTextureUpdated(VideoTextureUpdatedEvent {
-                                video_id: player.video_id,
-                                current_position_ms: 0,
-                                yuv,
-                                metadata,
-                            }));
-                        }
-                        Err(error) => {
-                            let should_fallback = error.contains("undefined Vulkan format")
-                                || error.contains("unsupported YUV Vulkan format");
-                            if should_fallback {
-                                crate::warning!(
-                                    "Android headset camera: Vulkan import unsupported, falling back to cpu-yuv video_id={} error={}",
+                    if pair_direct_hardware_buffer_frames {
+                        if self
+                            .os
+                            .pending_direct_camera_hardware_buffer_frames
+                            .insert(player.video_id, frame)
+                            .is_some()
+                        {
+                            let replaced = self
+                                .os
+                                .direct_camera_hardware_buffer_replaced_count
+                                .saturating_add(1);
+                            self.os.direct_camera_hardware_buffer_replaced_count = replaced;
+                            if replaced <= 8 || replaced % 120 == 0 {
+                                crate::log!(
+                                    "RUSTY_XR_MAKEPAD_DIRECT_STEREO_HARDWARE_BUFFER_LATEST_SLOT schema=rusty.xr.makepad-direct-stereo-hardware-buffer-latest-slot.v1 phase=replace status=drop-old videoId={} replaced={} policy=latest-complete-stereo-pair",
                                     player.video_id.0,
+                                    replaced,
+                                );
+                            }
+                        }
+                    } else {
+                        match self
+                            .update_android_direct_camera_hardware_buffer_frame(player, &frame)
+                        {
+                            Ok((yuv, metadata)) => {
+                                Self::push_android_direct_camera_hardware_buffer_texture_update(
+                                    &mut events,
+                                    player,
+                                    &frame,
+                                    yuv,
+                                    metadata,
+                                );
+                            }
+                            Err(error) => {
+                                Self::push_android_direct_camera_hardware_buffer_import_error(
+                                    &mut events,
+                                    player,
                                     error,
                                 );
-                                if let Err(fallback_error) = player.fallback_to_cpu_yuv() {
-                                    events.push(Event::VideoDecodingError(
-                                        VideoDecodingErrorEvent {
-                                            video_id: player.video_id,
-                                            error: format!(
-                                                "{error}; cpu fallback failed: {fallback_error}"
-                                            ),
-                                        },
-                                    ));
-                                }
-                            } else {
-                                events.push(Event::VideoDecodingError(VideoDecodingErrorEvent {
-                                    video_id: player.video_id,
-                                    error,
-                                }));
                             }
                         }
                     }
@@ -2225,6 +2430,15 @@ impl Cx {
                     metadata,
                 }));
             }
+        }
+
+        #[cfg(use_vulkan)]
+        if pair_direct_hardware_buffer_frames {
+            self.flush_android_direct_camera_hardware_buffer_pair(
+                &active_hardware_buffer_video_ids,
+                &mut players,
+                &mut events,
+            );
         }
 
         self.os.camera_players = players;
@@ -3752,6 +3966,12 @@ impl Default for CxOs {
             video_surfaces: HashMap::new(),
             video_configs: HashMap::new(),
             camera_players: HashMap::new(),
+            #[cfg(use_vulkan)]
+            pending_direct_camera_hardware_buffer_frames: HashMap::new(),
+            #[cfg(use_vulkan)]
+            direct_camera_hardware_buffer_pair_index: 0,
+            #[cfg(use_vulkan)]
+            direct_camera_hardware_buffer_replaced_count: 0,
             pending_camera_preview_windows: HashMap::new(),
             software_video_players: HashMap::new(),
             websocket_parsers: HashMap::new(),
@@ -3898,6 +4118,13 @@ pub struct CxOs {
     pub(crate) video_surfaces: HashMap<LiveId, jobject>,
     pub(crate) video_configs: HashMap<LiveId, AndroidVideoConfig>,
     pub(crate) camera_players: HashMap<LiveId, AndroidCameraPlayer>,
+    #[cfg(use_vulkan)]
+    pub(crate) pending_direct_camera_hardware_buffer_frames:
+        HashMap<LiveId, AndroidCameraHardwareBufferFrame>,
+    #[cfg(use_vulkan)]
+    pub(crate) direct_camera_hardware_buffer_pair_index: u64,
+    #[cfg(use_vulkan)]
+    pub(crate) direct_camera_hardware_buffer_replaced_count: u64,
     pub(crate) pending_camera_preview_windows: HashMap<LiveId, *mut ndk_sys::ANativeWindow>,
     pub(crate) software_video_players: HashMap<LiveId, AndroidSoftwarePlayer>,
     websocket_parsers: HashMap<u64, WebSocketImpl>,
