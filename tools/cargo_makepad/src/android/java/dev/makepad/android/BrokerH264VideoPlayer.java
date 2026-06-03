@@ -323,6 +323,15 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             params.put("target_screen_uv_rect", mConfig.targetScreenUvRect);
             params.put("targetScreenUvRect", mConfig.targetScreenUvRect);
         }
+        if (mConfig.stereoPairId.length() > 0 && mConfig.stereoPairRole.length() > 0) {
+            params.put("stereo_pair_release", true);
+            params.put("stereo_pair_id", mConfig.stereoPairId);
+            params.put("stereoPairId", mConfig.stereoPairId);
+            params.put("stereo_pair_role", mConfig.stereoPairRole);
+            params.put("stereoPairRole", mConfig.stereoPairRole);
+            params.put("stereo_pair_max_delta_ns", mConfig.stereoPairMaxDeltaNs);
+            params.put("stereoPairMaxDeltaNs", mConfig.stereoPairMaxDeltaNs);
+        }
         if ("broker-synthetic".equals(sourceMode)) {
             params.put("source_mode", "synthetic_surface");
             params.put("synthetic_pattern", normalizeSyntheticPattern(mConfig.syntheticPattern));
@@ -1132,6 +1141,20 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         return DECODE_OUTPUT_AUTO;
     }
 
+    private static String normalizeStereoPairRole(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.US).replace('_', '-');
+        if ("left".equals(normalized) || "l".equals(normalized) || "0".equals(normalized)) {
+            return "left";
+        }
+        if ("right".equals(normalized) || "r".equals(normalized) || "1".equals(normalized)) {
+            return "right";
+        }
+        return "";
+    }
+
     private static String normalizeSyntheticPattern(String value) {
         if (value == null || value.trim().length() == 0) {
             return "diagnostic-grid";
@@ -1332,6 +1355,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         final String sourceSamplingMode;
         final String targetScreenUvRect;
         final String cameraId;
+        final String stereoPairId;
+        final String stereoPairRole;
+        final int stereoPairMaxDeltaNs;
         final int preferredWidth;
         final int preferredHeight;
         final int captureMs;
@@ -1354,6 +1380,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             String sourceSamplingMode,
             String targetScreenUvRect,
             String cameraId,
+            String stereoPairId,
+            String stereoPairRole,
+            int stereoPairMaxDeltaNs,
             int preferredWidth,
             int preferredHeight,
             int captureMs,
@@ -1378,6 +1407,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             this.sourceSamplingMode = normalizeSourceSamplingMode(sourceSamplingMode);
             this.targetScreenUvRect = targetScreenUvRect != null ? targetScreenUvRect.trim() : "";
             this.cameraId = cameraId != null ? cameraId.trim() : "";
+            this.stereoPairId = stereoPairId != null ? stereoPairId.trim() : "";
+            this.stereoPairRole = normalizeStereoPairRole(stereoPairRole);
+            this.stereoPairMaxDeltaNs = clamp(stereoPairMaxDeltaNs, 0, 250000000);
             this.preferredWidth = clamp(preferredWidth, 16, 4096);
             this.preferredHeight = clamp(preferredHeight, 16, 4096);
             this.captureMs = captureMs <= 0 ? 0 : clamp(captureMs, 100, 120000);
@@ -1406,6 +1438,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 "",
                 "",
                 "",
+                "",
+                "",
+                25000000,
                 1280,
                 1280,
                 900,

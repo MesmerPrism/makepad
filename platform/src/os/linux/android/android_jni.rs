@@ -1995,6 +1995,8 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
     let source_sampling_mode = CString::new(source.source_sampling_mode).unwrap();
     let target_screen_uv_rect = CString::new(source.target_screen_uv_rect).unwrap();
     let camera_id = CString::new(source.camera_id).unwrap();
+    let stereo_pair_id = CString::new(source.stereo_pair_id).unwrap();
+    let stereo_pair_role = CString::new(source.stereo_pair_role).unwrap();
     let broker_host = ((**env).NewStringUTF.unwrap())(env, broker_host.as_ptr());
     let source_mode = ((**env).NewStringUTF.unwrap())(env, source_mode.as_ptr());
     let decode_output_mode = ((**env).NewStringUTF.unwrap())(env, decode_output_mode.as_ptr());
@@ -2005,12 +2007,14 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
     let target_screen_uv_rect =
         ((**env).NewStringUTF.unwrap())(env, target_screen_uv_rect.as_ptr());
     let camera_id = ((**env).NewStringUTF.unwrap())(env, camera_id.as_ptr());
+    let stereo_pair_id = ((**env).NewStringUTF.unwrap())(env, stereo_pair_id.as_ptr());
+    let stereo_pair_role = ((**env).NewStringUTF.unwrap())(env, stereo_pair_role.as_ptr());
 
     ndk_utils::call_void_method!(
         env,
         get_activity(),
         "prepareBrokerH264VideoPlayback",
-        "(JLjava/lang/String;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIIIIIIIIIZZZ)V",
+        "(JLjava/lang/String;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIIIIIIIIIIZZZ)V",
         video_id.get_value() as jni_sys::jlong,
         broker_host,
         source.broker_port as jni_sys::jint,
@@ -2022,6 +2026,9 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
         source_sampling_mode,
         target_screen_uv_rect,
         camera_id,
+        stereo_pair_id,
+        stereo_pair_role,
+        source.stereo_pair_max_delta_ns as jni_sys::jint,
         source.preferred_width as jni_sys::jint,
         source.preferred_height as jni_sys::jint,
         source.capture_ms as jni_sys::jint,
@@ -2045,6 +2052,8 @@ unsafe fn to_java_prepare_broker_h264_video_playback(
     (**env).DeleteLocalRef.unwrap()(env, source_sampling_mode);
     (**env).DeleteLocalRef.unwrap()(env, target_screen_uv_rect);
     (**env).DeleteLocalRef.unwrap()(env, camera_id);
+    (**env).DeleteLocalRef.unwrap()(env, stereo_pair_id);
+    (**env).DeleteLocalRef.unwrap()(env, stereo_pair_role);
 }
 
 pub unsafe fn to_java_update_tex_image(
