@@ -1405,6 +1405,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 "head-anchored-virtual-camera",
                 "",
                 "",
+                "",
                 1280,
                 1280,
                 900,
