@@ -125,6 +125,7 @@ struct CxOpenXrInputActions {
     touch_thumbrest_action: XrAction,
     aim_pose_action: XrAction,
     grip_pose_action: XrAction,
+    controller_tracking_haptic_action: XrAction,
 }
 
 pub struct CxOpenXrInputs {
@@ -480,6 +481,10 @@ fn xr_pose_is_finite(pose: XrPosef) -> bool {
 
 const XR_HAND_GRAB_ACTIVATE_THRESHOLD: f32 = 0.72;
 const XR_HAND_GRAB_RELEASE_THRESHOLD: f32 = 0.42;
+const XR_CONTROLLER_TRACKING_HAPTIC_INTERVAL_NS: i64 = 750_000_000;
+const XR_CONTROLLER_TRACKING_HAPTIC_DURATION_NS: i64 = 45_000_000;
+const XR_CONTROLLER_TRACKING_HAPTIC_AMPLITUDE: f32 = 0.28;
+const XR_CONTROLLER_TRACKING_HAPTIC_REACQUIRED_AMPLITUDE: f32 = 0.45;
 
 fn xr_hand_grab_active(previous: bool, grab_ready: bool, grab_strength: f32) -> bool {
     if !grab_ready || !grab_strength.is_finite() {
@@ -498,6 +503,8 @@ pub struct CxOpenXrController {
     grip_space: XrSpace,
     detached_aim_space: XrSpace,
     detached_grip_space: XrSpace,
+    last_tracking_haptic_time_ns: i64,
+    last_haptic_tracked: bool,
 }
 
 impl CxOpenXrController {
@@ -509,7 +516,7 @@ impl CxOpenXrController {
     }
 
     fn poll(
-        &self,
+        &mut self,
         xr: &LibOpenXr,
         session: XrSession,
         local_space: XrSpace,
@@ -539,8 +546,19 @@ impl CxOpenXrController {
             aim_location,
             detached_aim_location,
         );
-        let controller_active =
-            aim_state.is_active.as_bool() || grip_state.is_active.as_bool() || aim_tracked || grip_tracked;
+        let controller_active = aim_state.is_active.as_bool()
+            || grip_state.is_active.as_bool()
+            || aim_tracked
+            || grip_tracked;
+        let controller_tracked = aim_tracked || grip_tracked;
+        self.update_tracking_haptics(
+            xr,
+            session,
+            time,
+            is_left,
+            actions.controller_tracking_haptic_action,
+            controller_tracked,
+        );
 
         //crate::log!("{:?}", XrActionStateBoolean::get(xr, session, actions.click_x_action, self.path).current_state.as_bool());
 
@@ -676,6 +694,78 @@ impl CxOpenXrController {
                 XrController::TOUCH_THUMBREST,
                 true,
             ),
+        }
+    }
+
+    fn update_tracking_haptics(
+        &mut self,
+        xr: &LibOpenXr,
+        session: XrSession,
+        time: XrTime,
+        is_left: bool,
+        action: XrAction,
+        tracked: bool,
+    ) {
+        let time_ns = time.as_nanos();
+        if !tracked {
+            if self.last_haptic_tracked {
+                crate::log!(
+                    "RUSTY_XR_CONTROLLER_TRACKING_HAPTIC schema=rusty.xr.controller-tracking-haptic.v1 phase=tracking-lost hand={} status=inactive",
+                    if is_left { "left" } else { "right" }
+                );
+            }
+            self.last_haptic_tracked = false;
+            return;
+        }
+
+        let reacquired = !self.last_haptic_tracked;
+        let interval_elapsed = self.last_tracking_haptic_time_ns == 0
+            || time_ns.saturating_sub(self.last_tracking_haptic_time_ns)
+                >= XR_CONTROLLER_TRACKING_HAPTIC_INTERVAL_NS;
+        if !reacquired && !interval_elapsed {
+            return;
+        }
+
+        let amplitude = if reacquired {
+            XR_CONTROLLER_TRACKING_HAPTIC_REACQUIRED_AMPLITUDE
+        } else {
+            XR_CONTROLLER_TRACKING_HAPTIC_AMPLITUDE
+        };
+        let haptic_info = XrHapticActionInfo {
+            action,
+            subaction_path: self.path,
+            ..Default::default()
+        };
+        let vibration = XrHapticVibration {
+            duration: XrDuration::from_nanos(XR_CONTROLLER_TRACKING_HAPTIC_DURATION_NS),
+            frequency: XR_FREQUENCY_UNSPECIFIED,
+            amplitude,
+            ..Default::default()
+        };
+        let result = unsafe {
+            (xr.xrApplyHapticFeedback)(
+                session,
+                &haptic_info,
+                &vibration as *const XrHapticVibration as *const XrHapticBaseHeader,
+            )
+        };
+        if result == XrResult::SUCCESS {
+            self.last_tracking_haptic_time_ns = time_ns;
+            self.last_haptic_tracked = true;
+            crate::log!(
+                "RUSTY_XR_CONTROLLER_TRACKING_HAPTIC schema=rusty.xr.controller-tracking-haptic.v1 phase=pulse hand={} status=ok reacquired={} durationNs={} amplitude={:.3}",
+                if is_left { "left" } else { "right" },
+                reacquired,
+                XR_CONTROLLER_TRACKING_HAPTIC_DURATION_NS,
+                amplitude
+            );
+        } else if result == XrResult::SESSION_NOT_FOCUSED {
+            self.last_tracking_haptic_time_ns = time_ns;
+            self.last_haptic_tracked = tracked;
+        } else {
+            self.last_tracking_haptic_time_ns = time_ns;
+            result.log_error("xrApplyHapticFeedback controller tracking haptic");
+            self.last_haptic_tracked = tracked;
         }
     }
 }
@@ -923,6 +1013,14 @@ impl CxOpenXrInputs {
             "",
             &hand_paths,
         )?;
+        let controller_tracking_haptic_action = XrAction::new(
+            xr,
+            action_set,
+            XrActionType::VIBRATION_OUTPUT,
+            "controller_tracking_haptic",
+            "Controller tracking haptic",
+            &hand_paths,
+        )?;
 
         let detached_aim_pose_action = XrAction::new(
             xr,
@@ -1139,6 +1237,18 @@ impl CxOpenXrInputs {
                 detached_grip_pose_action,
                 "/user/detached_controller_meta/right/input/grip/pose",
             )?,
+            XrActionSuggestedBinding::new(
+                xr,
+                instance,
+                controller_tracking_haptic_action,
+                "/user/hand/left/output/haptic",
+            )?,
+            XrActionSuggestedBinding::new(
+                xr,
+                instance,
+                controller_tracking_haptic_action,
+                "/user/hand/right/output/haptic",
+            )?,
         ];
 
         let hand_bindings = [
@@ -1224,6 +1334,7 @@ impl CxOpenXrInputs {
             touch_thumbrest_action,
             aim_pose_action,
             grip_pose_action,
+            controller_tracking_haptic_action,
         };
 
         Ok(CxOpenXrInputs {
@@ -1275,6 +1386,8 @@ impl CxOpenXrInputs {
                     left_detached_path,
                     pose,
                 )?,
+                last_tracking_haptic_time_ns: 0,
+                last_haptic_tracked: false,
             },
             right_controller: CxOpenXrController {
                 path: right_hand_path,
@@ -1306,6 +1419,8 @@ impl CxOpenXrInputs {
                     right_detached_path,
                     pose,
                 )?,
+                last_tracking_haptic_time_ns: 0,
+                last_haptic_tracked: false,
             },
             last_state: Default::default(),
         })

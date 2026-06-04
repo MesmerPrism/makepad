@@ -218,6 +218,8 @@ pub struct LibOpenXr {
     pub xrGetActionStateFloat: TxrGetActionStateFloat,
     pub xrGetActionStateVector2f: TxrGetActionStateVector2f,
     pub xrGetActionStatePose: TxrGetActionStatePose,
+    pub xrApplyHapticFeedback: TxrApplyHapticFeedback,
+    pub xrStopHapticFeedback: TxrStopHapticFeedback,
     pub xrSyncActions: TxrSyncActions,
     pub xrResumeSimultaneousHandsAndControllersTrackingMETA:
         TxrResumeSimultaneousHandsAndControllersTrackingMETA,
@@ -424,6 +426,8 @@ impl LibOpenXr {
             xrGetActionStateFloat: get_proc_addr!(gipa, instance, TxrGetActionStateFloat)?,
             xrGetActionStateVector2f: get_proc_addr!(gipa, instance, TxrGetActionStateVector2f)?,
             xrGetActionStatePose: get_proc_addr!(gipa, instance, TxrGetActionStatePose)?,
+            xrApplyHapticFeedback: get_proc_addr!(gipa, instance, TxrApplyHapticFeedback)?,
+            xrStopHapticFeedback: get_proc_addr!(gipa, instance, TxrStopHapticFeedback)?,
             xrSyncActions: get_proc_addr!(gipa, instance, TxrSyncActions)?,
             xrResumeSimultaneousHandsAndControllersTrackingMETA: get_proc_addr!(
                 gipa,
@@ -858,6 +862,17 @@ pub type TxrGetActionStatePose = unsafe extern "C" fn(
     state: *mut XrActionStatePose,
 ) -> XrResult;
 
+pub type TxrApplyHapticFeedback = unsafe extern "C" fn(
+    session: XrSession,
+    haptic_action_info: *const XrHapticActionInfo,
+    haptic_feedback: *const XrHapticBaseHeader,
+) -> XrResult;
+
+pub type TxrStopHapticFeedback = unsafe extern "C" fn(
+    session: XrSession,
+    haptic_action_info: *const XrHapticActionInfo,
+) -> XrResult;
+
 pub type TxrSyncActions =
     unsafe extern "C" fn(session: XrSession, sync_info: *const XrActionsSyncInfo) -> XrResult;
 
@@ -1241,6 +1256,9 @@ impl XrDuration {
         self.0
     }
 }
+
+pub const XR_MIN_HAPTIC_DURATION: XrDuration = XrDuration(-1);
+pub const XR_FREQUENCY_UNSPECIFIED: f32 = 0.0;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -2088,6 +2106,55 @@ impl XrActionStatePose {
         unsafe { (xr.xrGetActionStatePose)(session, &info, &mut state) }
             .log_error("xrGetActionStatePose");
         state
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct XrHapticActionInfo {
+    pub ty: XrStructureType,
+    pub next: *const c_void,
+    pub action: XrAction,
+    pub subaction_path: XrPath,
+}
+
+impl Default for XrHapticActionInfo {
+    fn default() -> Self {
+        XrHapticActionInfo {
+            ty: XrStructureType::HAPTIC_ACTION_INFO,
+            next: 0 as *const _,
+            action: XrAction(0),
+            subaction_path: XrPath(0),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct XrHapticBaseHeader {
+    pub ty: XrStructureType,
+    pub next: *const c_void,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct XrHapticVibration {
+    pub ty: XrStructureType,
+    pub next: *const c_void,
+    pub duration: XrDuration,
+    pub frequency: f32,
+    pub amplitude: f32,
+}
+
+impl Default for XrHapticVibration {
+    fn default() -> Self {
+        XrHapticVibration {
+            ty: XrStructureType::HAPTIC_VIBRATION,
+            next: 0 as *const _,
+            duration: XR_MIN_HAPTIC_DURATION,
+            frequency: XR_FREQUENCY_UNSPECIFIED,
+            amplitude: 0.0,
+        }
     }
 }
 
