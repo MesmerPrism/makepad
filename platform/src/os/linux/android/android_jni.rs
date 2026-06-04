@@ -2068,17 +2068,20 @@ pub unsafe fn to_java_prepare_video_playback(
     autoplay: bool,
     should_loop: bool,
 ) {
-    if let VideoSource::BrokerH264(config) = source {
-        to_java_prepare_broker_h264_video_playback(
-            env,
-            video_id,
-            config,
-            external_texture_handle,
-            autoplay,
-            should_loop,
-        );
-        return;
-    }
+    let source = match source {
+        VideoSource::ExternalH264(config) | VideoSource::BrokerH264(config) => {
+            to_java_prepare_broker_h264_video_playback(
+                env,
+                video_id,
+                config,
+                external_texture_handle,
+                autoplay,
+                should_loop,
+            );
+            return;
+        }
+        source => source,
+    };
 
     let video_source = match source {
         VideoSource::InMemory(data) => {
@@ -2104,7 +2107,7 @@ pub unsafe fn to_java_prepare_video_playback(
             crate::error!("VIDEO: Camera source not supported on Android");
             return;
         }
-        VideoSource::BrokerH264(..) => unreachable!(),
+        VideoSource::ExternalH264(..) | VideoSource::BrokerH264(..) => unreachable!(),
         VideoSource::PlaybackSession(..) | VideoSource::Session(..) => {
             crate::error!("VIDEO: session sources are handled by the software video player");
             return;
@@ -2129,7 +2132,7 @@ pub unsafe fn to_java_prepare_video_playback(
 unsafe fn to_java_prepare_broker_h264_video_playback(
     env: *mut jni_sys::JNIEnv,
     video_id: LiveId,
-    source: crate::event::video_playback::BrokerH264VideoSource,
+    source: crate::event::video_playback::ExternalH264VideoSource,
     external_texture_handle: u32,
     autoplay: bool,
     should_loop: bool,

@@ -249,7 +249,7 @@ pub enum CameraPreviewMode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct BrokerH264VideoSource {
+pub struct ExternalH264VideoSource {
     pub broker_host: String,
     pub broker_port: u16,
     pub stream_port: u16,
@@ -277,7 +277,9 @@ pub struct BrokerH264VideoSource {
     pub live_stream: bool,
 }
 
-impl Default for BrokerH264VideoSource {
+pub type BrokerH264VideoSource = ExternalH264VideoSource;
+
+impl Default for ExternalH264VideoSource {
     fn default() -> Self {
         Self {
             broker_host: "127.0.0.1".to_string(),
@@ -313,6 +315,7 @@ pub enum VideoSource {
     Network(String),
     Filesystem(String),
     Camera(VideoInputId, VideoFormatId),
+    ExternalH264(ExternalH264VideoSource),
     BrokerH264(BrokerH264VideoSource),
     PlaybackSession(MediaPlaybackSessionId),
     Session(VideoFrameSessionId),

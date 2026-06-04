@@ -36,8 +36,12 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class BrokerH264VideoPlayer extends VideoPlayer {
-    private static final String TAG = "MakepadBrokerH264";
-    private static final String STREAM_MAGIC = "RXYRVID1";
+    private static final String TAG = "MakepadExternalH264";
+    private static final String MANIFOLD_COMMAND_SCHEMA = "rusty.manifold.command.envelope.v1";
+    private static final String LEGACY_RUSTY_XR_BROKER_COMMAND_SCHEMA = "rusty.xr.broker.command.v1";
+    private static final String MANIFOLD_EVENTS_PATH = "/manifold/v1/events";
+    private static final String STREAM_MAGIC = "RMANVID1";
+    private static final String LEGACY_STREAM_MAGIC = "RXYRVID1";
     private static final int CODEC_H264 = 1;
     private static final int MAX_PACKET_BYTES = 1024 * 1024;
     private static final int MAX_STREAM_HEADER_METADATA_BYTES = 256 * 1024;
@@ -84,7 +88,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             String sourceSamplingMode = normalizeSourceSamplingMode(mConfig.sourceSamplingMode);
             Log.i(TAG, String.format(
                 Locale.US,
-                "Broker H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s sourceSamplingMode=%s targetScreenUvRect=%s syntheticProjectionProfile=%s",
+                "External H.264 prepare videoId=%d sourceMode=%s streamPort=%d cameraId=%s liveStream=%s autoplay=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d projectionGeometryProfile=%s sourceSamplingMode=%s targetScreenUvRect=%s syntheticProjectionProfile=%s",
                 mVideoId,
                 sourceMode,
                 mConfig.streamPort,
@@ -106,7 +110,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     Math.max(1, mConfig.preferredWidth),
                     Math.max(1, mConfig.preferredHeight));
 
-                mHandlerThread = new android.os.HandlerThread("BrokerH264SurfaceTexture");
+                mHandlerThread = new android.os.HandlerThread("ExternalH264SurfaceTexture");
                 mHandlerThread.start();
                 mGlHandler = new android.os.Handler(mHandlerThread.getLooper());
                 mSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
@@ -136,7 +140,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         }
         Log.i(TAG, String.format(
             Locale.US,
-            "Broker H.264 begin videoId=%d sourceMode=%s streamPort=%d liveStream=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s",
+            "External H.264 begin videoId=%d sourceMode=%s streamPort=%d liveStream=%s externalTexture=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s",
             mVideoId,
             normalizeSourceMode(mConfig.sourceMode),
             mConfig.streamPort,
@@ -145,7 +149,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             mConfig.decodeOutputMode,
             effectiveDecodeOutputMode()));
         mRunning = true;
-        mDecodeThread = new Thread(this::runDecode, "MakepadBrokerH264Decode");
+        mDecodeThread = new Thread(this::runDecode, "MakepadExternalH264Decode");
         mDecodeThread.start();
     }
 
@@ -198,14 +202,14 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 JSONObject ack = sendStartCommand();
                 if (!ack.optBoolean("accepted", false)) {
                     throw new IllegalStateException(
-                        "Broker rejected H.264 stream command: " + ack.optString("message", ""));
+                        "Broker rejected external H.264 stream command: " + ack.optString("message", ""));
                 }
             }
             decodeStream();
             notifyCompleted();
         } catch (Exception ex) {
             if (mRunning) {
-                Log.w(TAG, "Broker H.264 playback failed: " + safeMessage(ex), ex);
+                Log.w(TAG, "External H.264 playback failed: " + safeMessage(ex), ex);
                 MakepadNative.onVideoDecodingError(mVideoId, safeMessage(ex));
             }
         }
@@ -253,10 +257,10 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         InputStream input = socket.getInputStream();
         OutputStream output = socket.getOutputStream();
         String key = Base64.encodeToString(
-            ("makepad-broker-h264-" + System.nanoTime()).getBytes(StandardCharsets.US_ASCII),
+            ("makepad-external-h264-" + System.nanoTime()).getBytes(StandardCharsets.US_ASCII),
             Base64.NO_WRAP);
         String request =
-            "GET /rustyxr/v1/events HTTP/1.1\r\n" +
+            "GET " + MANIFOLD_EVENTS_PATH + " HTTP/1.1\r\n" +
             "Host: " + mConfig.brokerHost + ":" + mConfig.brokerPort + "\r\n" +
             "Upgrade: websocket\r\n" +
             "Connection: Upgrade\r\n" +
@@ -294,7 +298,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
         closeQuietly(socket);
         mBrokerSocket = null;
-        throw new IllegalStateException("Timed out waiting for broker H.264 command ack.");
+        throw new IllegalStateException("Timed out waiting for external H.264 command ack.");
     }
 
     private JSONObject startCommandJson() throws Exception {
@@ -349,7 +353,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
         JSONObject command = new JSONObject();
         command.put("type", "command");
-        command.put("schema", "rusty.xr.broker.command.v1");
+        command.put("schema", MANIFOLD_COMMAND_SCHEMA);
+        command.put("legacy_schema", LEGACY_RUSTY_XR_BROKER_COMMAND_SCHEMA);
         String clientLabel = mConfig.stereoPairRole.length() > 0
             ? mConfig.stereoPairRole
             : Long.toString(mVideoId);
@@ -361,7 +366,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             "broker-synthetic".equals(sourceMode)
                 ? "media.start_synthetic_h264_stream"
                 : "camera_provider.start_app_camera_h264_stream");
-        command.put("client_id", "makepad-broker-h264-video-" + clientLabel);
+        command.put("client_id", "makepad-external-h264-video-" + clientLabel);
         command.put("app_label", "Makepad XR app");
         command.put("app_version", "source-example");
         command.put("params", params);
@@ -375,7 +380,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         DataInputStream input = new DataInputStream(socket.getInputStream());
         StreamHeader header = readHeader(input);
         if (header.codecId != CODEC_H264) {
-            throw new IllegalStateException("Broker stream codec is not H.264: " + header.codecId);
+            throw new IllegalStateException("External stream codec is not H.264: " + header.codecId);
         }
 
         List<Packet> pending = new ArrayList<Packet>();
@@ -417,7 +422,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         boolean lowLatencyParameterSucceeded = requestDecoderLowLatency(decoder);
         Log.i(TAG, String.format(
             Locale.US,
-            "Broker H.264 decoder started videoId=%d decoder=%s lowLatencyRequested=%s",
+            "External H.264 decoder started videoId=%d decoder=%s lowLatencyRequested=%s",
             mVideoId,
             decoder.getName(),
             lowLatencyParameterSucceeded));
@@ -572,7 +577,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             outputEosSeen);
 
         if (decodedFrameCount == 0 && mRunning) {
-            throw new IllegalStateException("Broker H.264 decoder produced no output frames.");
+            throw new IllegalStateException("External H.264 decoder produced no output frames.");
         }
     }
 
@@ -627,7 +632,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             : 0.0;
         Log.i(TAG, String.format(
             Locale.US,
-            "Broker H.264 playback progress videoId=%d phase=%s status=ok sourceMode=%s streamPort=%d cameraId=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d requestedFrameRateHz=%d packetsRead=%d inputQueuedCount=%d decodedFrameCount=%d yuvFrameEmitCount=%d hardwareBufferFrameEmitCount=%d yuvCopyTimeMs=%d yuvCopyAvgMs=%.2f outputFormatChangedCount=%d inputEosQueued=%s outputEosSeen=%s elapsedMs=%d packetReadRateHz=%.2f inputQueueRateHz=%.2f decodedFrameRateHz=%.2f yuvFrameEmitRateHz=%.2f hardwareBufferFrameEmitRateHz=%.2f",
+            "External H.264 playback progress videoId=%d phase=%s status=ok sourceMode=%s streamPort=%d cameraId=%s decodeOutputMode=%s effectiveDecodeOutputMode=%s preferredWidth=%d preferredHeight=%d requestedFrameRateHz=%d packetsRead=%d inputQueuedCount=%d decodedFrameCount=%d yuvFrameEmitCount=%d hardwareBufferFrameEmitCount=%d yuvCopyTimeMs=%d yuvCopyAvgMs=%.2f outputFormatChangedCount=%d inputEosQueued=%s outputEosSeen=%s elapsedMs=%d packetReadRateHz=%.2f inputQueueRateHz=%.2f decodedFrameRateHz=%.2f yuvFrameEmitRateHz=%.2f hardwareBufferFrameEmitRateHz=%.2f",
             mVideoId,
             phase,
             normalizeSourceMode(mConfig.sourceMode),
@@ -660,8 +665,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         byte[] magicBytes = new byte[8];
         input.readFully(magicBytes);
         String magic = new String(magicBytes, StandardCharsets.US_ASCII);
-        if (!STREAM_MAGIC.equals(magic)) {
-            throw new IllegalStateException("Unexpected broker stream magic: " + magic);
+        if (!STREAM_MAGIC.equals(magic) && !LEGACY_STREAM_MAGIC.equals(magic)) {
+            throw new IllegalStateException("Unexpected external stream magic: " + magic);
         }
 
         int schemaVersion = input.readInt();
@@ -671,13 +676,13 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int packetCount = input.readInt();
         int headerMetadataBytes = input.readInt();
         if (schemaVersion < 1 || schemaVersion > 3) {
-            throw new IllegalStateException("Unsupported broker stream schema version: " + schemaVersion);
+            throw new IllegalStateException("Unsupported external stream schema version: " + schemaVersion);
         }
         if (packetCount < 0 || packetCount > MAX_STREAM_PACKETS) {
-            throw new IllegalStateException("Broker stream packet count is out of range: " + packetCount);
+            throw new IllegalStateException("External stream packet count is out of range: " + packetCount);
         }
         if (headerMetadataBytes < 0 || headerMetadataBytes > MAX_STREAM_HEADER_METADATA_BYTES) {
-            throw new IllegalStateException("Broker stream metadata header is out of range: " + headerMetadataBytes);
+            throw new IllegalStateException("External stream metadata header is out of range: " + headerMetadataBytes);
         }
         JSONObject projectionMetadata = null;
         String projectionMetadataJson = "";
@@ -691,7 +696,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             } catch (Exception ex) {
                 Log.w(TAG, String.format(
                     Locale.US,
-                    "Broker H.264 stream header metadata parse failed videoId=%d bytes=%d error=%s",
+                    "External H.264 stream header metadata parse failed videoId=%d bytes=%d error=%s",
                     mVideoId,
                     headerMetadataBytes,
                     safeMessage(ex)));
@@ -708,8 +713,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             : "";
         Log.i(TAG, String.format(
             Locale.US,
-            "Broker H.264 stream header videoId=%d schema=%d width=%d height=%d packets=%d metadataBytes=%d metadataReady=%s cameraId=%s source=%s",
+            "External H.264 stream header videoId=%d magic=%s schema=%d width=%d height=%d packets=%d metadataBytes=%d metadataReady=%s cameraId=%s source=%s",
             mVideoId,
+            magic,
             schemaVersion,
             width,
             height,
@@ -932,7 +938,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             }
         }
         throw new IllegalStateException(
-            "Timed out connecting to broker H.264 stream on port " + port + ": " +
+            "Timed out connecting to external H.264 stream on port " + port + ": " +
                 (lastError != null ? safeMessage(lastError) : ""));
     }
 
@@ -1250,7 +1256,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 "homography".equals(normalized)) {
             return SOURCE_SAMPLING_SCREEN_TO_CAMERA_HOMOGRAPHY;
         }
-        throw new IllegalArgumentException("Unsupported broker H.264 source sampling mode: " + value);
+        throw new IllegalArgumentException("Unsupported external H.264 source sampling mode: " + value);
     }
 
     private static void closeQuietly(Socket socket) {
@@ -1433,9 +1439,9 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     deltaNs,
                     pairIndex);
                 if (pairIndex < 8 || pairIndex % 120 == 0) {
-                    Log.i(TAG, String.format(
-                        Locale.US,
-                        "Broker H.264 stereo hardware-buffer pair delivered pairId=%s pairIndex=%d deltaNs=%d leftVideoId=%d rightVideoId=%d leftSeq=%d rightSeq=%d dropped=%d",
+                Log.i(TAG, String.format(
+                    Locale.US,
+                        "External H.264 stereo hardware-buffer pair delivered pairId=%s pairIndex=%d deltaNs=%d leftVideoId=%d rightVideoId=%d leftSeq=%d rightSeq=%d dropped=%d",
                         pairId,
                         pairIndex,
                         deltaNs,
@@ -1446,7 +1452,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                         dropCount));
                 }
             } catch (RuntimeException error) {
-                Log.w(TAG, "Could not emit broker H.264 stereo hardware-buffer pair: " + safeMessage(error), error);
+                Log.w(TAG, "Could not emit external H.264 stereo hardware-buffer pair: " + safeMessage(error), error);
             } finally {
                 left.close();
                 right.close();
@@ -1469,7 +1475,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             if (dropCount < 8 || dropCount % 120 == 0) {
                 Log.w(TAG, String.format(
                     Locale.US,
-                    "Broker H.264 stereo hardware-buffer frame dropped pairId=%s reason=%s role=%s seq=%d ts=%d dropped=%d",
+                    "External H.264 stereo hardware-buffer frame dropped pairId=%s reason=%s role=%s seq=%d ts=%d dropped=%d",
                     pairId,
                     reason,
                     frame.role,
@@ -1574,7 +1580,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     buffer);
                 return true;
             } catch (Exception error) {
-                Log.w(TAG, "Could not emit broker H.264 hardware-buffer frame: " + safeMessage(error), error);
+                Log.w(TAG, "Could not emit external H.264 hardware-buffer frame: " + safeMessage(error), error);
                 return false;
             } finally {
                 if (buffer != null) {

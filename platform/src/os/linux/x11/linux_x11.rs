@@ -803,9 +803,12 @@ impl X11Cx {
                         ));
                         continue;
                     }
-                    if let VideoSource::BrokerH264(..) = source {
+                    if matches!(
+                        &source,
+                        VideoSource::ExternalH264(..) | VideoSource::BrokerH264(..)
+                    ) {
                         let error =
-                            "VideoSource::BrokerH264 is only supported on Android".to_string();
+                            "VideoSource::ExternalH264 is only supported on Android".to_string();
                         crate::error!("{}", error);
                         cx.call_event_handler(&Event::VideoDecodingError(
                             VideoDecodingErrorEvent { video_id, error },

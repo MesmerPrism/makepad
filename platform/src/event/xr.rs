@@ -46,11 +46,27 @@ impl XrController {
     pub const TOUCH_THUMBSTICK: u16 = 1 << 11;
     pub const TOUCH_TRIGGER: u16 = 1 << 12;
     pub const TOUCH_THUMBREST: u16 = 1 << 13;
+    pub const AIM_TRACKED: u16 = 1 << 14;
+    pub const GRIP_TRACKED: u16 = 1 << 15;
+
     pub fn triggered(&self) -> bool {
         self.trigger > 0.8
     }
+
     pub fn active(&self) -> bool {
         self.buttons & Self::ACTIVE != 0
+    }
+
+    pub fn tracked(&self) -> bool {
+        self.aim_tracked() || self.grip_tracked()
+    }
+
+    pub fn aim_tracked(&self) -> bool {
+        self.buttons & Self::AIM_TRACKED != 0
+    }
+
+    pub fn grip_tracked(&self) -> bool {
+        self.buttons & Self::GRIP_TRACKED != 0
     }
 
     pub fn click_x(&self) -> bool {

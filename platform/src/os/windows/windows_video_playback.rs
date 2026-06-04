@@ -597,8 +597,8 @@ impl WindowsVideoPlayer {
                 error!("VIDEO: Camera source not supported on Windows");
                 (vec![0], None)
             }
-            VideoSource::BrokerH264(..) => {
-                error!("VIDEO: Broker H.264 source is only supported on Android");
+            VideoSource::ExternalH264(..) | VideoSource::BrokerH264(..) => {
+                error!("VIDEO: external H.264 source is only supported on Android");
                 (vec![0], None)
             }
             VideoSource::PlaybackSession(..) | VideoSource::Session(..) => {

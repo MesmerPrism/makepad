@@ -386,8 +386,8 @@ impl GStreamerVideoPlayer {
                 // Camera sources are handled by V4l2CameraPlayer, not GStreamer.
                 ("".to_string(), None)
             }
-            VideoSource::BrokerH264(..) => {
-                crate::error!("VIDEO: Broker H.264 source is only supported on Android");
+            VideoSource::ExternalH264(..) | VideoSource::BrokerH264(..) => {
+                crate::error!("VIDEO: external H.264 source is only supported on Android");
                 ("".to_string(), None)
             }
             VideoSource::PlaybackSession(..) | VideoSource::Session(..) => {

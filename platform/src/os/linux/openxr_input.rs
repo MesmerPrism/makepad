@@ -2,6 +2,7 @@ use {
     crate::{
         event::xr::*,
         os::linux::{openxr::*, openxr_sys::*},
+        Pose,
     },
     std::rc::Rc,
 };
@@ -522,6 +523,24 @@ impl CxOpenXrController {
         let grip = XrActionStateFloat::get(xr, session, actions.grip_action, self.path);
         let grip_state = XrActionStatePose::get(xr, session, actions.grip_pose_action, self.path);
         let aim_state = XrActionStatePose::get(xr, session, actions.aim_pose_action, self.path);
+        let grip_location = XrSpaceLocation::locate(xr, local_space, time, self.grip_space);
+        let aim_location = XrSpaceLocation::locate(xr, local_space, time, self.aim_space);
+        let detached_grip_location =
+            XrSpaceLocation::locate(xr, local_space, time, self.detached_grip_space);
+        let detached_aim_location =
+            XrSpaceLocation::locate(xr, local_space, time, self.detached_aim_space);
+        let (grip_pose, grip_tracked) = select_controller_pose_location(
+            grip_state.is_active.as_bool(),
+            grip_location,
+            detached_grip_location,
+        );
+        let (aim_pose, aim_tracked) = select_controller_pose_location(
+            aim_state.is_active.as_bool(),
+            aim_location,
+            detached_aim_location,
+        );
+        let controller_active =
+            aim_state.is_active.as_bool() || grip_state.is_active.as_bool() || aim_tracked || grip_tracked;
 
         //crate::log!("{:?}", XrActionStateBoolean::get(xr, session, actions.click_x_action, self.path).current_state.as_bool());
 
@@ -547,22 +566,22 @@ impl CxOpenXrController {
         }
 
         XrController {
-            grip_pose: if grip_state.is_active.as_bool() {
-                XrSpaceLocation::locate(xr, local_space, time, self.grip_space).pose
-            } else {
-                XrSpaceLocation::locate(xr, local_space, time, self.detached_grip_space).pose
-            },
-            aim_pose: if aim_state.is_active.as_bool() {
-                XrSpaceLocation::locate(xr, local_space, time, self.aim_space).pose
-            } else {
-                XrSpaceLocation::locate(xr, local_space, time, self.detached_aim_space).pose
-            },
+            grip_pose,
+            aim_pose,
             stick: normalize_xr_controller_stick(stick.current_state),
             trigger: trigger.current_state,
             grip: grip.current_state,
             //last_buttons,
-            buttons: if aim_state.is_active.as_bool() {
+            buttons: if controller_active {
                 XrController::ACTIVE
+            } else {
+                0
+            } | if aim_tracked {
+                XrController::AIM_TRACKED
+            } else {
+                0
+            } | if grip_tracked {
+                XrController::GRIP_TRACKED
             } else {
                 0
             } | bf(
@@ -659,6 +678,45 @@ impl CxOpenXrController {
             ),
         }
     }
+}
+
+fn select_controller_pose_location(
+    primary_action_active: bool,
+    primary: XrSpaceLocation,
+    detached: XrSpaceLocation,
+) -> (Pose, bool) {
+    if controller_location_tracked(&primary)
+        || (primary_action_active && controller_location_valid(&primary))
+    {
+        return (primary.pose, controller_location_tracked(&primary));
+    }
+    if controller_location_tracked(&detached) || controller_location_valid(&detached) {
+        return (detached.pose, controller_location_tracked(&detached));
+    }
+    if controller_location_valid(&primary) {
+        return (primary.pose, false);
+    }
+    (detached.pose, false)
+}
+
+fn controller_location_valid(location: &XrSpaceLocation) -> bool {
+    location
+        .location_flags
+        .contains(XrSpaceLocationFlags::ORIENTATION_VALID)
+        && location
+            .location_flags
+            .contains(XrSpaceLocationFlags::POSITION_VALID)
+        && xr_pose_is_finite(location.pose)
+}
+
+fn controller_location_tracked(location: &XrSpaceLocation) -> bool {
+    controller_location_valid(location)
+        && location
+            .location_flags
+            .contains(XrSpaceLocationFlags::ORIENTATION_TRACKED)
+        && location
+            .location_flags
+            .contains(XrSpaceLocationFlags::POSITION_TRACKED)
 }
 
 impl CxOpenXrInputs {
