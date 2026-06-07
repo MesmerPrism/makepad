@@ -270,8 +270,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
             packetsRead++;
         }
 
-        NalUnit sps = findNalUnit(pending, 7);
-        NalUnit pps = findNalUnit(pending, 8);
+        NalUnit sps = H264AnnexBPrimer.findNalUnit(pending, 7);
+        NalUnit pps = H264AnnexBPrimer.findNalUnit(pending, 8);
         boolean hasCompleteCsd = sps != null && pps != null;
         MediaFormat format = MediaFormat.createVideoFormat("video/avc", header.width, header.height);
         if (sps != null) {
@@ -546,7 +546,8 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         if (pending.size() >= 8) {
             return false;
         }
-        return findNalUnit(pending, 7) == null || findNalUnit(pending, 8) == null;
+        return H264AnnexBPrimer.findNalUnit(pending, 7) == null ||
+            H264AnnexBPrimer.findNalUnit(pending, 8) == null;
     }
 
     private boolean shouldReadMorePackets(StreamHeader header, int packetsRead) {
@@ -726,55 +727,6 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         throw new IllegalStateException(
             "Timed out connecting to external H.264 stream on port " + port + ": " +
                 (lastError != null ? safeMessage(lastError) : ""));
-    }
-
-    private static NalUnit findNalUnit(List<Packet> packets, int nalType) {
-        for (int i = 0; i < packets.size(); i++) {
-            byte[] payload = packets.get(i).payload;
-            int start = findStartCode(payload, 0);
-            while (start >= 0) {
-                int startCodeLength = startCodeLengthAt(payload, start);
-                int nalStart = start + startCodeLength;
-                if (nalStart >= payload.length) {
-                    break;
-                }
-                int nextStart = findStartCode(payload, nalStart);
-                int nalEnd = nextStart >= 0 ? nextStart : payload.length;
-                if ((payload[nalStart] & 0x1f) == nalType) {
-                    byte[] bytes = new byte[nalEnd - start];
-                    System.arraycopy(payload, start, bytes, 0, bytes.length);
-                    return new NalUnit(bytes);
-                }
-                start = nextStart;
-            }
-        }
-        return null;
-    }
-
-    private static int findStartCode(byte[] data, int offset) {
-        for (int i = Math.max(0, offset); i < data.length - 2; i++) {
-            if (startCodeLengthAt(data, i) > 0) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static int startCodeLengthAt(byte[] data, int offset) {
-        if (offset + 4 <= data.length &&
-            data[offset] == 0 &&
-            data[offset + 1] == 0 &&
-            data[offset + 2] == 0 &&
-            data[offset + 3] == 1) {
-            return 4;
-        }
-        if (offset + 3 <= data.length &&
-            data[offset] == 0 &&
-            data[offset + 1] == 0 &&
-            data[offset + 2] == 1) {
-            return 3;
-        }
-        return 0;
     }
 
     private static String normalizeSourceMode(String value) {
@@ -1188,11 +1140,4 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         }
     }
 
-    private static final class NalUnit {
-        final byte[] bytes;
-
-        NalUnit(byte[] bytes) {
-            this.bytes = bytes;
-        }
-    }
 }

@@ -109,15 +109,27 @@ Completed movement:
 4. Keep TCP connection ownership, MediaCodec decode, H.264 primer parsing,
    CPU-YUV, HWB, and stereo pairing inside the facade.
 
+## Fourth Code Slice
+
+Status: completed. `H264AnnexBPrimer.java` now owns Annex-B start-code
+scanning, SPS/PPS NAL lookup, and the package-private `NalUnit` DTO used to
+seed `MediaFormat` CSD buffers.
+
+Completed movement:
+
+1. Add `H264AnnexBPrimer.java`.
+2. Move `findNalUnit`, `findStartCode`, `startCodeLengthAt`, and `NalUnit`.
+3. Keep primer-packet selection, stream reads, MediaCodec decode, CPU-YUV,
+   HWB, and stereo pairing inside the facade.
+
 ## Later Slices
 
-After the config, command-client, and stream-reader slices are validated and
-pushed:
+After the config, command-client, stream-reader, and Annex-B primer slices are
+validated and pushed:
 
-1. Split H.264 Annex-B primer helpers.
-2. Split hardware-buffer target and stereo pairer.
-3. Split CPU-YUV emitter only if the decoder loop remains too broad.
-4. Split decoder loop last, if needed.
+1. Split hardware-buffer target and stereo pairer.
+2. Split CPU-YUV emitter only if the decoder loop remains too broad.
+3. Split decoder loop last, if needed.
 
 ## Validation
 
