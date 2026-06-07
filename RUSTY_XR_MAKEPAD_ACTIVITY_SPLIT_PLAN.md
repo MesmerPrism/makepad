@@ -49,12 +49,12 @@ authority; this file is Android app-shell glue.
 - `RustyXrMediaProjectionHelper.java`: complete. Owns MediaProjection enable
   parsing, delayed consent request, consent result handling, foreground-service
   payload construction, and service stop glue.
+- `ExternalH264VideoPlaybackFactory.java`: complete. Owns external-H264 config
+  construction, `BrokerH264VideoPlayer` creation, playback flag assignment, and
+  runnable construction.
 - `MakepadActivity.java`: remains the generated activity facade and keeps
-  lifecycle order, plugin hooks, native callbacks, public H264 entrypoint, video
-  map/thread ownership, and activity switching.
-- Next candidate: only preflight `prepareBrokerH264VideoPlayback` if H264
-  entrypoint pressure grows; do not continue splitting lifecycle code by line
-  count.
+  lifecycle order, plugin hooks, native callbacks, public H264 entrypoint
+  signature, video map/thread ownership, and activity switching.
 
 ## First Slice
 
@@ -88,9 +88,10 @@ Recommended second movement after the first slice validates:
 
 Later movement needs a separate preflight before code changes:
 
-1. H264/external-video entrypoint helper. Only extract config construction if
-   `prepareBrokerH264VideoPlayback` keeps its public signature and the activity
-   keeps video runnable map/thread ownership.
+1. Further H264/external-video entrypoint cleanup only if a concrete
+   ownership/churn reason appears. `ExternalH264VideoPlaybackFactory.java` now
+   owns construction while `MakepadActivity.java` keeps the public method and
+   video runnable map/thread ownership.
 2. Additional diagnostic marker cleanup. Prefer compatibility aliases and
    explicit historical marker names over broad Rusty-XR renames.
 

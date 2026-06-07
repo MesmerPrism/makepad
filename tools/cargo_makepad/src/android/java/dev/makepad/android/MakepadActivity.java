@@ -2599,7 +2599,9 @@ public class MakepadActivity
             boolean autoplay,
             boolean shouldLoop,
             boolean liveStream) {
-        BrokerH264VideoPlayer.Config config = new BrokerH264VideoPlayer.Config(
+        VideoPlayerRunnable runnable = ExternalH264VideoPlaybackFactory.createRunnable(
+            this,
+            videoId,
             brokerHost,
             brokerPort,
             streamPort,
@@ -2622,12 +2624,10 @@ public class MakepadActivity
             commandTimeoutMs,
             streamTimeoutMs,
             decodeTimeoutMs,
+            externalTextureHandle,
+            autoplay,
+            shouldLoop,
             liveStream);
-        VideoPlayer videoPlayer = new BrokerH264VideoPlayer(this, videoId, config);
-        videoPlayer.setExternalTextureHandle(externalTextureHandle);
-        videoPlayer.setAutoplay(autoplay);
-        videoPlayer.setShouldLoop(shouldLoop);
-        VideoPlayerRunnable runnable = new VideoPlayerRunnable(videoPlayer);
 
         mVideoPlayerRunnables.put(videoId, runnable);
         mVideoPlaybackHandler.post(runnable);

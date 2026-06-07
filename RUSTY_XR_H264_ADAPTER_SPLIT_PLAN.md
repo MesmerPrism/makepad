@@ -17,7 +17,9 @@ Keep these stable during the first split intervals:
 - package: `dev.makepad.android`;
 - facade class: `BrokerH264VideoPlayer extends VideoPlayer`;
 - constructor: `BrokerH264VideoPlayer(Activity activity, long videoId, Config config)`;
-- entrypoint from `MakepadActivity.prepareBrokerH264VideoPlayback`;
+- entrypoint from `MakepadActivity.prepareBrokerH264VideoPlayback`, with
+  config/player/runnable construction delegated through
+  `ExternalH264VideoPlaybackFactory.java`;
 - native callbacks through `MakepadNative`;
 - Manifold defaults:
   - `rusty.manifold.command.envelope.v1`;
@@ -47,6 +49,7 @@ generic Java socket/media adapter inside the Makepad Android shell.
 | Hardware-buffer output | `ExternalH264HardwareBufferTarget.java` | Completed. Facade keeps orchestration, surface ownership reference, and timeout selection. |
 | Stereo HWB pairing | nested pairer family inside `ExternalH264HardwareBufferTarget.java` | Completed with the target because pairing owns retained `HardwareBuffer` frame lifetime and callback emission. |
 | Config and normalization | `Config`, normalize methods, clamp, defaults | `ExternalH264Config.java`; first code split candidate. |
+| Activity entrypoint construction | `ExternalH264VideoPlaybackFactory.java` | Completed. `MakepadActivity.java` keeps the public method signature, runnable map insertion, and handler post. |
 | Completion/prepared callbacks | `notifyPrepared`, `notifyCompleted`, error callback paths | Keep in facade or a small callback helper only after decoder split. |
 
 ## First Code Slice
@@ -167,9 +170,30 @@ Completed movement:
 After the config, command-client, stream-reader, Annex-B primer,
 hardware-buffer target, and CPU-YUV emitter slices are validated and pushed:
 
-1. Split decoder loop last, if needed.
-2. Consider stereo pairer lifecycle cleanup only as a behavior slice with
+1. Activity entrypoint construction is complete in
+   `ExternalH264VideoPlaybackFactory.java`; keep activity map/thread ownership
+   in `MakepadActivity.java`.
+2. Split decoder loop last, if needed.
+3. Consider stereo pairer lifecycle cleanup only as a behavior slice with
    downstream hardware-buffer validation.
+
+## Activity Entrypoint Slice
+
+Status: completed. `ExternalH264VideoPlaybackFactory.java` now owns external-
+H264 config construction, `BrokerH264VideoPlayer` creation, playback flag
+assignment, and runnable construction used by
+`MakepadActivity.prepareBrokerH264VideoPlayback`.
+
+Preserved boundary:
+
+1. `MakepadActivity.prepareBrokerH264VideoPlayback` keeps its public signature
+   and argument order.
+2. `MakepadActivity.java` keeps `mVideoPlayerRunnables.put(...)` and
+   `mVideoPlaybackHandler.post(...)` so activity video map/thread ownership
+   does not move into the H264 adapter.
+3. `BrokerH264VideoPlayer` remains the package-private compatibility facade
+   until downstream generated activity code and public examples no longer
+   reference that name.
 
 ## Validation
 
