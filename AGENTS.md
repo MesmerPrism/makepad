@@ -9,13 +9,15 @@ metadata, and branch-local documentation.
 For Rusty XR tasks in this repo, read these first:
 
 - `RUSTY_XR_FORK_NOTES.md`
+- `RUSTY_XR_PATCH_LEDGER.md`
 - Rusty XR public docs:
   - `docs/MAKEPAD_FORK_RELATIONSHIP.md`
-  - `docs/MAKEPAD_Q2Q_PARALLEL_APPROACH_COMPARISON.md`
+  - `docs/MAKEPAD_CAMERA_PARALLEL_APPROACH_COMPARISON.md`
   - `docs/MAKEPAD_XR_GPU_PAGE_FAULT_INVESTIGATION.md`
   - `docs/MAKEPAD_STEREO_COMPARISON_ITERATION.md`
 - Rusty XR example-local instructions:
   - `examples/makepad-q2q-camera-shell/AGENTS.md`
+  - `examples/makepad-camera-shell/AGENTS.md`
 
 Those Rusty XR docs live in the Rusty XR repo, not in this Makepad checkout.
 Do not copy private planning notes, local paths, generated APKs, device logs,
@@ -42,10 +44,11 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
   depth provider, depth swapchain, depth image, or depth start calls.
 - Makepad `Video` widget camera-permission routing when headset raw-camera
   sources require a different runtime permission from ordinary app cameras.
-- Android broker H.264 video-source plumbing that stays generic: public command
-  and `RXYRVID1` stream framing, MediaCodec decode, stream-header metadata
-  events, and a CPU-YUV decoded handoff for Vulkan/XR paths without a GL
-  external texture handle.
+- Android external H.264 video-source plumbing that stays generic: Manifold
+  command-envelope defaults, `/manifold/v1/events`, `RMANVID1` stream framing,
+  explicit legacy `RXYRVID1` compatibility, MediaCodec decode, stream-header
+  metadata events, and a CPU-YUV decoded handoff for Vulkan/XR paths without a
+  GL external texture handle.
 - Generic OpenXR hand-mesh bind-data access for runtimes that expose
   `XR_FB_hand_tracking_mesh`, kept as mesh counts/status plus an on-demand API
   rather than app-specific recording behavior.

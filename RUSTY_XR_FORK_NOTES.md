@@ -5,6 +5,11 @@ Makepad-first Quest lane. Upstream Makepad remains the source of truth for the
 framework; this branch carries only the small deltas needed to validate the
 Quest Android/Vulkan build path against Rusty XR's public contracts.
 
+`RUSTY_XR_PATCH_LEDGER.md` classifies the current local patch families,
+upstream-candidate boundaries, split-pressure watchlist, naming rules, and
+validation slots. Update that ledger when adding a new patch family, landing a
+split, or changing a command/stream default.
+
 ## Relationship To Rusty XR
 
 Rusty XR core crates stay framework-neutral and do not depend on Makepad. The
@@ -75,13 +80,15 @@ This branch currently carries:
 - A `Video` widget camera-permission option so camera playback can explicitly
   request headset-camera access on platforms where raw headset cameras are
   gated separately from the ordinary camera permission.
-- An Android-only broker H.264 video source that uses the platform WebSocket
-  command path, framed TCP H.264 packets, and Android MediaCodec so public
-  examples can consume broker-managed synthetic or camera streams. On GL paths
-  it can use Makepad's existing external-video texture handoff; on Quest
-  Vulkan/XR paths it can fall back to decoded CPU-YUV plane upload because no
-  GL external texture handle is available. The source descriptor can carry a
-  requested camera ID and source frame rate for broker-camera runs.
+- An Android-only external H.264 video source that uses the platform WebSocket
+  command path, Manifold command-envelope defaults, `/manifold/v1/events`,
+  `RMANVID1` stream framing, explicit legacy `RXYRVID1` compatibility, and
+  Android MediaCodec so public examples can consume Manifold/broker-managed
+  synthetic or camera streams. On GL paths it can use Makepad's existing
+  external-video texture handoff; on Quest Vulkan/XR paths it can fall back to
+  decoded CPU-YUV plane upload because no GL external texture handle is
+  available. The source descriptor can carry a requested camera ID and source
+  frame rate for broker-camera runs.
 - A video-source metadata event that forwards broker stream-header projection
   metadata to app code before projection-stage rows are derived.
 - Optional `VideoTextureUpdated` metadata for camera texture lanes. Android
