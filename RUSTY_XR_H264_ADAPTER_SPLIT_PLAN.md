@@ -43,7 +43,7 @@ generic Java socket/media adapter inside the Makepad Android shell.
 | Stream header/framing | `readHeader`, `readPacket`, `StreamHeader`, `Packet` | `ManifoldVideoStreamReader.java`, preserving `RMANVID1` default and `RXYRVID1` legacy read. |
 | H.264 primer parsing | `findNalUnit`, `findStartCode`, `startCodeLengthAt`, `NalUnit` | `H264AnnexBPrimer.java`. |
 | MediaCodec decode loop | `decodeStream`, `queuePacket`, `requestDecoderLowLatency`, `maybeLogProgress`, `logProgress` | Leave until command/stream/config helpers are split; then consider `ExternalH264DecoderLoop.java`. |
-| CPU-YUV output | `emitYuvFrame`, `copyPlane` | `ExternalH264CpuYuvEmitter.java` after decoder-loop boundaries are stable. |
+| CPU-YUV output | `ExternalH264CpuYuvEmitter.java` | Completed. Facade keeps output-mode decision, image acquisition/close, copy timing, and progress counters. |
 | Hardware-buffer output | `ExternalH264HardwareBufferTarget.java` | Completed. Facade keeps orchestration, surface ownership reference, and timeout selection. |
 | Stereo HWB pairing | nested pairer family inside `ExternalH264HardwareBufferTarget.java` | Completed with the target because pairing owns retained `HardwareBuffer` frame lifetime and callback emission. |
 | Config and normalization | `Config`, normalize methods, clamp, defaults | `ExternalH264Config.java`; first code split candidate. |
@@ -146,14 +146,29 @@ was not called before this split. Do not fold that lifecycle cleanup into a
 mechanical move; treat it as a behavior fix that needs downstream hardware-
 buffer validation.
 
+## Sixth Code Slice
+
+Status: completed. `ExternalH264CpuYuvEmitter.java` now owns CPU-YUV plane
+copying and `MakepadNative.onVideoYuvFrame` emission.
+
+Completed movement:
+
+1. Add `ExternalH264CpuYuvEmitter.java`.
+2. Move `emitYuvFrame` and `copyPlane`.
+3. Keep `BrokerH264VideoPlayer` as the decoder orchestrator: output-mode
+   decision, `MediaCodec.getOutputImage`, `Image.close`, copy timing,
+   progress counters, and decode-loop control flow remain in the facade.
+4. Preserve `onVideoYuvFrame` argument order, width/height clamping, chroma
+   dimensions, row/pixel-stride handling, and zero-fill behavior for missing
+   plane bytes.
+
 ## Later Slices
 
-After the config, command-client, stream-reader, Annex-B primer, and
-hardware-buffer target slices are validated and pushed:
+After the config, command-client, stream-reader, Annex-B primer,
+hardware-buffer target, and CPU-YUV emitter slices are validated and pushed:
 
-1. Split CPU-YUV emitter only if the decoder loop remains too broad.
-2. Split decoder loop last, if needed.
-3. Consider stereo pairer lifecycle cleanup only as a behavior slice with
+1. Split decoder loop last, if needed.
+2. Consider stereo pairer lifecycle cleanup only as a behavior slice with
    downstream hardware-buffer validation.
 
 ## Validation
