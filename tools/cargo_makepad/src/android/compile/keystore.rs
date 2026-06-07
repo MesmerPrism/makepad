@@ -1,4 +1,4 @@
-use super::{keytool_path, resolve_java_home};
+use super::toolchain::{keytool_path, resolve_java_home};
 use crate::android::HostOs;
 use crate::makepad_shell::{mkdir, shell_env};
 use std::{

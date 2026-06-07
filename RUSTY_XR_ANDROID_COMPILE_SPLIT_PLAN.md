@@ -34,14 +34,14 @@ to this Makepad tooling module. It remains package-generation tooling.
 | Responsibility | Current location | Split direction |
 | --- | --- | --- |
 | Android build orchestration | `build`, `build_aab`, `run` | Keep in `compile.rs` until helper families are split. |
-| SDK/JDK/NDK/tool resolution | path helpers, platform/build-tools/Java/NDK preflight, clang wrappers | Later `compile/toolchain.rs` or `compile/sdk_tools.rs`. |
+| SDK/JDK/NDK/tool resolution | path helpers, platform/build-tools/Java/NDK preflight, clang wrappers | Completed in `compile/toolchain.rs`. |
 | Keystore sidecar and keystore creation | `keystore_sidecar_path`, `KeystoreSidecar`, `read_keystore_sidecar`, `KeystoreCreateOpts`, `keystore_create` | Completed in `compile/keystore.rs`. |
 | Generated wrapper manifest | manifest path rewriting, workspace patch extraction, wrapper arg stripping, lock cache | Completed in `compile/wrapper_manifest.rs`. |
 | Packaging identity and manifest inputs | `ResolvedPackagingInputs`, `resolve_packaging_inputs`, `substitute_manifest_template`, `prepare_build` | Later `compile/packaging_inputs.rs` or `compile/manifest.rs`. |
 | Rust build setup | `rust_build`, `compose_android_rustflags`, cargo target dir helpers | Later `compile/rust_build.rs`. |
 | Java/R/dex build | `build_r_class`, `compile_java`, `build_dex` | Later `compile/java_build.rs`. |
 | APK assembly/signing | `build_unaligned_apk`, `add_rust_library`, resources, zipalign, apksigner | Later split only after shared-lib/resource families are isolated. |
-| Shared-library dependency bundling | NDK/local `readelf` scanning and `NEEDED` copy loops | Later `compile/shared_libs.rs`. |
+| Shared-library dependency bundling | NDK/local `readelf` scanning and `NEEDED` copy loops | Completed in `compile/shared_libs.rs`. |
 | Resource and font staging | APK and AAB asset/resource helpers | Later `compile/assets.rs`. |
 | AAB assembly/signing | AAB path prep, asset/native-lib staging, aapt2, bundletool, jarsigner | Later `compile/aab.rs` after shared-lib/assets extraction. |
 | ADB/device helpers | install/run, `adb`, `adb_tcp`, device/IP parsing | Later `compile/adb.rs`, but only after build packaging helpers are stable. |
@@ -83,15 +83,48 @@ Completed movement:
    source lockfile hash behavior, stripped cargo args, and user-facing error
    strings.
 
+## Third Code Slice
+
+Status: completed. This interval deliberately groups two related package
+tooling families so validation covers a larger but still cohesive movement:
+toolchain resolution and native shared-library dependency bundling.
+
+`compile/toolchain.rs` now owns SDK/JDK/NDK path resolution, selected
+platform/build-tools values, Java tool lookup, NDK prebuilt selection, clang
+wrapper API selection, tool path helpers, and SDK preflight reporting.
+
+`compile/shared_libs.rs` now owns APK and AAB native shared-library dependency
+handling: `llvm-readelf` `NEEDED` scans, NDK sysroot filtering, local Rust
+dylib dependency traversal, APK `aapt add` insertion, AAB native-lib staging,
+and Quest OpenXR loader native-lib staging.
+
+Completed movement:
+
+1. Add `tools/cargo_makepad/src/android/compile/toolchain.rs`.
+2. Move SDK/JDK/NDK path helpers, platform/build-tools resolvers, Java tool
+   lookup, clang wrapper detection, NDK prebuilt selection, `ndk_bin_path`, and
+   `preflight_android_sdk`.
+3. Add `tools/cargo_makepad/src/android/compile/shared_libs.rs`.
+4. Move APK and AAB shared-library dependency helpers, including local and NDK
+   dependency scanning/staging.
+5. Keep `rust_build`, `add_rust_library`, `build`, `build_aab`, Java/R/Dex,
+   APK/AAB assembly, command routing, and cargo target-dir derivation in the
+   facade for now.
+6. Preserve tool path selection, env-var fallback order, preflight error
+   strings, shared-library inclusion/exclusion behavior, AAB native lib layout,
+   and Quest OpenXR loader staging behavior.
+
 ## Later Slices
 
 Recommended next slices:
 
-1. Split SDK/JDK/NDK toolchain resolution only after wrapper movement, because
-   build, AAB, Java, signing, and shared-library paths all use it.
-2. Split shared-library dependency bundling before broad APK/AAB assembly
-   movement.
-3. Split ADB helpers last among tooling-only families unless a device command
+1. Split packaging identity and manifest/template inputs before broad APK/AAB
+   assembly movement.
+2. Split resource/font asset staging before AAB assembly movement.
+3. Split Java/R/Dex build helpers if package identity and assets are stable.
+4. Split APK/AAB assembly and signing only after package identity, assets, and
+   shared-library boundaries are stable.
+5. Split ADB helpers last among tooling-only families unless a device command
    bug requires them sooner.
 
 ## Validation
