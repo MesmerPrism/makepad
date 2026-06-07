@@ -51,6 +51,11 @@ generic Java socket/media adapter inside the Makepad Android shell.
 
 ## First Code Slice
 
+Status: completed. `ExternalH264Config.java` now owns config defaults,
+normalization, clamp behavior, decode-output constants, source-sampling
+constants, and `MAX_STREAM_PACKETS`. `BrokerH264VideoPlayer.Config` remains as
+a thin nested compatibility facade for existing `MakepadActivity` wiring.
+
 Recommended first movement:
 
 1. Add `ExternalH264Config.java`.
