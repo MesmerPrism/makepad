@@ -94,15 +94,30 @@ Completed movement:
 
 This slice leaves packet reading and decode loop inside the facade.
 
+## Third Code Slice
+
+Status: completed. `ManifoldVideoStreamReader.java` now owns stream magic
+constants, stream header validation, projection-metadata parsing/logging,
+packet-size limits, packet read, and package-private stream header/packet DTOs.
+
+Completed movement:
+
+1. Add `ManifoldVideoStreamReader.java`.
+2. Move `RMANVID1` default and explicit `RXYRVID1` legacy stream-header read.
+3. Move stream header metadata parsing, packet read, `StreamHeader`, and
+   `Packet`.
+4. Keep TCP connection ownership, MediaCodec decode, H.264 primer parsing,
+   CPU-YUV, HWB, and stereo pairing inside the facade.
+
 ## Later Slices
 
-After the config and command-client slices are validated and pushed:
+After the config, command-client, and stream-reader slices are validated and
+pushed:
 
-1. Split stream framing into `ManifoldVideoStreamReader.java`.
-2. Split H.264 Annex-B primer helpers.
-3. Split hardware-buffer target and stereo pairer.
-4. Split CPU-YUV emitter only if the decoder loop remains too broad.
-5. Split decoder loop last, if needed.
+1. Split H.264 Annex-B primer helpers.
+2. Split hardware-buffer target and stereo pairer.
+3. Split CPU-YUV emitter only if the decoder loop remains too broad.
+4. Split decoder loop last, if needed.
 
 ## Validation
 
