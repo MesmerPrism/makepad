@@ -38,9 +38,9 @@ generic Java socket/media adapter inside the Makepad Android shell.
 | VideoPlayer facade and lifecycle | class fields, constructor, `prepareVideoPlayback`, `beginPlayback`, `pausePlayback`, `resumePlayback`, `stopAndCleanup`, `runDecode` | Keep in `BrokerH264VideoPlayer.java` as orchestration. |
 | Output-mode decisions | `hasExternalTextureHandle`, `usesSurfaceTextureOutput`, `usesHardwareBufferOutput`, `usesCpuYuvOutput`, `effectiveDecodeOutputMode` | Keep in facade for first split, then move to config only if it reduces duplication. |
 | Manifold command WebSocket | `sendStartCommand`, HTTP upgrade text, ack loop, `sendMaskedTextFrame`, `readWebSocketTextFrame`, `readHttpLine`, length helpers | `ManifoldH264CommandClient.java`. |
-| Manifold command JSON | `startCommandJson` plus schema/path/magic constants | `ManifoldH264CommandRequest.java` or static builder inside `ManifoldH264CommandClient.java`. |
+| Manifold command JSON | `startCommandJson` plus schema/path constants | Static builder inside `ManifoldH264CommandClient.java`. |
 | Stream TCP connection | `connectWithRetry`, `mStreamSocket` ownership | Keep socket field in facade; helper may own connection attempt after command client is split. |
-| Stream header/framing | `readHeader`, `readPacket`, `StreamHeader`, `Packet`, `readExact` | `ManifoldVideoStreamReader.java`, preserving `RMANVID1` default and `RXYRVID1` legacy read. |
+| Stream header/framing | `readHeader`, `readPacket`, `StreamHeader`, `Packet` | `ManifoldVideoStreamReader.java`, preserving `RMANVID1` default and `RXYRVID1` legacy read. |
 | H.264 primer parsing | `findNalUnit`, `findStartCode`, `startCodeLengthAt`, `NalUnit` | `H264AnnexBPrimer.java`. |
 | MediaCodec decode loop | `decodeStream`, `queuePacket`, `requestDecoderLowLatency`, `maybeLogProgress`, `logProgress` | Leave until command/stream/config helpers are split; then consider `ExternalH264DecoderLoop.java`. |
 | CPU-YUV output | `emitYuvFrame`, `copyPlane` | `ExternalH264CpuYuvEmitter.java` after decoder-loop boundaries are stable. |
@@ -77,7 +77,12 @@ Do not move MediaCodec loop or HWB pairing in the same commit.
 
 ## Second Code Slice
 
-Recommended second movement:
+Status: completed. `ManifoldH264CommandClient.java` now owns the command
+WebSocket upgrade, command ack loop, command-envelope JSON builder, Manifold
+schema/path defaults, explicit legacy command-schema alias, and command-only
+WebSocket frame helpers.
+
+Completed movement:
 
 1. Add `ManifoldH264CommandClient.java`.
 2. Move command schema/path constants, `sendStartCommand`, command JSON
@@ -87,11 +92,11 @@ Recommended second movement:
    unchanged.
 5. Keep close-on-ack behavior unchanged.
 
-This slice should still leave packet reading and decode loop inside the facade.
+This slice leaves packet reading and decode loop inside the facade.
 
 ## Later Slices
 
-After the first two slices are validated and pushed:
+After the config and command-client slices are validated and pushed:
 
 1. Split stream framing into `ManifoldVideoStreamReader.java`.
 2. Split H.264 Annex-B primer helpers.

@@ -11,17 +11,13 @@ import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.util.Base64;
 import android.util.Log;
 import android.view.Surface;
 
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.EOFException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
@@ -32,14 +28,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class BrokerH264VideoPlayer extends VideoPlayer {
     private static final String TAG = "MakepadExternalH264";
-    private static final String MANIFOLD_COMMAND_SCHEMA = "rusty.manifold.command.envelope.v1";
-    private static final String LEGACY_RUSTY_XR_BROKER_COMMAND_SCHEMA = "rusty.xr.broker.command.v1";
-    private static final String MANIFOLD_EVENTS_PATH = "/manifold/v1/events";
     private static final String STREAM_MAGIC = "RMANVID1";
     private static final String LEGACY_STREAM_MAGIC = "RXYRVID1";
     private static final int CODEC_H264 = 1;
@@ -63,6 +55,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         new HashMap<String, StereoHardwareBufferPairer>();
 
     private final Config mConfig;
+    private final ManifoldH264CommandClient mCommandClient;
     private final AtomicBoolean mStarted = new AtomicBoolean(false);
     private volatile boolean mRunning = true;
     private volatile Socket mBrokerSocket;
@@ -75,6 +68,24 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     BrokerH264VideoPlayer(Activity activity, long videoId, Config config) {
         super(activity, videoId);
         mConfig = config != null ? config : Config.defaults();
+        mCommandClient = new ManifoldH264CommandClient(new ManifoldH264CommandClient.Owner() {
+            @Override
+            public boolean isRunning() {
+                return mRunning;
+            }
+
+            @Override
+            public void setCommandSocket(Socket socket) {
+                mBrokerSocket = socket;
+            }
+
+            @Override
+            public void clearCommandSocket(Socket socket) {
+                if (mBrokerSocket == socket) {
+                    mBrokerSocket = null;
+                }
+            }
+        });
     }
 
     @Override
@@ -197,7 +208,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
     private void runDecode() {
         try {
             if (shouldStartBrokerStream()) {
-                JSONObject ack = sendStartCommand();
+                JSONObject ack = mCommandClient.sendStartCommand(mConfig, mVideoId);
                 if (!ack.optBoolean("accepted", false)) {
                     throw new IllegalStateException(
                         "Broker rejected external H.264 stream command: " + ack.optString("message", ""));
@@ -243,132 +254,6 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 : DECODE_OUTPUT_CPU_YUV;
         }
         return mConfig.decodeOutputMode;
-    }
-
-    private JSONObject sendStartCommand() throws Exception {
-        Socket socket = new Socket();
-        mBrokerSocket = socket;
-        socket.connect(
-            new InetSocketAddress(mConfig.brokerHost, mConfig.brokerPort),
-            mConfig.commandTimeoutMs);
-        socket.setSoTimeout(mConfig.commandTimeoutMs);
-        InputStream input = socket.getInputStream();
-        OutputStream output = socket.getOutputStream();
-        String key = Base64.encodeToString(
-            ("makepad-external-h264-" + System.nanoTime()).getBytes(StandardCharsets.US_ASCII),
-            Base64.NO_WRAP);
-        String request =
-            "GET " + MANIFOLD_EVENTS_PATH + " HTTP/1.1\r\n" +
-            "Host: " + mConfig.brokerHost + ":" + mConfig.brokerPort + "\r\n" +
-            "Upgrade: websocket\r\n" +
-            "Connection: Upgrade\r\n" +
-            "Sec-WebSocket-Version: 13\r\n" +
-            "Sec-WebSocket-Key: " + key + "\r\n" +
-            "\r\n";
-        output.write(request.getBytes(StandardCharsets.US_ASCII));
-        output.flush();
-        String status = readHttpLine(input);
-        if (status == null || !status.contains("101")) {
-            throw new IllegalStateException("Broker WebSocket upgrade failed: " + status);
-        }
-        while (true) {
-            String line = readHttpLine(input);
-            if (line == null || line.length() == 0) {
-                break;
-            }
-        }
-
-        readWebSocketTextFrame(input);
-        sendMaskedTextFrame(output, startCommandJson().toString());
-        long deadline = SystemClock.elapsedRealtimeNanos() + (long) mConfig.commandTimeoutMs * 1_000_000L;
-        while (mRunning && SystemClock.elapsedRealtimeNanos() < deadline) {
-            String text = readWebSocketTextFrame(input);
-            if (text == null || text.length() == 0) {
-                continue;
-            }
-            JSONObject message = new JSONObject(text);
-            if ("command_ack".equals(message.optString("type", ""))) {
-                closeQuietly(socket);
-                mBrokerSocket = null;
-                return message;
-            }
-        }
-
-        closeQuietly(socket);
-        mBrokerSocket = null;
-        throw new IllegalStateException("Timed out waiting for external H.264 command ack.");
-    }
-
-    private JSONObject startCommandJson() throws Exception {
-        String sourceMode = normalizeSourceMode(mConfig.sourceMode);
-        String projectionGeometryProfile =
-            projectionGeometryProfileForSource(sourceMode, mConfig.syntheticProjectionProfile);
-        JSONObject params = new JSONObject();
-        params.put("device_port", mConfig.streamPort);
-        params.put("host_port", mConfig.streamPort);
-        params.put("preferred_width", mConfig.preferredWidth);
-        params.put("preferred_height", mConfig.preferredHeight);
-        params.put("content_width", mConfig.preferredWidth);
-        params.put("content_height", mConfig.preferredHeight);
-        params.put(
-            "desired_display_aspect_ratio",
-            mConfig.preferredHeight > 0
-                ? (double) mConfig.preferredWidth / (double) mConfig.preferredHeight
-                : 1.0);
-        params.put("capture_ms", mConfig.captureMs);
-        params.put("max_packets", mConfig.maxPackets);
-        params.put("bitrate_bps", mConfig.bitrateBps);
-        params.put("frame_rate_hz", mConfig.frameRateHz);
-        params.put("live_stream", mConfig.liveStream);
-        params.put("projection_geometry_profile", projectionGeometryProfile);
-        params.put("projectionGeometryProfile", projectionGeometryProfile);
-        String sourceSamplingMode = normalizeSourceSamplingMode(mConfig.sourceSamplingMode);
-        if (sourceSamplingMode.length() > 0) {
-            params.put("source_sampling_mode", sourceSamplingMode);
-            params.put("sourceSamplingMode", sourceSamplingMode);
-        }
-        if (mConfig.targetScreenUvRect.length() > 0) {
-            params.put("target_screen_uv_rect", mConfig.targetScreenUvRect);
-            params.put("targetScreenUvRect", mConfig.targetScreenUvRect);
-        }
-        if (mConfig.stereoPairId.length() > 0 && mConfig.stereoPairRole.length() > 0) {
-            params.put("stereo_pair_release", true);
-            params.put("stereo_pair_id", mConfig.stereoPairId);
-            params.put("stereoPairId", mConfig.stereoPairId);
-            params.put("stereo_pair_role", mConfig.stereoPairRole);
-            params.put("stereoPairRole", mConfig.stereoPairRole);
-            params.put("stereo_pair_max_delta_ns", mConfig.stereoPairMaxDeltaNs);
-            params.put("stereoPairMaxDeltaNs", mConfig.stereoPairMaxDeltaNs);
-        }
-        if ("broker-synthetic".equals(sourceMode)) {
-            params.put("source_mode", "synthetic_surface");
-            params.put("synthetic_pattern", normalizeSyntheticPattern(mConfig.syntheticPattern));
-            params.put(
-                "synthetic_projection_profile",
-                normalizeSyntheticProjectionProfile(mConfig.syntheticProjectionProfile));
-        }
-        params.put("camera_id", mConfig.cameraId);
-
-        JSONObject command = new JSONObject();
-        command.put("type", "command");
-        command.put("schema", MANIFOLD_COMMAND_SCHEMA);
-        command.put("legacy_schema", LEGACY_RUSTY_XR_BROKER_COMMAND_SCHEMA);
-        String clientLabel = mConfig.stereoPairRole.length() > 0
-            ? mConfig.stereoPairRole
-            : Long.toString(mVideoId);
-        command.put(
-            "request_id",
-            "makepad-h264-video-" + clientLabel + "-" + mVideoId + "-" + System.currentTimeMillis());
-        command.put(
-            "command",
-            "broker-synthetic".equals(sourceMode)
-                ? "media.start_synthetic_h264_stream"
-                : "camera_provider.start_app_camera_h264_stream");
-        command.put("client_id", "makepad-external-h264-video-" + clientLabel);
-        command.put("app_label", "Makepad XR app");
-        command.put("app_version", "source-example");
-        command.put("params", params);
-        return command;
     }
 
     private void decodeStream() throws Exception {
@@ -940,121 +825,6 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                 (lastError != null ? safeMessage(lastError) : ""));
     }
 
-    private static void sendMaskedTextFrame(OutputStream output, String text) throws Exception {
-        byte[] payload = text.getBytes(StandardCharsets.UTF_8);
-        output.write(0x81);
-        if (payload.length < 126) {
-            output.write(0x80 | payload.length);
-        } else if (payload.length <= 65535) {
-            output.write(0x80 | 126);
-            output.write((payload.length >>> 8) & 0xff);
-            output.write(payload.length & 0xff);
-        } else {
-            output.write(0x80 | 127);
-            long length = payload.length;
-            for (int i = 7; i >= 0; i--) {
-                output.write((int) ((length >>> (i * 8)) & 0xff));
-            }
-        }
-
-        byte[] mask = new byte[4];
-        new Random(System.nanoTime()).nextBytes(mask);
-        output.write(mask);
-        for (int i = 0; i < payload.length; i++) {
-            output.write(payload[i] ^ mask[i % 4]);
-        }
-        output.flush();
-    }
-
-    private static String readWebSocketTextFrame(InputStream input) throws Exception {
-        int first = input.read();
-        if (first < 0) {
-            return "";
-        }
-        int second = input.read();
-        if (second < 0) {
-            return "";
-        }
-        int opcode = first & 0x0f;
-        boolean masked = (second & 0x80) != 0;
-        long length = second & 0x7f;
-        if (length == 126) {
-            length = readUnsignedShort(input);
-        } else if (length == 127) {
-            length = readLong(input);
-        }
-        if (length < 0 || length > 1024 * 1024) {
-            throw new IllegalStateException("Broker WebSocket frame is too large.");
-        }
-        byte[] mask = null;
-        if (masked) {
-            mask = readExact(input, 4);
-        }
-        byte[] payload = readExact(input, (int) length);
-        if (mask != null) {
-            for (int i = 0; i < payload.length; i++) {
-                payload[i] = (byte) (payload[i] ^ mask[i % 4]);
-            }
-        }
-        return opcode == 1 ? new String(payload, StandardCharsets.UTF_8) : "";
-    }
-
-    private static String readHttpLine(InputStream input) throws Exception {
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        int previous = -1;
-        while (true) {
-            int value = input.read();
-            if (value < 0) {
-                break;
-            }
-            if (previous == '\r' && value == '\n') {
-                break;
-            }
-            buffer.write(value);
-            previous = value;
-            if (buffer.size() > 8192) {
-                throw new IllegalStateException("HTTP line exceeded 8192 bytes.");
-            }
-        }
-        byte[] bytes = buffer.toByteArray();
-        int length = bytes.length;
-        if (length > 0 && bytes[length - 1] == '\r') {
-            length--;
-        }
-        return new String(bytes, 0, length, StandardCharsets.US_ASCII);
-    }
-
-    private static int readUnsignedShort(InputStream input) throws Exception {
-        int high = input.read();
-        int low = input.read();
-        if (high < 0 || low < 0) {
-            throw new EOFException("Unexpected EOF while reading WebSocket length.");
-        }
-        return (high << 8) | low;
-    }
-
-    private static long readLong(InputStream input) throws Exception {
-        byte[] bytes = readExact(input, 8);
-        long value = 0L;
-        for (int i = 0; i < 8; i++) {
-            value = (value << 8) | (bytes[i] & 0xffL);
-        }
-        return value;
-    }
-
-    private static byte[] readExact(InputStream input, int length) throws Exception {
-        byte[] bytes = new byte[length];
-        int offset = 0;
-        while (offset < length) {
-            int read = input.read(bytes, offset, length - offset);
-            if (read < 0) {
-                throw new EOFException("Unexpected EOF while reading payload.");
-            }
-            offset += read;
-        }
-        return bytes;
-    }
-
     private static NalUnit findNalUnit(List<Packet> packets, int nalType) {
         for (int i = 0; i < packets.size(); i++) {
             byte[] payload = packets.get(i).payload;
@@ -1106,26 +876,6 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
 
     private static String normalizeSourceMode(String value) {
         return ExternalH264Config.normalizeSourceMode(value);
-    }
-
-    private static String normalizeDecodeOutputMode(String value) {
-        return ExternalH264Config.normalizeDecodeOutputMode(value);
-    }
-
-    private static String normalizeStereoPairRole(String value) {
-        return ExternalH264Config.normalizeStereoPairRole(value);
-    }
-
-    private static String normalizeSyntheticPattern(String value) {
-        return ExternalH264Config.normalizeSyntheticPattern(value);
-    }
-
-    private static String normalizeSyntheticProjectionProfile(String value) {
-        return ExternalH264Config.normalizeSyntheticProjectionProfile(value);
-    }
-
-    private static String normalizeCameraProjectionGeometryProfile(String value) {
-        return ExternalH264Config.normalizeCameraProjectionGeometryProfile(value);
     }
 
     private static String projectionGeometryProfileForSource(String sourceMode, String value) {
