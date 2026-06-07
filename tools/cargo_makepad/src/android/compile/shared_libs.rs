@@ -1,6 +1,6 @@
 use super::super::sdk::AndroidSDKUrls;
 use super::{
-    cargo_target_dir,
+    rust_build::cargo_target_dir,
     toolchain::{aapt_path, ndk_bin_path, resolve_compiler_api_level, resolve_ndk_prebuilt_root},
     BuildPaths,
 };

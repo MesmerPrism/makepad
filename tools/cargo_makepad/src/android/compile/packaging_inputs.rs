@@ -1,5 +1,5 @@
 use super::super::sdk::AndroidSDKUrls;
-use super::{cargo_target_dir, to_snakecase, BuildPaths};
+use super::{rust_build::cargo_target_dir, to_snakecase, BuildPaths};
 use crate::android::{AndroidConfig, AndroidVariant, ManifestArgs};
 use crate::makepad_shell::{cp_all, mkdir, rm, rmdir, write_text};
 use crate::utils::{

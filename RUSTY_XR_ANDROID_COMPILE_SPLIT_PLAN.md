@@ -38,12 +38,12 @@ to this Makepad tooling module. It remains package-generation tooling.
 | Keystore sidecar and keystore creation | `keystore_sidecar_path`, `KeystoreSidecar`, `read_keystore_sidecar`, `KeystoreCreateOpts`, `keystore_create` | Completed in `compile/keystore.rs`. |
 | Generated wrapper manifest | manifest path rewriting, workspace patch extraction, wrapper arg stripping, lock cache | Completed in `compile/wrapper_manifest.rs`. |
 | Packaging identity and manifest inputs | `ResolvedPackagingInputs`, `resolve_packaging_inputs`, `substitute_manifest_template`, `prepare_build` | Completed in `compile/packaging_inputs.rs`. |
-| Rust build setup | `rust_build`, `compose_android_rustflags`, cargo target dir helpers | Later `compile/rust_build.rs`. |
+| Rust build setup | `rust_build`, `compose_android_rustflags`, cargo target dir helpers | Completed in `compile/rust_build.rs`. |
 | Java/R/dex build | `build_r_class`, `compile_java`, `build_dex` | Completed in `compile/java_build.rs`. |
-| APK assembly/signing | `build_unaligned_apk`, `add_rust_library`, resources, zipalign, apksigner | Later split only after shared-lib/resource families are isolated. |
+| APK assembly/signing | `build_unaligned_apk`, `add_rust_library`, zipalign, apksigner | Completed in `compile/apk_assembly.rs`. |
 | Shared-library dependency bundling | NDK/local `readelf` scanning and `NEEDED` copy loops | Completed in `compile/shared_libs.rs`. |
 | Resource and font staging | APK and AAB asset/resource helpers | Completed in `compile/assets.rs`. |
-| AAB assembly/signing | AAB path prep, asset/native-lib staging, aapt2, bundletool, jarsigner | Later `compile/aab.rs` after shared-lib/assets extraction. |
+| AAB assembly/signing | AAB path prep, aapt2 proto APK, base module zip, bundletool, jarsigner | Completed in `compile/aab_assembly.rs`. |
 | ADB/device helpers | install/run, `adb`, `adb_tcp`, device/IP parsing | Later `compile/adb.rs`, but only after build packaging helpers are stable. |
 
 ## First Code Slice
@@ -146,16 +146,49 @@ Completed movement:
    paths, small-font replacement, Java input hash caching, javac args, and D8
    output behavior.
 
+## Fifth Code Slice
+
+Status: completed. This interval intentionally broadens the batch size by
+moving the remaining package assembly/signing helpers and the Rust build setup
+helpers together while preserving `compile.rs` as the public command facade.
+
+`compile/apk_assembly.rs` now owns APK packaging and signing helpers:
+unaligned APK creation, Rust shared-library insertion, APK zipalign, debug
+keystore signing, and Quest OpenXR loader insertion into the APK.
+
+`compile/aab_assembly.rs` now owns AAB assembly and signing helpers: AAB path
+preparation, `aapt2` resource compilation/linking, proto-APK extraction into
+the base module layout, bundletool execution, jarsigner lookup, and optional
+AAB signing options.
+
+`compile/rust_build.rs` now owns Android Rust build setup: generated wrapper
+manifest routing, Android cargo target-dir derivation, NDK compiler env vars,
+Android SDK/JDK/NDK env vars, Quest `MAKEPAD` env selection, rustflags
+composition, and compose-rustflags tests.
+
+Completed movement:
+
+1. Add `tools/cargo_makepad/src/android/compile/apk_assembly.rs`.
+2. Add `tools/cargo_makepad/src/android/compile/aab_assembly.rs`.
+3. Add `tools/cargo_makepad/src/android/compile/rust_build.rs`.
+4. Keep `build`, `build_aab`, `run`, `adb`, `adb_tcp`, `java`, `javac`, phase
+   timing, public result structs, and command routing in `compile.rs`.
+5. Re-export `compile::AabSigningOpts` from `compile/aab_assembly.rs` so
+   `android/mod.rs` call sites remain unchanged.
+6. Preserve APK/AAB filenames and paths, `aapt`/`aapt2`/zipalign/apksigner/
+   jarsigner/bundletool arguments, debug signing behavior, Rust target-dir
+   behavior, generated wrapper behavior, Android env vars, Quest OpenXR loader
+   staging, and existing compose-rustflags tests.
+
 ## Later Slices
 
 Recommended next slices:
 
-1. Split APK/AAB assembly and signing only after package identity, assets, and
-   shared-library boundaries are stable.
-2. Split Rust build setup if the remaining facade still carries too much build
-   orchestration pressure after APK/AAB assembly moves.
-3. Split ADB helpers last among tooling-only families unless a device command
-   bug requires them sooner.
+1. Split ADB/device helpers into `compile/adb.rs` if the remaining facade still
+   carries device-command pressure.
+2. Reassess whether `java`/`javac` passthrough and timing helpers should remain
+   in the facade. Do not continue splitting by line count alone once
+   `compile.rs` is cohesive.
 
 ## Validation
 
