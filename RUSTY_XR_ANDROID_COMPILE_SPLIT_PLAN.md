@@ -36,7 +36,7 @@ to this Makepad tooling module. It remains package-generation tooling.
 | Android build orchestration | `build`, `build_aab`, `run` | Keep in `compile.rs` until helper families are split. |
 | SDK/JDK/NDK/tool resolution | path helpers, platform/build-tools/Java/NDK preflight, clang wrappers | Later `compile/toolchain.rs` or `compile/sdk_tools.rs`. |
 | Keystore sidecar and keystore creation | `keystore_sidecar_path`, `KeystoreSidecar`, `read_keystore_sidecar`, `KeystoreCreateOpts`, `keystore_create` | Completed in `compile/keystore.rs`. |
-| Generated wrapper manifest | manifest path rewriting, workspace patch extraction, wrapper arg stripping, lock cache | Later `compile/wrapper_manifest.rs`. |
+| Generated wrapper manifest | manifest path rewriting, workspace patch extraction, wrapper arg stripping, lock cache | Completed in `compile/wrapper_manifest.rs`. |
 | Packaging identity and manifest inputs | `ResolvedPackagingInputs`, `resolve_packaging_inputs`, `substitute_manifest_template`, `prepare_build` | Later `compile/packaging_inputs.rs` or `compile/manifest.rs`. |
 | Rust build setup | `rust_build`, `compose_android_rustflags`, cargo target dir helpers | Later `compile/rust_build.rs`. |
 | Java/R/dex build | `build_r_class`, `compile_java`, `build_dex` | Later `compile/java_build.rs`. |
@@ -63,19 +63,35 @@ Completed movement:
 4. Preserve all user-facing error strings, keystore sidecar format, keytool
    arguments, `JAVA_HOME` env behavior, and public command routing.
 
+## Second Code Slice
+
+Status: completed. `compile/wrapper_manifest.rs` now owns generated Android
+wrapper Cargo manifest generation, wrapper path normalization, workspace patch
+section extraction, wrapper cargo-arg stripping, changed-file writes, and
+source lockfile hash caching. `compile.rs` still owns the `rust_build`
+orchestration call site and imports only the helper functions it needs.
+
+Completed movement:
+
+1. Add `tools/cargo_makepad/src/android/compile/wrapper_manifest.rs`.
+2. Move `has_explicit_lib_target`, TOML path rewriting helpers,
+   `extract_workspace_patch_sections`, `strip_generated_wrapper_args`,
+   `write_file_if_changed`, and `generate_android_wrapper_manifest`.
+3. Keep `rust_build`, cargo target-dir derivation, Android target env vars,
+   rustflags, and SDK/NDK resolution in the facade for now.
+4. Preserve generated wrapper manifest path, workspace patch copying,
+   source lockfile hash behavior, stripped cargo args, and user-facing error
+   strings.
+
 ## Later Slices
 
 Recommended next slices:
 
-1. Split generated wrapper manifest helpers:
-   `has_explicit_lib_target`, TOML path rewriting, workspace patch extraction,
-   wrapper arg stripping, `write_file_if_changed`, and
-   `generate_android_wrapper_manifest`.
-2. Split SDK/JDK/NDK toolchain resolution only after wrapper movement, because
+1. Split SDK/JDK/NDK toolchain resolution only after wrapper movement, because
    build, AAB, Java, signing, and shared-library paths all use it.
-3. Split shared-library dependency bundling before broad APK/AAB assembly
+2. Split shared-library dependency bundling before broad APK/AAB assembly
    movement.
-4. Split ADB helpers last among tooling-only families unless a device command
+3. Split ADB helpers last among tooling-only families unless a device command
    bug requires them sooner.
 
 ## Validation
