@@ -52,6 +52,7 @@ Current first split candidates:
 
 1. `tools/cargo_makepad/src/android/java/dev/makepad/android/BrokerH264VideoPlayer.java`
    - Keep the public class name initially as a compatibility facade.
+   - Use `RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md` before moving Java code.
    - Move config normalization, Manifold command WebSocket, stream framing,
      H.264 primer parsing, decoder loop, hardware-buffer target, and stereo
      pairing into focused helpers.
