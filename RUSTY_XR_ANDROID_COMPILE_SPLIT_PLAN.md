@@ -37,12 +37,12 @@ to this Makepad tooling module. It remains package-generation tooling.
 | SDK/JDK/NDK/tool resolution | path helpers, platform/build-tools/Java/NDK preflight, clang wrappers | Completed in `compile/toolchain.rs`. |
 | Keystore sidecar and keystore creation | `keystore_sidecar_path`, `KeystoreSidecar`, `read_keystore_sidecar`, `KeystoreCreateOpts`, `keystore_create` | Completed in `compile/keystore.rs`. |
 | Generated wrapper manifest | manifest path rewriting, workspace patch extraction, wrapper arg stripping, lock cache | Completed in `compile/wrapper_manifest.rs`. |
-| Packaging identity and manifest inputs | `ResolvedPackagingInputs`, `resolve_packaging_inputs`, `substitute_manifest_template`, `prepare_build` | Later `compile/packaging_inputs.rs` or `compile/manifest.rs`. |
+| Packaging identity and manifest inputs | `ResolvedPackagingInputs`, `resolve_packaging_inputs`, `substitute_manifest_template`, `prepare_build` | Completed in `compile/packaging_inputs.rs`. |
 | Rust build setup | `rust_build`, `compose_android_rustflags`, cargo target dir helpers | Later `compile/rust_build.rs`. |
-| Java/R/dex build | `build_r_class`, `compile_java`, `build_dex` | Later `compile/java_build.rs`. |
+| Java/R/dex build | `build_r_class`, `compile_java`, `build_dex` | Completed in `compile/java_build.rs`. |
 | APK assembly/signing | `build_unaligned_apk`, `add_rust_library`, resources, zipalign, apksigner | Later split only after shared-lib/resource families are isolated. |
 | Shared-library dependency bundling | NDK/local `readelf` scanning and `NEEDED` copy loops | Completed in `compile/shared_libs.rs`. |
-| Resource and font staging | APK and AAB asset/resource helpers | Later `compile/assets.rs`. |
+| Resource and font staging | APK and AAB asset/resource helpers | Completed in `compile/assets.rs`. |
 | AAB assembly/signing | AAB path prep, asset/native-lib staging, aapt2, bundletool, jarsigner | Later `compile/aab.rs` after shared-lib/assets extraction. |
 | ADB/device helpers | install/run, `adb`, `adb_tcp`, device/IP parsing | Later `compile/adb.rs`, but only after build packaging helpers are stable. |
 
@@ -114,17 +114,47 @@ Completed movement:
    strings, shared-library inclusion/exclusion behavior, AAB native lib layout,
    and Quest OpenXR loader staging behavior.
 
+## Fourth Code Slice
+
+Status: completed. This interval continues the broader-batch cadence by moving
+three package-generation families together: packaging identity/manifest input
+preparation, resource/font asset staging, and Java/R/Dex helper execution.
+
+`compile/packaging_inputs.rs` now owns package id, app label, version code,
+version name, minSdk override validation, custom/default AndroidManifest
+template substitution, generated `MakepadApp`/`MakepadAppXr` Java source, icon
+presence checks, and APK output filename derivation.
+
+`compile/assets.rs` now owns APK and AAB resource/font staging, small-font
+replacement, dependency resource traversal, duplicate font filtering, Quest
+widget-resource pruning, and APK `aapt add` asset insertion.
+
+`compile/java_build.rs` now owns generated R class creation, javac source
+hashing and cache stamp behavior, expected class output checks, javac
+invocation, class file discovery, and D8 Dex generation.
+
+Completed movement:
+
+1. Add `tools/cargo_makepad/src/android/compile/packaging_inputs.rs`.
+2. Add `tools/cargo_makepad/src/android/compile/assets.rs`.
+3. Add `tools/cargo_makepad/src/android/compile/java_build.rs`.
+4. Keep `build`, `build_aab`, `rust_build`, `add_rust_library`, APK/AAB
+   assembly, signing, timing wrappers, command routing, and cargo target-dir
+   derivation in the facade for now.
+5. Preserve package id/label/version/minSdk behavior, manifest template output,
+   generated Java source output, launcher icon warnings, APK/AAB resource
+   paths, small-font replacement, Java input hash caching, javac args, and D8
+   output behavior.
+
 ## Later Slices
 
 Recommended next slices:
 
-1. Split packaging identity and manifest/template inputs before broad APK/AAB
-   assembly movement.
-2. Split resource/font asset staging before AAB assembly movement.
-3. Split Java/R/Dex build helpers if package identity and assets are stable.
-4. Split APK/AAB assembly and signing only after package identity, assets, and
+1. Split APK/AAB assembly and signing only after package identity, assets, and
    shared-library boundaries are stable.
-5. Split ADB helpers last among tooling-only families unless a device command
+2. Split Rust build setup if the remaining facade still carries too much build
+   orchestration pressure after APK/AAB assembly moves.
+3. Split ADB helpers last among tooling-only families unless a device command
    bug requires them sooner.
 
 ## Validation
