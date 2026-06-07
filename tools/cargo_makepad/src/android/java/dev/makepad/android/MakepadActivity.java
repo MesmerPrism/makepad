@@ -26,7 +26,6 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
-import android.media.projection.MediaProjectionManager;
 import android.media.midi.MidiDevice;
 import android.media.midi.MidiDeviceInfo;
 import android.media.midi.MidiManager;
@@ -908,8 +907,6 @@ public class MakepadActivity
     implements MidiManager.OnDeviceOpenedListener
 {
     private static final String LOG_TAG = "Makepad";
-    private static final int RUSTY_XR_MEDIA_PROJECTION_REQUEST = 8713;
-    private static final long RUSTY_XR_MEDIA_PROJECTION_DELAY_MS = 1600L;
     private static final long SURFACE_COVER_FADE_OUT_MS = 100;
     private static final long WARM_RESUME_SNAPSHOT_MAX_AGE_MS = 10000;
     private static final int TASK_DESCRIPTION_BACKGROUND_COLOR = 0xFFF5F7FA;
@@ -920,7 +917,7 @@ public class MakepadActivity
 
     private MakepadSurface view;
     private final Handler mHandler = new Handler(Looper.getMainLooper());
-    private MediaProjectionManager mRustyXrMediaProjectionManager;
+    private RustyXrMediaProjectionHelper mRustyXrMediaProjection;
 
     // video playback
     Handler mVideoPlaybackHandler;
@@ -965,19 +962,10 @@ public class MakepadActivity
     private SelectionHandleView mSelectionHandleEnd;
     private int mSelectionHandleSizePx;
 
-    private static void rustyXrActivityMarker(String phase) {
-        Log.e(
-            "RustyXRMakepad",
-            "RUSTY_XR_MAKEPAD_ANDROID_ACTIVITY schema=rusty.xr.makepad-android-activity.v1 phase="
-                + phase
-                + " renderer=makepad android_packager=cargo-makepad"
-        );
-    }
-
     static {
-        rustyXrActivityMarker("java-load-library-before");
+        RustyXrActivitySupport.activityMarker("java-load-library-before");
         System.loadLibrary("makepad");
-        rustyXrActivityMarker("java-load-library-after");
+        RustyXrActivitySupport.activityMarker("java-load-library-after");
     }
 
     private void cacheWarmResumeSurfaceSnapshot(Bitmap snapshot) {
@@ -1060,7 +1048,7 @@ public class MakepadActivity
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        rustyXrActivityMarker("on-create-entry");
+        RustyXrActivitySupport.activityMarker("on-create-entry");
         if (mWebSocketsThread == null || !mWebSocketsThread.isAlive()) {
             mWebSocketsThread = new HandlerThread("WebSocketsThread");
             mWebSocketsThread.start();
@@ -1075,9 +1063,8 @@ public class MakepadActivity
         }
         
         super.onCreate(savedInstanceState);
-        mRustyXrMediaProjectionManager =
-            (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-        requestRustyXrMediaProjectionIfEnabled();
+        mRustyXrMediaProjection = new RustyXrMediaProjectionHelper(this, mHandler);
+        mRustyXrMediaProjection.requestIfEnabled(getIntent());
         
         this.requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setSoftInputMode(
@@ -1171,9 +1158,9 @@ public class MakepadActivity
         restoreWarmResumeSurfaceSnapshotIfAvailable();
         updateTaskDescription();
 
-        rustyXrActivityMarker("native-activity-on-create-before");
+        RustyXrActivitySupport.activityMarker("native-activity-on-create-before");
         MakepadNative.activityOnCreate(this);
-        rustyXrActivityMarker("native-activity-on-create-after");
+        RustyXrActivitySupport.activityMarker("native-activity-on-create-after");
 
         mVideoPlaybackThread = new HandlerThread("VideoPlayerThread");
         mVideoPlaybackThread.start(); // TODO: only start this if its needed.
@@ -1235,7 +1222,9 @@ public class MakepadActivity
 
     @Override
     protected void onDestroy() {
-        stopService(new Intent(this, MediaProjectionStreamService.class));
+        if (mRustyXrMediaProjection != null) {
+            mRustyXrMediaProjection.stopService();
+        }
         if (mCameraPreviewOverlay != null) {
             for (Long videoId : mCameraPreviewViews.keySet()) {
                 MakepadNative.onCameraPreviewSurfaceDestroyed(videoId);
@@ -1320,118 +1309,19 @@ public class MakepadActivity
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        requestRustyXrMediaProjectionIfEnabled();
+        if (mRustyXrMediaProjection != null) {
+            mRustyXrMediaProjection.requestIfEnabled(intent);
+        }
         restoreSurfaceViewForWarmResumeIfNeeded();
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == RUSTY_XR_MEDIA_PROJECTION_REQUEST) {
-            if (resultCode != RESULT_OK || data == null) {
-                Log.w("RustyXRMakepad", "MediaProjection consent denied or cancelled");
-                return;
-            }
-            Log.i("RustyXRMakepad", "MediaProjection consent granted; starting stream service");
-            Intent serviceIntent = new Intent(this, MediaProjectionStreamService.class);
-            serviceIntent.putExtra(MediaProjectionStreamService.EXTRA_RESULT_CODE, resultCode);
-            serviceIntent.putExtra(MediaProjectionStreamService.EXTRA_RESULT_DATA, data);
-            serviceIntent.putExtra(MediaProjectionStreamService.EXTRA_HOST, "127.0.0.1");
-            serviceIntent.putExtra(
-                MediaProjectionStreamService.EXTRA_PORT,
-                rustyXrIntentIntExtra("rustyxr.mediaProjectionPort", 8787)
-            );
-            serviceIntent.putExtra(
-                MediaProjectionStreamService.EXTRA_WIDTH,
-                rustyXrIntentIntExtra("rustyxr.mediaProjectionWidth", 512)
-            );
-            serviceIntent.putExtra(
-                MediaProjectionStreamService.EXTRA_HEIGHT,
-                rustyXrIntentIntExtra("rustyxr.mediaProjectionHeight", 288)
-            );
-            startForegroundService(serviceIntent);
+        if (mRustyXrMediaProjection != null
+            && mRustyXrMediaProjection.handleActivityResult(requestCode, resultCode, data)) {
             return;
         }
         //% MAIN_ACTIVITY_ON_ACTIVITY_RESULT
-    }
-
-    private void requestRustyXrMediaProjectionIfEnabled() {
-        if (!rustyXrIntentBooleanExtra("rustyxr.mediaProjection", false)) {
-            return;
-        }
-        long delayMs = rustyXrIntentLongExtra(
-            "rustyxr.mediaProjectionDelayMs",
-            RUSTY_XR_MEDIA_PROJECTION_DELAY_MS
-        );
-        mHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                requestRustyXrMediaProjection();
-            }
-        }, Math.max(0L, delayMs));
-    }
-
-    private void requestRustyXrMediaProjection() {
-        if (mRustyXrMediaProjectionManager == null) {
-            Log.w("RustyXRMakepad", "MediaProjectionManager is unavailable");
-            return;
-        }
-        Log.i("RustyXRMakepad", "Requesting MediaProjection consent");
-        startActivityForResult(
-            mRustyXrMediaProjectionManager.createScreenCaptureIntent(),
-            RUSTY_XR_MEDIA_PROJECTION_REQUEST
-        );
-    }
-
-    private boolean rustyXrIntentBooleanExtra(String key, boolean fallback) {
-        Intent intent = getIntent();
-        if (intent == null || !intent.hasExtra(key) || intent.getExtras() == null) {
-            return fallback;
-        }
-        Object value = intent.getExtras().get(key);
-        if (value instanceof Boolean) {
-            return ((Boolean) value).booleanValue();
-        }
-        if (value instanceof String) {
-            String text = ((String) value).trim().toLowerCase();
-            return "true".equals(text) || "1".equals(text) || "yes".equals(text) || "on".equals(text);
-        }
-        return fallback;
-    }
-
-    private int rustyXrIntentIntExtra(String key, int fallback) {
-        Intent intent = getIntent();
-        if (intent == null || !intent.hasExtra(key) || intent.getExtras() == null) {
-            return fallback;
-        }
-        try {
-            Object value = intent.getExtras().get(key);
-            if (value instanceof Number) {
-                return ((Number) value).intValue();
-            }
-            if (value instanceof String) {
-                return Integer.parseInt(((String) value).trim());
-            }
-        } catch (RuntimeException ignored) {
-        }
-        return fallback;
-    }
-
-    private long rustyXrIntentLongExtra(String key, long fallback) {
-        Intent intent = getIntent();
-        if (intent == null || !intent.hasExtra(key) || intent.getExtras() == null) {
-            return fallback;
-        }
-        try {
-            Object value = intent.getExtras().get(key);
-            if (value instanceof Number) {
-                return ((Number) value).longValue();
-            }
-            if (value instanceof String) {
-                return Long.parseLong(((String) value).trim());
-            }
-        } catch (RuntimeException ignored) {
-        }
-        return fallback;
     }
 
     @Override

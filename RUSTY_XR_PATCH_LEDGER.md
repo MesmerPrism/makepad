@@ -29,10 +29,10 @@ Current audit baseline:
 
 | Family | Primary files | Classification | Keep local or upstream? | Validation |
 | --- | --- | --- | --- | --- |
-| Fork instructions and validation helpers | `AGENTS.md`, `RUSTY_XR_FORK_NOTES.md`, `RUSTY_XR_PATCH_LEDGER.md`, `Justfile`, `tools/check_all.ps1`, `tools/rusty_xr_format.py` | Branch-local documentation and validation routing. | Keep local unless a helper becomes generic Makepad tooling. | `python tools\rusty_xr_format.py --changed --check`; `make check` where appropriate. |
+| Fork instructions and validation helpers | `AGENTS.md`, `RUSTY_XR_FORK_NOTES.md`, `RUSTY_XR_PATCH_LEDGER.md`, `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md`, `Justfile`, `tools/check_all.ps1`, `tools/rusty_xr_format.py` | Branch-local documentation and validation routing. | Keep local unless a helper becomes generic Makepad tooling. | `python tools\rusty_xr_format.py --changed --check`; `make check` where appropriate. |
 | Workspace metadata and generated-target ignores | `.gitignore`, `Cargo.toml` | Workspace hygiene for standalone leaf crates and local generated Android targets. | Upstream candidate only when generic and not Rusty-specific. | `cargo metadata --no-deps --format-version 1`; focused CSG metadata checks when CSG entries change. |
 | Android packaging and cargo-makepad tooling | `tools/cargo_makepad/src/android/compile.rs`, `tools/cargo_makepad/src/android/compile/keystore.rs`, `tools/cargo_makepad/src/android/compile/wrapper_manifest.rs`, `tools/cargo_makepad/src/android/compile/toolchain.rs`, `tools/cargo_makepad/src/android/compile/shared_libs.rs`, `tools/cargo_makepad/src/android/compile/packaging_inputs.rs`, `tools/cargo_makepad/src/android/compile/assets.rs`, `tools/cargo_makepad/src/android/compile/java_build.rs`, `tools/cargo_makepad/src/android/compile/apk_assembly.rs`, `tools/cargo_makepad/src/android/compile/aab_assembly.rs`, `tools/cargo_makepad/src/android/compile/rust_build.rs`, `tools/cargo_makepad/src/android/mod.rs`, `tools/cargo_makepad/src/android/sdk.rs`, `tools/cargo_makepad/src/utils.rs` | Packaging/tooling patch family. | Prefer upstreamable slices for portability, stable generated-wrapper identity, SDK/JDK/NDK resolution, bundletool/AAB support, and shared-library bundling. | `cargo check -p cargo-makepad`; `cargo build -p cargo-makepad --release` after behavioral packaging changes. |
-| Android Java shell and permissions | `MakepadActivity.java`, `MakepadInputConnection.java`, `MakepadNative.java`, `MediaProjectionStreamService.java`, `VideoPlayer.java` | Local Quest/Android app-shell adapter plus generic Android shell fixes. | Keep Quest/Rusty launch markers local; upstream generic activity, input, permission, or generated-shell fixes when separable. | Java touched-class compile when Java changes; downstream APK source-root build for generated-shell behavior. |
+| Android Java shell and permissions | `MakepadActivity.java`, `RustyXrActivitySupport.java`, `RustyXrMediaProjectionHelper.java`, `MakepadInputConnection.java`, `MakepadNative.java`, `MediaProjectionStreamService.java`, `VideoPlayer.java` | Local Quest/Android app-shell adapter plus generic Android shell fixes. `MakepadActivity.java` remains the generated activity facade; Rusty phase-marker/intent parsing and MediaProjection glue live in package-private helpers. | Keep Quest/Rusty launch markers local; upstream generic activity, input, permission, or generated-shell fixes when separable. | Java touched-package compile when Java changes; downstream APK source-root build for generated-shell behavior. |
 | Manifold external H.264 video adapter | `BrokerH264VideoPlayer.java`, `ExternalH264Config.java`, `ManifoldH264CommandClient.java`, `ManifoldVideoStreamReader.java`, `H264AnnexBPrimer.java`, `ExternalH264HardwareBufferTarget.java`, `ExternalH264CpuYuvEmitter.java`, `platform/src/event/video_playback.rs`, `platform/src/os/linux/android/android_jni.rs`, `platform/src/os/linux/android/android.rs`, `widgets/src/video.rs` | Local adapter and compatibility surface. Manifold defaults are active; old Rusty-XR broker names are explicit legacy aliases only. | Keep local until a generic external H.264 source abstraction is separable. Avoid moving command/session/stream authority into Makepad. | Manifold-default scans; Java touched-class compile when Java changes; `cargo check -p cargo-makepad` when generated Java packaging changes. |
 | Android camera and video metadata | `platform/src/os/linux/android/android_camera.rs`, `platform/src/os/linux/android/android_camera_player.rs`, `platform/src/video.rs`, platform video playback stubs | Quest camera/video metadata and texture-readiness evidence. | Keep local unless the API is generic Makepad camera/video metadata. | Makepad format check; downstream camera-shell build and device validation only when behavior changes. |
 | Vulkan hardware-buffer import and lifetime | `platform/src/os/linux/vulkan.rs`, `platform/src/os/linux/vulkan_naga.rs`, shader reflection/lowering files | Renderer correctness and external video import evidence. | Upstream only as small generic lifetime/resource/sampler/reflection fixes. Do not broad-split upstream-owned files without a rebase plan. | `cargo check -p makepad-platform` when touching platform Vulkan; downstream GPU/page-fault gate for behavior changes. |
@@ -50,7 +50,19 @@ unlikely to create avoidable upstream merge conflicts.
 
 Current first split candidates:
 
-1. `tools/cargo_makepad/src/android/java/dev/makepad/android/BrokerH264VideoPlayer.java`
+1. `tools/cargo_makepad/src/android/java/dev/makepad/android/MakepadActivity.java`
+   - Use `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md` before moving Java code.
+   - Phase-marker and intent-extra parsing now live in
+     `RustyXrActivitySupport.java`.
+   - MediaProjection request/result/service glue now lives in
+     `RustyXrMediaProjectionHelper.java`.
+   - Split only Rusty-owned app-shell helpers: phase markers, intent-extra
+     parsing, MediaProjection request/result glue, and later H264/external-
+     video entrypoint helpers if the public method signature stays stable.
+   - Do not broad-refactor upstream Android lifecycle, surface recovery,
+     keyboard/input, selection, network thread ownership, or activity switching
+     by line count alone.
+2. `tools/cargo_makepad/src/android/java/dev/makepad/android/BrokerH264VideoPlayer.java`
    - Keep the public class name initially as a compatibility facade.
    - Use `RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md` before moving Java code.
    - Config defaults and normalization now live in `ExternalH264Config.java`.
@@ -65,7 +77,7 @@ Current first split candidates:
      `ExternalH264CpuYuvEmitter.java`.
    - Remaining split candidate is the decoder loop; any stereo pairer
      lifecycle cleanup is a behavior slice, not a mechanical movement.
-2. `tools/cargo_makepad/src/android/compile.rs`
+3. `tools/cargo_makepad/src/android/compile.rs`
    - Use `RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md` before moving Rust code.
    - Keystore sidecar parsing and upload-keystore creation now live in
      `tools/cargo_makepad/src/android/compile/keystore.rs`.
