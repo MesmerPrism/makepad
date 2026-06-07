@@ -21,6 +21,12 @@ try {
     if (Test-Path "tools\rusty_xr_format.py") {
         Invoke-Checked "changed-file format" "python" @("tools\rusty_xr_format.py", "--changed", "--check")
     }
+    if (Test-Path "tools\check_rusty_xr_makepad_guards.py") {
+        Invoke-Checked "Rusty XR Makepad guardrails" "python" @("tools\check_rusty_xr_makepad_guards.py")
+    }
+    if (Test-Path "tools\check_android_generated_output_stability.py") {
+        Invoke-Checked "Android generated-output stability" "python" @("tools\check_android_generated_output_stability.py")
+    }
     Invoke-Checked "git whitespace check" "git" @("diff", "--check")
     Invoke-Checked "Makepad widgets check" "cargo" @("check", "-p", "makepad-widgets")
 } finally {

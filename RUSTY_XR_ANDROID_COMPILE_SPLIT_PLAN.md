@@ -190,12 +190,50 @@ Recommended next slices:
    in the facade. Do not continue splitting by line count alone once
    `compile.rs` is cohesive.
 
+## Generated Output Stability Preflight
+
+The helper split is not enough by itself; Android packaging is only safe if a
+no-change build keeps identity inputs stable. Before changing wrapper,
+manifest, Rust build setup, SDK/JDK/NDK resolution, assets, Java/R/Dex, APK,
+AAB, signing, or shared-library handling, record the expected stability surface:
+
+| Surface | Stable witness |
+| --- | --- |
+| Generated wrapper manifest | `compile/wrapper_manifest.rs` keeps `write_file_if_changed`, wrapper path normalization, workspace patch extraction, and source lockfile hash caching. |
+| Cargo target identity | `compile/rust_build.rs` owns `CARGO_TARGET_DIR` handling and Android Rust env vars. |
+| Toolchain identity | `compile/toolchain.rs` owns selected SDK platform, build-tools, Java tools, NDK prebuilt, and clang API selection. |
+| Package identity | `compile/packaging_inputs.rs` owns package id, label, version, min SDK, target manifest template, and output filename derivation. |
+| Native library payload | `compile/shared_libs.rs`, `compile/apk_assembly.rs`, and `compile/aab_assembly.rs` own copied `.so` sets, OpenXR loader staging, APK insertion, and AAB native-lib layout. |
+| Timing evidence | `compile.rs` keeps `MAKEPAD_ANDROID_TIMING phase=...` markers around the orchestration steps. |
+
+For a behavior-affecting packaging change, run a before/after package generation
+comparison or timing-marker review in the downstream Rusty XR Makepad example.
+For mechanical helper movement, the repo-local guard is sufficient to prove the
+stability hooks are still present.
+
+Use the repo-local snapshot helper for the no-op package surface:
+
+```powershell
+python tools\check_android_generated_output_stability.py --snapshot-out target\android\stability-before.json
+# Run the same no-op package generation command again, without changing source,
+# SDK/JDK/NDK paths, target dir, Cargo home, or package flags.
+python tools\check_android_generated_output_stability.py --snapshot-out target\android\stability-after.json
+python tools\check_android_generated_output_stability.py --before target\android\stability-before.json --after target\android\stability-after.json
+```
+
+The snapshot compares generated wrapper manifests, generated wrapper lockfiles,
+source-lock hash cache, generated Android manifests, generated Makepad app Java
+sources, javac input cache identity, and the selected SDK/JDK/NDK/Cargo path
+environment. Use `--require-generated` when a behavior slice is claiming a real
+generated-output comparison rather than only checking static hooks.
+
 ## Validation
 
 For documentation-only preflight changes:
 
 ```powershell
 python tools\rusty_xr_format.py --changed --check
+python tools\check_android_generated_output_stability.py
 cargo metadata --no-deps --format-version 1
 git diff --check
 ```
@@ -204,6 +242,8 @@ For Rust source movement:
 
 ```powershell
 python tools\rusty_xr_format.py --changed --check
+python tools\check_rusty_xr_makepad_guards.py
+python tools\check_android_generated_output_stability.py
 cargo metadata --no-deps --format-version 1
 cargo check -p cargo-makepad
 git diff --check

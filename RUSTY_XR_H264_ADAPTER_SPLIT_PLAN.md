@@ -177,6 +177,47 @@ hardware-buffer target, and CPU-YUV emitter slices are validated and pushed:
 3. Consider stereo pairer lifecycle cleanup only as a behavior slice with
    downstream hardware-buffer validation.
 
+## Decoder Loop Preflight
+
+Do not split the decoder loop only because `BrokerH264VideoPlayer.java` is still
+large. The remaining facade is currently cohesive enough: it owns player
+lifecycle, stream socket ownership, output-mode decisions, MediaCodec
+orchestration, image acquisition/close, progress counters, and prepared/error
+callbacks.
+
+Before moving decoder-loop code, write a fresh preflight that answers:
+
+| Boundary question | Required answer before movement |
+| --- | --- |
+| Packet ownership | Which object owns `ManifoldVideoStreamReader.Packet` sequencing, primer packet selection, and packet exhaustion? |
+| CSD and format setup | Does the new helper only consume `H264AnnexBPrimer.NalUnit` output, or does it also decide stream/header policy? |
+| MediaCodec lifecycle | Which owner creates, starts, flushes, stops, releases, and handles low-latency configuration failures? |
+| Output routing | Which owner decides surface-texture, hardware-buffer, and CPU-YUV output, and which owner closes `Image` objects? |
+| Callback order | How are `notifyPrepared`, `notifyCompleted`, `onVideoYuvFrame`, `onVideoHardwareBufferFrame`, and stereo frame callbacks preserved? |
+| Timing and errors | Which owner logs progress, decode errors, copy timing, source timestamps, and stale-stream failures? |
+
+### Decoder Loop Ownership Map
+
+Current answer: BrokerH264VideoPlayer.java remains the decoder orchestrator.
+The helper boundary is not clean enough yet to move code safely without turning
+a mechanical split into a behavior slice.
+
+| Area | Current owner | Helper boundary only if split later |
+| --- | --- | --- |
+| Packet sequencing and exhaustion | `BrokerH264VideoPlayer.decodeStream` owns the read loop, packet exhaustion, max-packet/live semantics, and primer packet selection from `ManifoldVideoStreamReader.Packet`. | A helper may consume an already connected `ManifoldVideoStreamReader` and return a status object, but it must not change packet fields, `max_packets=0`, stream-header policy, or legacy `RXYRVID1` handling. |
+| CSD/primer handoff | `BrokerH264VideoPlayer` owns primer packet choice and `MediaFormat` CSD attachment after calling `H264AnnexBPrimer`. | A helper may accept explicit `NalUnit` outputs and attach CSD buffers, but it must not decide stream schema, projection metadata, or primer search policy. |
+| MediaCodec lifecycle | `BrokerH264VideoPlayer` creates, configures, starts, drains, stops, and releases `MediaCodec`, including low-latency requests and failure fallback. | A helper boundary is only clean if the facade still owns lifecycle policy and the helper only runs a bounded decode session with explicit release obligations. |
+| Output routing and cleanup | `BrokerH264VideoPlayer` decides surface-texture, hardware-buffer, and CPU-YUV output modes; it owns `Image` acquisition/close and hardware-buffer wait timeout selection. | A helper may receive output adapters for CPU-YUV and HWB callbacks, but it must not move output-mode decisions or change `Image.close`/buffer release ordering. |
+| Timing counters and stale-state evidence | `BrokerH264VideoPlayer` owns progress counters, decode error counts, copy timing, packet timestamps, stale-stream state, and progress log cadence. | A helper may return counters to the facade; it must not invent new success criteria or hide stale/failed decode state. |
+| Prepared/completed/error callbacks | `BrokerH264VideoPlayer` owns `notifyPrepared`, `notifyCompleted`, error callbacks, and native callback order through `MakepadNative`. | A helper may report state transitions, but the facade must emit callbacks in the same order and with the same payloads. |
+| Stop and cleanup | `BrokerH264VideoPlayer.stopAndCleanup` owns stop state, socket close, thread lifecycle, decoder release, surface release, and target cleanup. | A helper may expose an idempotent close hook only if cleanup order and repeated-stop behavior stay unchanged. |
+
+Only move code if the answer is a narrow package-private helper such as
+`ExternalH264DecoderLoop.java` that receives explicit dependencies and returns
+status to the facade. If the split requires changing packet fields, stream
+schema, callback order, MediaCodec output behavior, or legacy alias handling,
+stop and treat it as a behavior slice.
+
 ## Activity Entrypoint Slice
 
 Status: completed. `ExternalH264VideoPlaybackFactory.java` now owns external-
@@ -209,6 +250,7 @@ For Java movement:
 
 ```powershell
 python tools\rusty_xr_format.py --changed --check
+python tools\check_rusty_xr_makepad_guards.py
 cargo metadata --no-deps --format-version 1
 cargo check -p cargo-makepad
 ```

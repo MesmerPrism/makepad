@@ -10,6 +10,10 @@ For Rusty XR tasks in this repo, read these first:
 
 - `RUSTY_XR_FORK_NOTES.md`
 - `RUSTY_XR_PATCH_LEDGER.md`
+- `RUSTY_XR_MARKER_COMPATIBILITY.md`
+- `RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md`
+- `RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md`
+- `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md`
 - Rusty XR public docs:
   - `docs/MAKEPAD_FORK_RELATIONSHIP.md`
   - `docs/MAKEPAD_CAMERA_PARALLEL_APPROACH_COMPARISON.md`
@@ -60,12 +64,27 @@ projection policy, scorecard markers, runtime profile keys, and public example
 code out of this Makepad fork unless the change is a general Makepad adapter or
 an upstreamable Makepad fix.
 
+## Downstream Dependency Boundary
+
+The maintained fork is allowed as a dependency only in downstream app-shell or
+UI lanes:
+
+- Hostess Makepad shell crates;
+- Studio Makepad/UI shell crates;
+- public Rusty XR Makepad examples.
+
+Keep Manifold, Manifold packages, Rusty core/CLI crates, descriptor repos, and
+schema/fixture workspaces Makepad-free. Do not use this fork to define
+Manifold command/session/stream authority.
+
 ## Rusty XR Validation Ladder
 
 Use focused validation for this fork branch:
 
 ```powershell
 python tools\rusty_xr_format.py --changed --check
+python tools\check_rusty_xr_makepad_guards.py
+python tools\check_android_generated_output_stability.py
 cargo metadata --manifest-path libs\csg\csg_math\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_mesh\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_sdf\Cargo.toml --no-deps --format-version 1

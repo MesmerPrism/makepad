@@ -29,7 +29,7 @@ Current audit baseline:
 
 | Family | Primary files | Classification | Keep local or upstream? | Validation |
 | --- | --- | --- | --- | --- |
-| Fork instructions and validation helpers | `AGENTS.md`, `RUSTY_XR_FORK_NOTES.md`, `RUSTY_XR_PATCH_LEDGER.md`, `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md`, `Justfile`, `tools/check_all.ps1`, `tools/rusty_xr_format.py` | Branch-local documentation and validation routing. | Keep local unless a helper becomes generic Makepad tooling. | `python tools\rusty_xr_format.py --changed --check`; `make check` where appropriate. |
+| Fork instructions and validation helpers | `AGENTS.md`, `RUSTY_XR_FORK_NOTES.md`, `RUSTY_XR_PATCH_LEDGER.md`, `RUSTY_XR_MARKER_COMPATIBILITY.md`, `RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md`, `RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md`, `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md`, `Justfile`, `tools/check_all.ps1`, `tools/rusty_xr_format.py`, `tools/check_rusty_xr_makepad_guards.py`, `tools/check_android_generated_output_stability.py` | Branch-local documentation and validation routing. | Keep local unless a helper becomes generic Makepad tooling. | `python tools\rusty_xr_format.py --changed --check`; `python tools\check_rusty_xr_makepad_guards.py`; `python tools\check_android_generated_output_stability.py`; `make check` where appropriate. |
 | Workspace metadata and generated-target ignores | `.gitignore`, `Cargo.toml` | Workspace hygiene for standalone leaf crates and local generated Android targets. | Upstream candidate only when generic and not Rusty-specific. | `cargo metadata --no-deps --format-version 1`; focused CSG metadata checks when CSG entries change. |
 | Android packaging and cargo-makepad tooling | `tools/cargo_makepad/src/android/compile.rs`, `tools/cargo_makepad/src/android/compile/keystore.rs`, `tools/cargo_makepad/src/android/compile/wrapper_manifest.rs`, `tools/cargo_makepad/src/android/compile/toolchain.rs`, `tools/cargo_makepad/src/android/compile/shared_libs.rs`, `tools/cargo_makepad/src/android/compile/packaging_inputs.rs`, `tools/cargo_makepad/src/android/compile/assets.rs`, `tools/cargo_makepad/src/android/compile/java_build.rs`, `tools/cargo_makepad/src/android/compile/apk_assembly.rs`, `tools/cargo_makepad/src/android/compile/aab_assembly.rs`, `tools/cargo_makepad/src/android/compile/rust_build.rs`, `tools/cargo_makepad/src/android/mod.rs`, `tools/cargo_makepad/src/android/sdk.rs`, `tools/cargo_makepad/src/utils.rs` | Packaging/tooling patch family. | Prefer upstreamable slices for portability, stable generated-wrapper identity, SDK/JDK/NDK resolution, bundletool/AAB support, and shared-library bundling. | `cargo check -p cargo-makepad`; `cargo build -p cargo-makepad --release` after behavioral packaging changes. |
 | Android Java shell and permissions | `MakepadActivity.java`, `RustyXrActivitySupport.java`, `RustyXrMediaProjectionHelper.java`, `ExternalH264VideoPlaybackFactory.java`, `MakepadInputConnection.java`, `MakepadNative.java`, `MediaProjectionStreamService.java`, `VideoPlayer.java` | Local Quest/Android app-shell adapter plus generic Android shell fixes. `MakepadActivity.java` remains the generated activity facade; Rusty phase-marker/intent parsing, MediaProjection glue, and external-H264 entrypoint construction live in package-private helpers. | Keep Quest/Rusty launch markers local; upstream generic activity, input, permission, or generated-shell fixes when separable. | Java touched-package compile when Java changes; downstream APK source-root build for generated-shell behavior. |
@@ -48,9 +48,15 @@ Do not split upstream-owned Makepad files only because they are large. Split
 only when the changed area is fork-owned, cohesive by responsibility, and
 unlikely to create avoidable upstream merge conflicts.
 
-Current first split candidates:
+This is a watchlist, not an active split queue. `MakepadActivity.java`,
+`BrokerH264VideoPlayer.java`, and `compile.rs` are now cohesive facades after
+the completed pressure-release slices. Do not continue splitting them by line
+count. Split again only when behavior work touches a concrete ownership family
+and the helper boundary preserves public signatures, generated output,
+validation behavior, and legacy compatibility.
 
 1. `tools/cargo_makepad/src/android/java/dev/makepad/android/MakepadActivity.java`
+   - Status: preflight complete; first Rusty-owned app-shell slices are done.
    - Use `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md` before moving Java code.
    - Phase-marker and intent-extra parsing now live in
      `RustyXrActivitySupport.java`.
@@ -59,13 +65,20 @@ Current first split candidates:
    - H264/external-video config/player/runnable construction now lives in
      `ExternalH264VideoPlaybackFactory.java`; the public method signature and
      video runnable map/thread ownership stay in `MakepadActivity.java`.
-   - Split only Rusty-owned app-shell helpers: phase markers, intent-extra
-     parsing, MediaProjection request/result glue, and H264/external-video
-     entrypoint construction when the public method signature stays stable.
+   - Current decision: do not continue splitting `MakepadActivity.java` by line
+     count. It remains the generated activity facade for Android lifecycle,
+     plugin hooks, native callbacks, video map/thread ownership, activity
+     switching, and generated template hooks.
+   - Future slices must be behavior-led: revisit only when a concrete
+     MediaProjection, phase-marker, intent-extra, or external-H264 entrypoint
+     change needs a helper and can preserve the public method signature.
    - Do not broad-refactor upstream Android lifecycle, surface recovery,
      keyboard/input, selection, network thread ownership, or activity switching
      by line count alone.
 2. `tools/cargo_makepad/src/android/java/dev/makepad/android/BrokerH264VideoPlayer.java`
+   - Status: H264 adapter split complete through config, command client,
+     stream reader, Annex-B primer, HWB target, CPU-YUV emitter, and activity
+     entrypoint factory.
    - Keep the public class name initially as a compatibility facade.
    - Use `RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md` before moving Java code.
    - Config defaults and normalization now live in `ExternalH264Config.java`.
@@ -78,9 +91,16 @@ Current first split candidates:
      `ExternalH264HardwareBufferTarget.java`.
    - CPU-YUV plane copy and callback emission now live in
      `ExternalH264CpuYuvEmitter.java`.
-   - Remaining split candidate is the decoder loop; any stereo pairer
-     lifecycle cleanup is a behavior slice, not a mechanical movement.
+   - Current decision: leave `BrokerH264VideoPlayer.java` as the decoder
+     orchestrator. The decoder loop owns packet sequencing, CSD/primer handoff,
+     MediaCodec lifecycle, output routing, timing counters, callbacks, and
+     cleanup. Split only if H264 behavior churn resumes and the preflight shows
+     a narrow `ExternalH264DecoderLoop.java`-style boundary.
+   - Any stereo pairer lifecycle cleanup is a behavior slice, not mechanical
+     movement.
 3. `tools/cargo_makepad/src/android/compile.rs`
+   - Status: Android packaging/tooling pressure release complete; helper
+     families are split and `compile.rs` is a cohesive command facade.
    - Use `RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md` before moving Rust code.
    - Keystore sidecar parsing and upload-keystore creation now live in
      `tools/cargo_makepad/src/android/compile/keystore.rs`.
@@ -107,9 +127,23 @@ Current first split candidates:
    - Rust build setup, Android target-dir derivation, Android env vars, and
      rustflags composition now live in
      `tools/cargo_makepad/src/android/compile/rust_build.rs`.
-   - Remaining facade pressure is `build`/`build_aab`/`run` orchestration,
-     phase timing, ADB/device helpers, and Java/Javac passthrough. Split only
-     if those stop being cohesive facade responsibilities.
+   - Current decision: do not continue splitting `compile.rs` by line count.
+     It owns `build`/`build_aab`/`run` orchestration, phase timing,
+     ADB/device helpers, and Java/Javac passthrough as facade responsibilities.
+   - Future packaging behavior changes must use
+     `tools/check_android_generated_output_stability.py` for generated-output
+     identity checks when they claim no-op package stability.
+4. Platform/video watchlist:
+   - `platform/src/os/linux/android/android.rs`: split only when actively
+     touching a concrete video, hardware-buffer, marker, or camera family with
+     a clear helper boundary and downstream validation.
+   - `platform/src/os/linux/android/android_jni.rs`: monitor adapter API
+     growth, but do not preemptively split JNI message handling.
+   - `widgets/src/video.rs`: monitor video widget API growth, but keep widget
+     event handling intact until a renderer-neutral adapter boundary appears.
+   - `platform/src/os/linux/vulkan.rs`: leave alone unless HWB/video-import
+     work forces a narrow resource-lifetime or descriptor extraction with a GPU
+     validation gate.
 
 Hold on broad file-layout changes in `platform/src/os/linux/vulkan.rs`,
 `platform/src/os/linux/android/android.rs`, or OpenXR files unless the slice is
@@ -125,6 +159,29 @@ small, behavior-driven, and has a clear upstream or fork-owned boundary.
 - Diagnostic markers that still use `rusty.xr.makepad-*` are historical
   evidence markers. New markers should prefer a Makepad, Quest, Hostess, or
   Manifold owner name based on the actual authority.
+- Use `RUSTY_XR_MARKER_COMPATIBILITY.md` before renaming any `debug.rustyxr.*`,
+  `rustyxr.*`, or `rusty.xr.makepad-*` surface. Most of these are
+  rename-on-touch compatibility markers, not immediate cleanup targets.
+- `tools/check_rusty_xr_makepad_guards.py` is the repo-local drift check for
+  H.264 Manifold defaults, explicit `LEGACY_*` aliases, stale doc pointers,
+  split helper files, and generated-output stability hooks.
+- `tools/check_android_generated_output_stability.py` snapshots and compares
+  no-op Android generated-output identity: wrapper manifests, wrapper
+  lock/hash caches, generated Android manifests, app Java sources, javac input
+  caches, and selected SDK/JDK/NDK/Cargo path environment.
+
+## Dependency Boundary
+
+Makepad dependencies are allowed only in downstream app-shell/UI lanes:
+
+- Hostess Makepad shell crates;
+- Studio Makepad/UI shell crates;
+- public Rusty XR Makepad examples.
+
+Keep Manifold, Manifold packages, Rusty core/CLI crates, descriptor repos, and
+schema/fixture workspaces Makepad-free. Makepad may prove app-shell,
+packaging, rendering, Android, OpenXR, Vulkan, and generated-shell behavior,
+but it must not define Manifold command/session/stream authority.
 
 ## Update Policy
 

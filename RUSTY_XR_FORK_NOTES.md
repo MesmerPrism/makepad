@@ -7,8 +7,10 @@ Quest Android/Vulkan build path against Rusty XR's public contracts.
 
 `RUSTY_XR_PATCH_LEDGER.md` classifies the current local patch families,
 upstream-candidate boundaries, split-pressure watchlist, naming rules, and
-validation slots. Update that ledger when adding a new patch family, landing a
-split, or changing a command/stream default.
+validation slots. `RUSTY_XR_MARKER_COMPATIBILITY.md` classifies active
+Manifold defaults, explicit legacy aliases, and rename-on-touch diagnostic
+markers. Update those files when adding a new patch family, landing a split,
+or changing a command/stream default.
 
 ## Relationship To Rusty XR
 
@@ -28,6 +30,19 @@ Rusty XR core crates
 
 Do not move Rusty XR app behavior, downstream package identity, generated APKs,
 device logs, local SDK caches, or private validation artifacts into this branch.
+
+## Dependency Boundary
+
+Makepad dependencies are allowed only in downstream app-shell/UI lanes:
+
+- Hostess Makepad shell crates;
+- Studio Makepad/UI shell crates;
+- public Rusty XR Makepad examples.
+
+Keep Manifold, Manifold packages, Rusty core/CLI crates, descriptor repos, and
+schema/fixture workspaces Makepad-free. This fork can prove rendering,
+packaging, Android, OpenXR, Vulkan, and generated-shell behavior, but it must
+not become command/session/stream authority or a core Rusty dependency.
 
 ## Current Patch Scope
 
@@ -121,6 +136,15 @@ This branch currently carries:
 - Workspace metadata exclusions for standalone CSG leaf crates that are outside
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.
+- A local Rusty XR Makepad guard script,
+  `tools/check_rusty_xr_makepad_guards.py`, that verifies Manifold H.264
+  defaults, explicit legacy aliases, stale-doc pointers, split helper files,
+  and Android package-generation stability hooks.
+- A local generated-output stability checker,
+  `tools/check_android_generated_output_stability.py`, that can snapshot and
+  compare generated wrapper manifests, lock/hash caches, generated manifests,
+  app Java sources, javac input caches, and selected SDK/JDK/NDK/Cargo path
+  environment across no-op package-generation runs.
 
 Installer defaults are separate from packaging defaults. The current
 Makepad-managed Android-33/ext4 payload constants should stay internally
@@ -160,6 +184,8 @@ repo-wide formatting hygiene:
 
 ```powershell
 python tools\rusty_xr_format.py --changed --check
+python tools\check_rusty_xr_makepad_guards.py
+python tools\check_android_generated_output_stability.py
 cargo metadata --manifest-path libs\csg\csg_math\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_mesh\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_sdf\Cargo.toml --no-deps --format-version 1
