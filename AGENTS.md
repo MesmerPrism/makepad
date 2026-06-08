@@ -6,6 +6,12 @@ the framework source of truth; the Rusty XR branch should stay a shallow patch q
 packaging, Quest/Horizon OS Vulkan window-swapchain correctness, workspace
 metadata, and branch-local documentation.
 
+Rusty Morphospace is the top-level project/platform umbrella for the refactor
+repo family. This Makepad fork remains a toolkit/adapter dependency, not a
+Morphospace authority or module namespace. Keep Morphospace, Matter, Lattice,
+Manifold, Optics, Studio, and Quest contracts outside the fork unless a change
+is a general Makepad adapter or public example requirement.
+
 For Rusty XR tasks in this repo, read these first:
 
 - `RUSTY_XR_FORK_NOTES.md`
