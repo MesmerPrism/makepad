@@ -1,8 +1,8 @@
 # Rusty XR Makepad Fork Agent Notes
 
 This checkout can be used as the maintained Makepad fork branch for the Rusty
-XR Makepad-first Quest lane. Upstream Makepad remains the framework source of
-truth; the Rusty XR branch should stay a shallow patch queue for Android
+XR / future Rusty Lattice Makepad-first Quest lane. Upstream Makepad remains
+the framework source of truth; the Rusty XR branch should stay a shallow patch queue for Android
 packaging, Quest/Horizon OS Vulkan window-swapchain correctness, workspace
 metadata, and branch-local documentation.
 
@@ -63,6 +63,13 @@ Keep Rusty XR app behavior in the Rusty XR repo. Keep camera transport,
 projection policy, scorecard markers, runtime profile keys, and public example
 code out of this Makepad fork unless the change is a general Makepad adapter or
 an upstreamable Makepad fix.
+
+When extracting generic tracked-space output from Makepad/OpenXR events, target
+Rusty Lattice naming outside this fork: `Lattice*` contracts and
+`rusty.lattice.*` schema IDs for spaces, transforms, tracked poses, view sets,
+spatial input roles, frame-state binding, calibration, validity, confidence,
+and runtime capability snapshots. Keep Makepad `Xr*` names where they describe
+Makepad or OpenXR APIs.
 
 ## Downstream Dependency Boundary
 
