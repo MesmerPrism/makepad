@@ -152,7 +152,7 @@ fn rusty_xr_android_bootstrap_marker(phase: &str) {
     android_debug_log(
         4,
         &format!(
-            "RUSTY_XR_MAKEPAD_ANDROID_BOOTSTRAP schema=rusty.xr.makepad-android-bootstrap.v1 phase={phase} renderer=makepad android_packager=cargo-makepad"
+            "MORPHOSPACE_MAKEPAD_ANDROID_BOOTSTRAP schema=rusty.makepad.android_bootstrap.v1 phase={phase} renderer=makepad android_packager=cargo-makepad"
         ),
     );
 }

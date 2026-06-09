@@ -34,8 +34,8 @@ public final class MediaProjectionStreamService extends Service {
     public static final String EXTRA_WIDTH = "width";
     public static final String EXTRA_HEIGHT = "height";
 
-    private static final String TAG = "RustyXRMakepadMedia";
-    private static final String CHANNEL_ID = "rusty_xr_makepad_media_projection";
+    private static final String TAG = "MorphospaceMakepadMedia";
+    private static final String CHANNEL_ID = "morphospace_makepad_media_projection";
     private static final int NOTIFICATION_ID = 8714;
 
     private HandlerThread captureThread;
@@ -84,7 +84,7 @@ public final class MediaProjectionStreamService extends Service {
             return START_NOT_STICKY;
         }
 
-        captureThread = new HandlerThread("RustyXRMakepadMediaProjection");
+        captureThread = new HandlerThread("MorphospaceMakepadMediaProjection");
         captureThread.start();
         captureHandler = new Handler(captureThread.getLooper());
 
@@ -197,7 +197,7 @@ public final class MediaProjectionStreamService extends Service {
                 }
             }, captureHandler);
             virtualDisplay = mediaProjection.createVirtualDisplay(
-                "Rusty XR Makepad Display Composite",
+                "Morphospace Makepad Display Composite",
                 width,
                 height,
                 getResources().getDisplayMetrics().densityDpi,
@@ -241,7 +241,7 @@ public final class MediaProjectionStreamService extends Service {
         if (manager != null && android.os.Build.VERSION.SDK_INT >= 26) {
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "Rusty XR Makepad media capture",
+                "Morphospace Makepad media capture",
                 NotificationManager.IMPORTANCE_LOW);
             manager.createNotificationChannel(channel);
         }
@@ -250,7 +250,7 @@ public final class MediaProjectionStreamService extends Service {
             ? new Notification.Builder(this, CHANNEL_ID)
             : new Notification.Builder(this);
         return builder
-            .setContentTitle("Rusty XR Makepad media capture")
+            .setContentTitle("Morphospace Makepad media capture")
             .setContentText("Streaming display-composite frames to the paired receiver.")
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setOngoing(true)

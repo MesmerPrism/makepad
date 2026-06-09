@@ -19,7 +19,7 @@ slice.
 | Old stream magic alias | `LEGACY_STREAM_MAGIC = "RXYRVID1"` | explicit legacy alias | Keep only as a read compatibility path. New writers should emit `RMANVID1`. |
 | Makepad diagnostic schemas | `schema=rusty.xr.makepad-*` | historical diagnostic evidence | Keep until the owning diagnostic family is touched. New marker families should prefer `rusty.makepad.*`, `rusty.quest.makepad.*`, or a Manifold name only when Manifold is the authority. |
 | Android debug properties | `debug.rustyxr.*` | compatibility property alias | Keep read/cleanup compatibility. New defaults should be owner-neutral or app/Quest/Manifold-owned when that route is next edited. |
-| MediaProjection launch extras | `rustyxr.mediaProjection*` | compatibility launch alias | Keep as historical activity-shell input until the public Rusty XR wrapper migrates. Do not treat it as Manifold command authority. |
+| MediaProjection launch extras | `rustyquest.makepad.mediaProjection*` | active Quest/Makepad launch surface | Keep as the active Activity-extra surface for Makepad media projection. Do not treat it as Manifold command authority. |
 
 ## Runtime Marker Decisions
 
@@ -30,7 +30,7 @@ same slice.
 | Runtime marker family | Keep compatibility | Rename-on-touch | Retire | Replace with owner |
 | --- | --- | --- | --- | --- |
 | `debug.rustyquest.makepad.display.refresh.rate.hz` | active default | no old compatibility read; old `debug.rustyxr.xr.display.refresh.rate.hz` is retired from the active Makepad fork | old property retired | Quest/Makepad-owned Android display-refresh property, not Manifold authority |
-| `rusty.xr.makepad-android-bootstrap.v1` and `rusty.xr.makepad-android-activity.v1` | yes | yes | no immediate retire | Makepad-owned Android app-shell phase marker |
+| `rusty.makepad.android_bootstrap.v1` and `rusty.makepad.android_activity.v1` | active default | no old compatibility emission | old Rusty-XR activity markers retired from the active fork | Makepad-owned Android app-shell phase marker |
 | `rusty.xr.makepad-camera-frame-flow.v1` | yes | yes | retire duplicate phases only after downstream frame-flow evidence no longer consumes them | Quest/Makepad-owned camera frame-flow diagnostic |
 | `rusty.xr.makepad-broker-h264-*` | yes | yes; replace `broker` wording only in the touched H.264 stream/slot slice | no immediate retire | Makepad-owned H.264 diagnostic, or Manifold-owned only if the event becomes a Manifold contract |
 | `rusty.xr.makepad-direct-stereo-hardware-buffer-*` | yes | yes | no immediate retire | Makepad-owned hardware-buffer stereo diagnostic |
@@ -45,8 +45,10 @@ Use this queue when an affected behavior slice is already editing the owner:
 2. Android direct/stereo H.264 diagnostic schemas in `platform/src/os/linux/android/android.rs`.
 3. JNI latest-slot diagnostic schemas in `platform/src/os/linux/android/android_jni.rs`.
 4. Camera frame-flow schemas in `platform/src/os/linux/android/android_camera_player.rs`.
-5. Activity bootstrap marker schema in `RustyXrActivitySupport.java`.
-6. MediaProjection launch extras in `RustyXrMediaProjectionHelper.java`.
+5. Vulkan and Android activity marker consumers that still expect historical
+   `RUSTY_XR_MAKEPAD_*` evidence.
+6. MediaProjection launch extras in downstream public Rusty XR wrappers that
+   have not migrated to `rustyquest.makepad.mediaProjection*`.
 7. Display refresh debug property in `platform/src/os/linux/android/android.rs`.
 
 Each rename-on-touch slice needs a downstream evidence-tool scan before commit.

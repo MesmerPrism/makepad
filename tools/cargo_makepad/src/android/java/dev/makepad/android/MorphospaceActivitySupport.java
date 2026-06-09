@@ -3,16 +3,16 @@ package dev.makepad.android;
 import android.content.Intent;
 import android.util.Log;
 
-final class RustyXrActivitySupport {
-    private static final String LOG_TAG = "RustyXRMakepad";
+final class MorphospaceActivitySupport {
+    private static final String LOG_TAG = "MorphospaceMakepad";
 
-    private RustyXrActivitySupport() {
+    private MorphospaceActivitySupport() {
     }
 
     static void activityMarker(String phase) {
         Log.e(
             LOG_TAG,
-            "RUSTY_XR_MAKEPAD_ANDROID_ACTIVITY schema=rusty.xr.makepad-android-activity.v1 phase="
+            "MORPHOSPACE_MAKEPAD_ANDROID_ACTIVITY schema=rusty.makepad.android_activity.v1 phase="
                 + phase
                 + " renderer=makepad android_packager=cargo-makepad"
         );

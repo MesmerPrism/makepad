@@ -34,9 +34,9 @@ authority; this file is Android app-shell glue.
 | Responsibility | Current location | Split direction |
 | --- | --- | --- |
 | Upstream Android lifecycle and view setup | `onCreate`, `onResume`, `onPause`, `onDestroy`, surface/layout methods | Keep in `MakepadActivity.java`; do not broad-refactor. |
-| Rusty activity phase markers | `rustyXrActivityMarker`, static load markers, onCreate/native onCreate markers | Move marker formatting/logging into `RustyXrActivitySupport.java`, keep phase call sites in the activity. |
-| Morphospace intent-extra parsing | `rustyXrIntentBooleanExtra`, `rustyXrIntentIntExtra`, `rustyXrIntentLongExtra` | Move typed parsing into `RustyXrActivitySupport.java`, passing an explicit `Intent`. |
-| MediaProjection request/result flow | `mRustyXrMediaProjectionManager`, request constants, `requestRustyXrMediaProjectionIfEnabled`, `requestRustyXrMediaProjection`, MediaProjection branch in `onActivityResult`, service stop in `onDestroy` | Move to `RustyXrMediaProjectionHelper.java`; activity keeps lifecycle call sites and delegates request/result handling. |
+| Morphospace activity phase markers | static load markers, onCreate/native onCreate markers | Move marker formatting/logging into `MorphospaceActivitySupport.java`, keep phase call sites in the activity. |
+| Morphospace intent-extra parsing | boolean/int/long Activity extra parsing | Move typed parsing into `MorphospaceActivitySupport.java`, passing an explicit `Intent`. |
+| MediaProjection request/result flow | request constants, delayed request, MediaProjection branch in `onActivityResult`, service stop in `onDestroy` | Move to `MorphospaceMediaProjectionHelper.java`; activity keeps lifecycle call sites and delegates request/result handling. |
 | H264/external-video entrypoint | `prepareBrokerH264VideoPlayback` config construction and runnable insertion | Later helper only if it can preserve the public method signature and video-thread/map ownership. |
 | Generic video playback | `prepareVideoPlayback`, `beginVideoPlayback`, pause/resume/stop, cleanup | Keep in activity unless a video-shell boundary becomes necessary. |
 | Activity switching | `switchActivityClass`, intent extras forwarding | Keep in activity because it is upstream lifecycle/app-shell behavior. |
@@ -44,9 +44,9 @@ authority; this file is Android app-shell glue.
 ## Current Slice Status
 
 - Preflight/source map: complete.
-- `RustyXrActivitySupport.java`: complete. Owns Morphospace activity marker
+- `MorphospaceActivitySupport.java`: complete. Owns Morphospace activity marker
   formatting/logging and typed Morphospace intent-extra parsing.
-- `RustyXrMediaProjectionHelper.java`: complete. Owns MediaProjection enable
+- `MorphospaceMediaProjectionHelper.java`: complete. Owns MediaProjection enable
   parsing, delayed consent request, consent result handling, foreground-service
   payload construction, and service stop glue.
 - `ExternalH264VideoPlaybackFactory.java`: complete. Owns external-H264 config
@@ -60,7 +60,7 @@ authority; this file is Android app-shell glue.
 
 Recommended first movement:
 
-1. Add `RustyXrActivitySupport.java`.
+1. Add `MorphospaceActivitySupport.java`.
 2. Move activity phase-marker formatting/logging and typed Morphospace intent-extra
    parsing into static package-private helper methods.
 3. Keep all phase call sites and MediaProjection call sites in
@@ -72,7 +72,7 @@ Recommended first movement:
 
 Recommended second movement after the first slice validates:
 
-1. Add `RustyXrMediaProjectionHelper.java`.
+1. Add `MorphospaceMediaProjectionHelper.java`.
 2. Move MediaProjection request code/default delay, manager lookup,
    enabled/delay parsing, consent request, consent result handling, foreground
    service intent construction, and service stop helper.

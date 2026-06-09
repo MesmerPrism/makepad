@@ -917,7 +917,7 @@ public class MakepadActivity
 
     private MakepadSurface view;
     private final Handler mHandler = new Handler(Looper.getMainLooper());
-    private RustyXrMediaProjectionHelper mRustyXrMediaProjection;
+    private MorphospaceMediaProjectionHelper mMorphospaceMediaProjection;
 
     // video playback
     Handler mVideoPlaybackHandler;
@@ -963,9 +963,9 @@ public class MakepadActivity
     private int mSelectionHandleSizePx;
 
     static {
-        RustyXrActivitySupport.activityMarker("java-load-library-before");
+        MorphospaceActivitySupport.activityMarker("java-load-library-before");
         System.loadLibrary("makepad");
-        RustyXrActivitySupport.activityMarker("java-load-library-after");
+        MorphospaceActivitySupport.activityMarker("java-load-library-after");
     }
 
     private void cacheWarmResumeSurfaceSnapshot(Bitmap snapshot) {
@@ -1048,7 +1048,7 @@ public class MakepadActivity
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        RustyXrActivitySupport.activityMarker("on-create-entry");
+        MorphospaceActivitySupport.activityMarker("on-create-entry");
         if (mWebSocketsThread == null || !mWebSocketsThread.isAlive()) {
             mWebSocketsThread = new HandlerThread("WebSocketsThread");
             mWebSocketsThread.start();
@@ -1063,8 +1063,8 @@ public class MakepadActivity
         }
         
         super.onCreate(savedInstanceState);
-        mRustyXrMediaProjection = new RustyXrMediaProjectionHelper(this, mHandler);
-        mRustyXrMediaProjection.requestIfEnabled(getIntent());
+        mMorphospaceMediaProjection = new MorphospaceMediaProjectionHelper(this, mHandler);
+        mMorphospaceMediaProjection.requestIfEnabled(getIntent());
         
         this.requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setSoftInputMode(
@@ -1158,9 +1158,9 @@ public class MakepadActivity
         restoreWarmResumeSurfaceSnapshotIfAvailable();
         updateTaskDescription();
 
-        RustyXrActivitySupport.activityMarker("native-activity-on-create-before");
+        MorphospaceActivitySupport.activityMarker("native-activity-on-create-before");
         MakepadNative.activityOnCreate(this);
-        RustyXrActivitySupport.activityMarker("native-activity-on-create-after");
+        MorphospaceActivitySupport.activityMarker("native-activity-on-create-after");
 
         mVideoPlaybackThread = new HandlerThread("VideoPlayerThread");
         mVideoPlaybackThread.start(); // TODO: only start this if its needed.
@@ -1222,8 +1222,8 @@ public class MakepadActivity
 
     @Override
     protected void onDestroy() {
-        if (mRustyXrMediaProjection != null) {
-            mRustyXrMediaProjection.stopService();
+        if (mMorphospaceMediaProjection != null) {
+            mMorphospaceMediaProjection.stopService();
         }
         if (mCameraPreviewOverlay != null) {
             for (Long videoId : mCameraPreviewViews.keySet()) {
@@ -1309,16 +1309,16 @@ public class MakepadActivity
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (mRustyXrMediaProjection != null) {
-            mRustyXrMediaProjection.requestIfEnabled(intent);
+        if (mMorphospaceMediaProjection != null) {
+            mMorphospaceMediaProjection.requestIfEnabled(intent);
         }
         restoreSurfaceViewForWarmResumeIfNeeded();
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (mRustyXrMediaProjection != null
-            && mRustyXrMediaProjection.handleActivityResult(requestCode, resultCode, data)) {
+        if (mMorphospaceMediaProjection != null
+            && mMorphospaceMediaProjection.handleActivityResult(requestCode, resultCode, data)) {
             return;
         }
         //% MAIN_ACTIVITY_ON_ACTIVITY_RESULT

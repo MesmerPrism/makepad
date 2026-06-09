@@ -7,21 +7,21 @@ import android.media.projection.MediaProjectionManager;
 import android.os.Handler;
 import android.util.Log;
 
-final class RustyXrMediaProjectionHelper {
-    private static final String LOG_TAG = "RustyXRMakepad";
+final class MorphospaceMediaProjectionHelper {
+    private static final String LOG_TAG = "MorphospaceMakepad";
     private static final int REQUEST_CODE = 8713;
     private static final long DEFAULT_DELAY_MS = 1600L;
-    private static final String EXTRA_ENABLE = "rustyxr.mediaProjection";
-    private static final String EXTRA_DELAY_MS = "rustyxr.mediaProjectionDelayMs";
-    private static final String EXTRA_PORT = "rustyxr.mediaProjectionPort";
-    private static final String EXTRA_WIDTH = "rustyxr.mediaProjectionWidth";
-    private static final String EXTRA_HEIGHT = "rustyxr.mediaProjectionHeight";
+    private static final String EXTRA_ENABLE = "rustyquest.makepad.mediaProjection";
+    private static final String EXTRA_DELAY_MS = "rustyquest.makepad.mediaProjectionDelayMs";
+    private static final String EXTRA_PORT = "rustyquest.makepad.mediaProjectionPort";
+    private static final String EXTRA_WIDTH = "rustyquest.makepad.mediaProjectionWidth";
+    private static final String EXTRA_HEIGHT = "rustyquest.makepad.mediaProjectionHeight";
 
     private final Activity mActivity;
     private final Handler mHandler;
     private final MediaProjectionManager mMediaProjectionManager;
 
-    RustyXrMediaProjectionHelper(Activity activity, Handler handler) {
+    MorphospaceMediaProjectionHelper(Activity activity, Handler handler) {
         mActivity = activity;
         mHandler = handler;
         mMediaProjectionManager =
@@ -29,10 +29,10 @@ final class RustyXrMediaProjectionHelper {
     }
 
     void requestIfEnabled(Intent intent) {
-        if (!RustyXrActivitySupport.intentBooleanExtra(intent, EXTRA_ENABLE, false)) {
+        if (!MorphospaceActivitySupport.intentBooleanExtra(intent, EXTRA_ENABLE, false)) {
             return;
         }
-        long delayMs = RustyXrActivitySupport.intentLongExtra(intent, EXTRA_DELAY_MS, DEFAULT_DELAY_MS);
+        long delayMs = MorphospaceActivitySupport.intentLongExtra(intent, EXTRA_DELAY_MS, DEFAULT_DELAY_MS);
         mHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -57,15 +57,15 @@ final class RustyXrMediaProjectionHelper {
         serviceIntent.putExtra(MediaProjectionStreamService.EXTRA_HOST, "127.0.0.1");
         serviceIntent.putExtra(
             MediaProjectionStreamService.EXTRA_PORT,
-            RustyXrActivitySupport.intentIntExtra(configIntent, EXTRA_PORT, 8787)
+            MorphospaceActivitySupport.intentIntExtra(configIntent, EXTRA_PORT, 8787)
         );
         serviceIntent.putExtra(
             MediaProjectionStreamService.EXTRA_WIDTH,
-            RustyXrActivitySupport.intentIntExtra(configIntent, EXTRA_WIDTH, 512)
+            MorphospaceActivitySupport.intentIntExtra(configIntent, EXTRA_WIDTH, 512)
         );
         serviceIntent.putExtra(
             MediaProjectionStreamService.EXTRA_HEIGHT,
-            RustyXrActivitySupport.intentIntExtra(configIntent, EXTRA_HEIGHT, 288)
+            MorphospaceActivitySupport.intentIntExtra(configIntent, EXTRA_HEIGHT, 288)
         );
         mActivity.startForegroundService(serviceIntent);
         return true;

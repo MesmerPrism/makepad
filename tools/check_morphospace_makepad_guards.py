@@ -137,8 +137,8 @@ def check_split_maps(checks):
         "tools/cargo_makepad/src/android/java/dev/makepad/android/H264AnnexBPrimer.java",
         "tools/cargo_makepad/src/android/java/dev/makepad/android/ManifoldH264CommandClient.java",
         "tools/cargo_makepad/src/android/java/dev/makepad/android/ManifoldVideoStreamReader.java",
-        "tools/cargo_makepad/src/android/java/dev/makepad/android/RustyXrActivitySupport.java",
-        "tools/cargo_makepad/src/android/java/dev/makepad/android/RustyXrMediaProjectionHelper.java",
+        "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceActivitySupport.java",
+        "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceMediaProjectionHelper.java",
     ]
     for rel in required_modules:
         if checks.path(rel) is not None:
