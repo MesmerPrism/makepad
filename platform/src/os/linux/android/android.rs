@@ -105,7 +105,8 @@ const ANDROID_XR_BUFFER_SCALE_MAX: f32 = 1.5;
 const ANDROID_XR_MULTISAMPLES: usize = 4;
 const ANDROID_XR_FIXED_FOVEATION_LEVEL: u8 = 3;
 const ANDROID_XR_NATIVE_PASSTHROUGH_DEFAULT: bool = true;
-const RUSTY_XR_DISPLAY_REFRESH_RATE_PROPERTY: &str = "debug.rustyxr.xr.display.refresh.rate.hz";
+const RUSTY_QUEST_MAKEPAD_DISPLAY_REFRESH_RATE_PROPERTY: &str =
+    "debug.rustyquest.makepad.display.refresh.rate.hz";
 
 fn android_system_property_value(name: &str) -> Option<String> {
     use std::ffi::{CStr, CString};
@@ -226,10 +227,9 @@ impl Cx {
             environment_depth: false,
             remove_hands_from_depth: false,
             fixed_foveation_level: ANDROID_XR_FIXED_FOVEATION_LEVEL,
-            display_refresh_rate_hz: self
-                .os
-                .xr_display_refresh_rate_requested_hz
-                .or_else(|| android_system_property_f32(RUSTY_XR_DISPLAY_REFRESH_RATE_PROPERTY)),
+            display_refresh_rate_hz: self.os.xr_display_refresh_rate_requested_hz.or_else(|| {
+                android_system_property_f32(RUSTY_QUEST_MAKEPAD_DISPLAY_REFRESH_RATE_PROPERTY)
+            }),
             native_passthrough: self.os.xr_native_passthrough_requested,
         }
     }

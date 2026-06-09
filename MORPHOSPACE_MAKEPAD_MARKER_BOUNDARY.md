@@ -29,7 +29,7 @@ same slice.
 
 | Runtime marker family | Keep compatibility | Rename-on-touch | Retire | Replace with owner |
 | --- | --- | --- | --- | --- |
-| `debug.rustyxr.xr.display.refresh.rate.hz` | yes | yes; keep a compatibility read path if legacy/public Rusty XR wrappers still set it | no immediate retire | Quest/Makepad-owned Android display-refresh property, not Manifold authority |
+| `debug.rustyquest.makepad.display.refresh.rate.hz` | active default | no old compatibility read; old `debug.rustyxr.xr.display.refresh.rate.hz` is retired from the active Makepad fork | old property retired | Quest/Makepad-owned Android display-refresh property, not Manifold authority |
 | `rusty.xr.makepad-android-bootstrap.v1` and `rusty.xr.makepad-android-activity.v1` | yes | yes | no immediate retire | Makepad-owned Android app-shell phase marker |
 | `rusty.xr.makepad-camera-frame-flow.v1` | yes | yes | retire duplicate phases only after downstream frame-flow evidence no longer consumes them | Quest/Makepad-owned camera frame-flow diagnostic |
 | `rusty.xr.makepad-broker-h264-*` | yes | yes; replace `broker` wording only in the touched H.264 stream/slot slice | no immediate retire | Makepad-owned H.264 diagnostic, or Manifold-owned only if the event becomes a Manifold contract |
