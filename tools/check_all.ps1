@@ -18,11 +18,11 @@ function Invoke-Checked {
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $RepoRoot
 try {
-    if (Test-Path "tools\rusty_xr_format.py") {
-        Invoke-Checked "changed-file format" "python" @("tools\rusty_xr_format.py", "--changed", "--check")
+    if (Test-Path "tools\makepad_fork_format.py") {
+        Invoke-Checked "changed-file format" "python" @("tools\makepad_fork_format.py", "--changed", "--check")
     }
-    if (Test-Path "tools\check_rusty_xr_makepad_guards.py") {
-        Invoke-Checked "Rusty XR Makepad guardrails" "python" @("tools\check_rusty_xr_makepad_guards.py")
+    if (Test-Path "tools\check_morphospace_makepad_guards.py") {
+        Invoke-Checked "Morphospace Makepad guardrails" "python" @("tools\check_morphospace_makepad_guards.py")
     }
     if (Test-Path "tools\check_android_generated_output_stability.py") {
         Invoke-Checked "Android generated-output stability" "python" @("tools\check_android_generated_output_stability.py")

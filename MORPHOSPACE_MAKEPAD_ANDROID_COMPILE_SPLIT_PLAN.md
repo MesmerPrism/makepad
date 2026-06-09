@@ -1,4 +1,4 @@
-# Rusty XR Android Compile Split Plan
+# Morphospace Makepad Android Compile Split Plan
 
 This is a mechanical split preflight for
 `tools/cargo_makepad/src/android/compile.rs`.
@@ -232,7 +232,7 @@ generated-output comparison rather than only checking static hooks.
 For documentation-only preflight changes:
 
 ```powershell
-python tools\rusty_xr_format.py --changed --check
+python tools\makepad_fork_format.py --changed --check
 python tools\check_android_generated_output_stability.py
 cargo metadata --no-deps --format-version 1
 git diff --check
@@ -241,8 +241,8 @@ git diff --check
 For Rust source movement:
 
 ```powershell
-python tools\rusty_xr_format.py --changed --check
-python tools\check_rusty_xr_makepad_guards.py
+python tools\makepad_fork_format.py --changed --check
+python tools\check_morphospace_makepad_guards.py
 python tools\check_android_generated_output_stability.py
 cargo metadata --no-deps --format-version 1
 cargo check -p cargo-makepad

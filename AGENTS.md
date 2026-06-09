@@ -1,10 +1,10 @@
-# Rusty XR Makepad Fork Agent Notes
+# Morphospace Makepad Fork Agent Notes
 
-This checkout can be used as the maintained Makepad fork branch for the Rusty
-XR / future Rusty Lattice Makepad-first Quest lane. Upstream Makepad remains
-the framework source of truth; the Rusty XR branch should stay a shallow patch queue for Android
-packaging, Quest/Horizon OS Vulkan window-swapchain correctness, workspace
-metadata, and branch-local documentation.
+This checkout can be used as the maintained Makepad fork branch for the
+Morphospace Makepad Quest lane. Upstream Makepad remains the framework source
+of truth; the Morphospace Makepad patch branch should stay a shallow patch
+queue for Android packaging, Quest/Horizon OS Vulkan window-swapchain
+correctness, workspace metadata, and branch-local documentation.
 
 Rusty Morphospace is the top-level project/platform umbrella for the refactor
 repo family. This Makepad fork remains a toolkit/adapter dependency, not a
@@ -12,30 +12,30 @@ Morphospace authority or module namespace. Keep Morphospace, Matter, Lattice,
 Manifold, Optics, Studio, and Quest contracts outside the fork unless a change
 is a general Makepad adapter or public example requirement.
 
-For Rusty XR tasks in this repo, read these first:
+For Morphospace Makepad tasks in this repo, read these first:
 
-- `RUSTY_XR_FORK_NOTES.md`
-- `RUSTY_XR_PATCH_LEDGER.md`
-- `RUSTY_XR_MARKER_COMPATIBILITY.md`
-- `RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md`
-- `RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md`
-- `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md`
-- Rusty XR public docs:
+- `MORPHOSPACE_MAKEPAD_FORK_NOTES.md`
+- `MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md`
+- `MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md`
+- `MORPHOSPACE_MAKEPAD_H264_ADAPTER_SPLIT_PLAN.md`
+- `MORPHOSPACE_MAKEPAD_ANDROID_COMPILE_SPLIT_PLAN.md`
+- `MORPHOSPACE_MAKEPAD_ACTIVITY_SPLIT_PLAN.md`
+- Legacy Rusty-XR public docs:
   - `docs/MAKEPAD_FORK_RELATIONSHIP.md`
   - `docs/MAKEPAD_CAMERA_PARALLEL_APPROACH_COMPARISON.md`
   - `docs/MAKEPAD_XR_GPU_PAGE_FAULT_INVESTIGATION.md`
   - `docs/MAKEPAD_STEREO_COMPARISON_ITERATION.md`
-- Rusty XR example-local instructions:
+- Legacy Rusty-XR example-local instructions:
   - `examples/makepad-q2q-camera-shell/AGENTS.md`
   - `examples/makepad-camera-shell/AGENTS.md`
 
-Those Rusty XR docs live in the Rusty XR repo, not in this Makepad checkout.
+Those legacy Rusty-XR docs live in the legacy Rusty-XR repo, not in this Makepad checkout.
 Do not copy private planning notes, local paths, generated APKs, device logs,
 package identities, SDK caches, or downstream tuning into this branch.
 
-## Rusty XR Patch Boundaries
+## Morphospace Patch Boundaries
 
-Current acceptable Makepad-side changes for the Rusty XR lane are:
+Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
 
 - Android `cargo-makepad` packaging fixes needed by the public Makepad Quest
   example lane.
@@ -43,7 +43,7 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
 - Windows path normalization for generated Android wrapper inputs.
 - Targeted Android Vulkan frame-fence waits before destroying/recreating
   swapchain-backed window resources after suboptimal or out-of-date returns.
-- Public-safe Android activity/bootstrap phase markers used by the Rusty XR
+- Public-safe Android activity/bootstrap phase markers used by the Morphospace
   Makepad Quest validation lane before Camera2 work starts.
 - Quest manifest camera permission and optional camera feature declarations
   needed by public examples that exercise Android NDK Camera2 diagnostics.
@@ -65,7 +65,7 @@ Current acceptable Makepad-side changes for the Rusty XR lane are:
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 
-Keep Rusty XR app behavior in the Rusty XR repo. Keep camera transport,
+Keep legacy Rusty-XR app behavior in the legacy Rusty-XR repo. Keep camera transport,
 projection policy, scorecard markers, runtime profile keys, and public example
 code out of this Makepad fork unless the change is a general Makepad adapter or
 an upstreamable Makepad fix.
@@ -84,19 +84,19 @@ UI lanes:
 
 - Hostess Makepad shell crates;
 - Studio Makepad/UI shell crates;
-- public Rusty XR Makepad examples.
+- legacy/public Rusty XR Makepad examples.
 
 Keep Manifold, Manifold packages, Rusty core/CLI crates, descriptor repos, and
 schema/fixture workspaces Makepad-free. Do not use this fork to define
 Manifold command/session/stream authority.
 
-## Rusty XR Validation Ladder
+## Morphospace Validation Ladder
 
 Use focused validation for this fork branch:
 
 ```powershell
-python tools\rusty_xr_format.py --changed --check
-python tools\check_rusty_xr_makepad_guards.py
+python tools\makepad_fork_format.py --changed --check
+python tools\check_morphospace_makepad_guards.py
 python tools\check_android_generated_output_stability.py
 cargo metadata --manifest-path libs\csg\csg_math\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_mesh\Cargo.toml --no-deps --format-version 1
@@ -108,10 +108,10 @@ cargo build -p cargo-makepad --release
 
 Do not use `cargo fmt --all` in this fork. Cargo's `--all` formatter route
 also walks local path dependencies, which includes vendored crates with pruned
-tests, benches, and examples. Use `python tools\rusty_xr_format.py --changed`
+tests, benches, and examples. Use `python tools\makepad_fork_format.py --changed`
 or `--changed --check` for edited files; the script derives workspace-member
 roots from Cargo metadata instead of hard-coding a file list. If a repo-wide
-audit is needed, use `python tools\rusty_xr_format.py --workspace --check`;
+audit is needed, use `python tools\makepad_fork_format.py --workspace --check`;
 that excludes local path dependencies but may still report existing first-party
 Makepad formatting drift.
 
@@ -129,11 +129,11 @@ cadence, and zero decode errors before comparing projection stages.
 For Quest comparison work, keep the ladder ordered:
 
 1. Minimal Makepad Quest/Vulkan surface smoke.
-2. Rusty XR Makepad synthetic OpenXR shell.
-3. Rusty XR synthetic stereo projection marker/scene.
+2. Morphospace Makepad synthetic OpenXR shell.
+3. Morphospace synthetic stereo projection marker/scene.
 4. Camera metadata and acquisition logging.
 5. Hardware-buffer import.
-6. Stereo projection parity against the non-Makepad Rusty XR custom APK lane.
+6. Stereo projection parity against the non-Makepad Morphospace Quest APK lane.
 
 # Studio Remote Runbook
 

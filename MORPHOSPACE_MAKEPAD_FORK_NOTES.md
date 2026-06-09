@@ -1,34 +1,34 @@
-# Rusty XR Fork Notes
+# Morphospace Makepad Fork Notes
 
-This branch is a narrow Makepad patch queue used by the Rusty XR
-Makepad-first Quest lane. Upstream Makepad remains the source of truth for the
-framework; this branch carries only the small deltas needed to validate the
-Quest Android/Vulkan build path against Rusty XR's public contracts.
+This branch is a narrow Makepad patch queue used by the Morphospace Makepad
+Quest lane. Upstream Makepad remains the source of truth for the framework;
+this branch carries only the small deltas needed to validate the Quest
+Android/Vulkan build path against Morphospace app-shell contracts.
 
-`RUSTY_XR_PATCH_LEDGER.md` classifies the current local patch families,
+`MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md` classifies the current local patch families,
 upstream-candidate boundaries, split-pressure watchlist, naming rules, and
-validation slots. `RUSTY_XR_MARKER_COMPATIBILITY.md` classifies active
+validation slots. `MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md` classifies active
 Manifold defaults, explicit legacy aliases, and rename-on-touch diagnostic
 markers. Update those files when adding a new patch family, landing a split,
 or changing a command/stream default.
 
-## Relationship To Rusty XR
+## Relationship To Morphospace
 
-Rusty XR core crates stay framework-neutral and do not depend on Makepad. The
-Makepad-first Rusty XR example depends on Makepad as an app shell and renderer
-route, while sharing Rusty XR runtime-profile and diagnostic contracts with the
-non-Makepad Quest examples.
+Morphospace core crates stay framework-neutral and do not depend on Makepad.
+The Morphospace Makepad example depends on Makepad as an app shell and renderer
+route, while sharing Morphospace runtime-profile and diagnostic contracts with
+the non-Makepad Quest examples.
 
 The intended dependency direction is:
 
 ```text
-Rusty XR core crates
-  -> Rusty XR Quest examples
-  -> Rusty XR Makepad-first Quest example
+Morphospace core crates
+  -> Morphospace Quest examples
+  -> Morphospace Makepad Quest example
        -> this Makepad fork branch
 ```
 
-Do not move Rusty XR app behavior, downstream package identity, generated APKs,
+Do not move downstream app behavior, downstream package identity, generated APKs,
 device logs, local SDK caches, or private validation artifacts into this branch.
 
 ## Dependency Boundary
@@ -37,7 +37,7 @@ Makepad dependencies are allowed only in downstream app-shell/UI lanes:
 
 - Hostess Makepad shell crates;
 - Studio Makepad/UI shell crates;
-- public Rusty XR Makepad examples.
+- legacy/public Rusty XR Makepad examples.
 
 Keep Manifold, Manifold packages, Rusty core/CLI crates, descriptor repos, and
 schema/fixture workspaces Makepad-free. This fork can prove rendering,
@@ -137,7 +137,7 @@ This branch currently carries:
   the main Makepad workspace validation path.
 - A local generated-target ignore rule for Android control builds.
 - A local Rusty XR Makepad guard script,
-  `tools/check_rusty_xr_makepad_guards.py`, that verifies Manifold H.264
+  `tools/check_morphospace_makepad_guards.py`, that verifies Manifold H.264
   defaults, explicit legacy aliases, stale-doc pointers, split helper files,
   and Android package-generation stability hooks.
 - A local generated-output stability checker,
@@ -183,8 +183,8 @@ For this branch, use focused validation instead of claiming full Makepad
 repo-wide formatting hygiene:
 
 ```powershell
-python tools\rusty_xr_format.py --changed --check
-python tools\check_rusty_xr_makepad_guards.py
+python tools\makepad_fork_format.py --changed --check
+python tools\check_morphospace_makepad_guards.py
 python tools\check_android_generated_output_stability.py
 cargo metadata --manifest-path libs\csg\csg_math\Cargo.toml --no-deps --format-version 1
 cargo metadata --manifest-path libs\csg\csg_mesh\Cargo.toml --no-deps --format-version 1
@@ -194,7 +194,7 @@ cargo check -p cargo-makepad
 cargo build -p cargo-makepad --release
 ```
 
-Use `tools\rusty_xr_format.py` instead of `cargo fmt --all`. Cargo's `--all`
+Use `tools\makepad_fork_format.py` instead of `cargo fmt --all`. Cargo's `--all`
 formatter route includes local path dependencies, so it reaches vendored crates
 that are not part of this fork's patch surface. The helper derives the
 workspace-member roots from Cargo metadata and formats only changed first-party
@@ -204,11 +204,11 @@ but existing Makepad-wide rustfmt drift can still make that audit fail.
 When Android Java bridge code changes, also compile the touched Java classes
 against the Android platform jar used by the target SDK. When generated Android
 templates or `cargo-makepad` packaging code changes, reinstall
-`cargo-makepad` from this checkout before rebuilding a Rusty XR APK; a
+`cargo-makepad` from this checkout before rebuilding a downstream APK; a
 downstream `Cargo.lock` pin alone does not update the packager binary.
 
 Quest smoke validation should start with a minimal Makepad Android/Vulkan
-surface before Rusty XR camera, broker, stream, or renderer measurements are
+surface before downstream camera, broker, stream, or renderer measurements are
 interpreted.
 
 For broker H.264 validation, preserve `max_packets=0` as the live/unbounded

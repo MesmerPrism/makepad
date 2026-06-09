@@ -1,9 +1,9 @@
-# Rusty XR Makepad Fork Patch Ledger
+# Morphospace Makepad Fork Patch Ledger
 
-This branch is a maintained Makepad fork for the Rusty XR Makepad-first Quest
+This branch is a maintained Makepad fork for the Morphospace Makepad Quest
 lane. Upstream Makepad remains the framework source of truth. This ledger keeps
 the local patch queue reviewable so the fork stays an app-shell, renderer, and
-tooling dependency rather than becoming Rusty runtime authority.
+tooling dependency rather than becoming Morphospace runtime authority.
 
 Use this file when adding, rebasing, splitting, or upstreaming fork patches.
 Keep entries public-safe: do not add private local paths, device logs, generated
@@ -29,16 +29,16 @@ Current audit baseline:
 
 | Family | Primary files | Classification | Keep local or upstream? | Validation |
 | --- | --- | --- | --- | --- |
-| Fork instructions and validation helpers | `AGENTS.md`, `RUSTY_XR_FORK_NOTES.md`, `RUSTY_XR_PATCH_LEDGER.md`, `RUSTY_XR_MARKER_COMPATIBILITY.md`, `RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md`, `RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md`, `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md`, `Justfile`, `tools/check_all.ps1`, `tools/rusty_xr_format.py`, `tools/check_rusty_xr_makepad_guards.py`, `tools/check_android_generated_output_stability.py` | Branch-local documentation and validation routing. | Keep local unless a helper becomes generic Makepad tooling. | `python tools\rusty_xr_format.py --changed --check`; `python tools\check_rusty_xr_makepad_guards.py`; `python tools\check_android_generated_output_stability.py`; `make check` where appropriate. |
+| Fork instructions and validation helpers | `AGENTS.md`, `MORPHOSPACE_MAKEPAD_FORK_NOTES.md`, `MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md`, `MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md`, `MORPHOSPACE_MAKEPAD_H264_ADAPTER_SPLIT_PLAN.md`, `MORPHOSPACE_MAKEPAD_ANDROID_COMPILE_SPLIT_PLAN.md`, `MORPHOSPACE_MAKEPAD_ACTIVITY_SPLIT_PLAN.md`, `Justfile`, `tools/check_all.ps1`, `tools/makepad_fork_format.py`, `tools/check_morphospace_makepad_guards.py`, `tools/check_android_generated_output_stability.py` | Branch-local documentation and validation routing. | Keep local unless a helper becomes generic Makepad tooling. | `python tools\makepad_fork_format.py --changed --check`; `python tools\check_morphospace_makepad_guards.py`; `python tools\check_android_generated_output_stability.py`; `make check` where appropriate. |
 | Workspace metadata and generated-target ignores | `.gitignore`, `Cargo.toml` | Workspace hygiene for standalone leaf crates and local generated Android targets. | Upstream candidate only when generic and not Rusty-specific. | `cargo metadata --no-deps --format-version 1`; focused CSG metadata checks when CSG entries change. |
 | Android packaging and cargo-makepad tooling | `tools/cargo_makepad/src/android/compile.rs`, `tools/cargo_makepad/src/android/compile/keystore.rs`, `tools/cargo_makepad/src/android/compile/wrapper_manifest.rs`, `tools/cargo_makepad/src/android/compile/toolchain.rs`, `tools/cargo_makepad/src/android/compile/shared_libs.rs`, `tools/cargo_makepad/src/android/compile/packaging_inputs.rs`, `tools/cargo_makepad/src/android/compile/assets.rs`, `tools/cargo_makepad/src/android/compile/java_build.rs`, `tools/cargo_makepad/src/android/compile/apk_assembly.rs`, `tools/cargo_makepad/src/android/compile/aab_assembly.rs`, `tools/cargo_makepad/src/android/compile/rust_build.rs`, `tools/cargo_makepad/src/android/mod.rs`, `tools/cargo_makepad/src/android/sdk.rs`, `tools/cargo_makepad/src/utils.rs` | Packaging/tooling patch family. | Prefer upstreamable slices for portability, stable generated-wrapper identity, SDK/JDK/NDK resolution, bundletool/AAB support, and shared-library bundling. | `cargo check -p cargo-makepad`; `cargo build -p cargo-makepad --release` after behavioral packaging changes. |
-| Android Java shell and permissions | `MakepadActivity.java`, `RustyXrActivitySupport.java`, `RustyXrMediaProjectionHelper.java`, `ExternalH264VideoPlaybackFactory.java`, `MakepadInputConnection.java`, `MakepadNative.java`, `MediaProjectionStreamService.java`, `VideoPlayer.java` | Local Quest/Android app-shell adapter plus generic Android shell fixes. `MakepadActivity.java` remains the generated activity facade; Rusty phase-marker/intent parsing, MediaProjection glue, and external-H264 entrypoint construction live in package-private helpers. | Keep Quest/Rusty launch markers local; upstream generic activity, input, permission, or generated-shell fixes when separable. | Java touched-package compile when Java changes; downstream APK source-root build for generated-shell behavior. |
+| Android Java shell and permissions | `MakepadActivity.java`, `RustyXrActivitySupport.java`, `RustyXrMediaProjectionHelper.java`, `ExternalH264VideoPlaybackFactory.java`, `MakepadInputConnection.java`, `MakepadNative.java`, `MediaProjectionStreamService.java`, `VideoPlayer.java` | Local Quest/Android app-shell adapter plus generic Android shell fixes. `MakepadActivity.java` remains the generated activity facade; Morphospace phase-marker/intent parsing, MediaProjection glue, and external-H264 entrypoint construction live in package-private helpers. | Keep Quest/Morphospace launch markers local; upstream generic activity, input, permission, or generated-shell fixes when separable. | Java touched-package compile when Java changes; downstream APK source-root build for generated-shell behavior. |
 | Manifold external H.264 video adapter | `BrokerH264VideoPlayer.java`, `ExternalH264VideoPlaybackFactory.java`, `ExternalH264Config.java`, `ManifoldH264CommandClient.java`, `ManifoldVideoStreamReader.java`, `H264AnnexBPrimer.java`, `ExternalH264HardwareBufferTarget.java`, `ExternalH264CpuYuvEmitter.java`, `platform/src/event/video_playback.rs`, `platform/src/os/linux/android/android_jni.rs`, `platform/src/os/linux/android/android.rs`, `widgets/src/video.rs` | Local adapter and compatibility surface. Manifold defaults are active; old Rusty-XR broker names are explicit legacy aliases only. | Keep local until a generic external H.264 source abstraction is separable. Avoid moving command/session/stream authority into Makepad. | Manifold-default scans; Java touched-class compile when Java changes; `cargo check -p cargo-makepad` when generated Java packaging changes. |
 | Android camera and video metadata | `platform/src/os/linux/android/android_camera.rs`, `platform/src/os/linux/android/android_camera_player.rs`, `platform/src/video.rs`, platform video playback stubs | Quest camera/video metadata and texture-readiness evidence. | Keep local unless the API is generic Makepad camera/video metadata. | Makepad format check; downstream camera-shell build and device validation only when behavior changes. |
 | Vulkan hardware-buffer import and lifetime | `platform/src/os/linux/vulkan.rs`, `platform/src/os/linux/vulkan_naga.rs`, shader reflection/lowering files | Renderer correctness and external video import evidence. | Upstream only as small generic lifetime/resource/sampler/reflection fixes. Do not broad-split upstream-owned files without a rebase plan. | `cargo check -p makepad-platform` when touching platform Vulkan; downstream GPU/page-fault gate for behavior changes. |
-| OpenXR and Quest runtime surfaces | `platform/src/os/linux/openxr.rs`, `openxr_input.rs`, `openxr_opengl.rs`, `openxr_sys.rs`, `openxr_vulkan.rs`, `platform/src/event/xr.rs`, `xr/src/**` | Quest/OpenXR proving support and generic XR capability exposure. | Keep local for Rusty proving markers; upstream generic OpenXR fixes or hand-mesh capability exposure when separable. | Makepad format check; OpenXR/Quest smoke only when runtime behavior changes. |
-| Shader, draw, and text intake | `draw/src/shader/**`, `draw/src/text/**`, `platform/script/src/**` | Mixed upstream intake plus XR shader builtin/resource-shape support. | Upstream generic shader/resource fixes; keep XR view-id or Rusty evidence markers local until generalized. | Cargo metadata/checks for affected crates; downstream render validation for behavior changes. |
-| Widgets and Studio/UI intake | `widgets/src/**`, `examples/uizoo/**`, `tools/cargo_makepad/src/studio.rs`, `tools/cargo_makepad/src/tunnel.rs` | Upstream UI intake and local proving-surface polish. | Prefer upstream for generic widget fixes. Keep Rusty proving behavior out of generic widgets unless the API is renderer-neutral. | Makepad format check; targeted widget/app checks only when behavior changes. |
+| OpenXR and Quest runtime surfaces | `platform/src/os/linux/openxr.rs`, `openxr_input.rs`, `openxr_opengl.rs`, `openxr_sys.rs`, `openxr_vulkan.rs`, `platform/src/event/xr.rs`, `xr/src/**` | Quest/OpenXR proving support and generic XR capability exposure. | Keep local for Morphospace proving markers; upstream generic OpenXR fixes or hand-mesh capability exposure when separable. | Makepad format check; OpenXR/Quest smoke only when runtime behavior changes. |
+| Shader, draw, and text intake | `draw/src/shader/**`, `draw/src/text/**`, `platform/script/src/**` | Mixed upstream intake plus XR shader builtin/resource-shape support. | Upstream generic shader/resource fixes; keep XR view-id or Morphospace evidence markers local until generalized. | Cargo metadata/checks for affected crates; downstream render validation for behavior changes. |
+| Widgets and Studio/UI intake | `widgets/src/**`, `examples/uizoo/**`, `tools/cargo_makepad/src/studio.rs`, `tools/cargo_makepad/src/tunnel.rs` | Upstream UI intake and local proving-surface polish. | Prefer upstream for generic widget fixes. Keep Morphospace proving behavior out of generic widgets unless the API is renderer-neutral. | Makepad format check; targeted widget/app checks only when behavior changes. |
 | Cross-platform stubs and upstream sync | Apple, Windows, Web, X11, Wayland, Linux video playback files | Usually upstream sync or generic compatibility changes needed to keep enum/API additions compiling across platforms. | Upstream candidate when not Rusty-specific. Keep changes minimal. | `cargo metadata --no-deps --format-version 1`; targeted cargo check if API shape changes. |
 | Vendored or generated local touches | `libs/rapier/vendor/**`, generated binding-style files | Avoid churn. Only touch for required upstream sync or compiler compatibility. | Prefer no local edits. Re-check provenance before changing. | Only focused metadata/checks; do not use repo-wide formatting to rewrite vendored paths. |
 
@@ -56,8 +56,8 @@ and the helper boundary preserves public signatures, generated output,
 validation behavior, and legacy compatibility.
 
 1. `tools/cargo_makepad/src/android/java/dev/makepad/android/MakepadActivity.java`
-   - Status: preflight complete; first Rusty-owned app-shell slices are done.
-   - Use `RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md` before moving Java code.
+   - Status: preflight complete; first Morphospace-owned app-shell slices are done.
+   - Use `MORPHOSPACE_MAKEPAD_ACTIVITY_SPLIT_PLAN.md` before moving Java code.
    - Phase-marker and intent-extra parsing now live in
      `RustyXrActivitySupport.java`.
    - MediaProjection request/result/service glue now lives in
@@ -80,7 +80,7 @@ validation behavior, and legacy compatibility.
      stream reader, Annex-B primer, HWB target, CPU-YUV emitter, and activity
      entrypoint factory.
    - Keep the public class name initially as a compatibility facade.
-   - Use `RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md` before moving Java code.
+   - Use `MORPHOSPACE_MAKEPAD_H264_ADAPTER_SPLIT_PLAN.md` before moving Java code.
    - Config defaults and normalization now live in `ExternalH264Config.java`.
    - Manifold command WebSocket and command JSON now live in
      `ManifoldH264CommandClient.java`.
@@ -101,7 +101,7 @@ validation behavior, and legacy compatibility.
 3. `tools/cargo_makepad/src/android/compile.rs`
    - Status: Android packaging/tooling pressure release complete; helper
      families are split and `compile.rs` is a cohesive command facade.
-   - Use `RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md` before moving Rust code.
+   - Use `MORPHOSPACE_MAKEPAD_ANDROID_COMPILE_SPLIT_PLAN.md` before moving Rust code.
    - Keystore sidecar parsing and upload-keystore creation now live in
      `tools/cargo_makepad/src/android/compile/keystore.rs`.
    - Generated wrapper manifest path rewriting, workspace patch extraction,
@@ -159,10 +159,10 @@ small, behavior-driven, and has a clear upstream or fork-owned boundary.
 - Diagnostic markers that still use `rusty.xr.makepad-*` are historical
   evidence markers. New markers should prefer a Makepad, Quest, Hostess, or
   Manifold owner name based on the actual authority.
-- Use `RUSTY_XR_MARKER_COMPATIBILITY.md` before renaming any `debug.rustyxr.*`,
+- Use `MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md` before renaming any `debug.rustyxr.*`,
   `rustyxr.*`, or `rusty.xr.makepad-*` surface. Most of these are
   rename-on-touch compatibility markers, not immediate cleanup targets.
-- `tools/check_rusty_xr_makepad_guards.py` is the repo-local drift check for
+- `tools/check_morphospace_makepad_guards.py` is the repo-local drift check for
   H.264 Manifold defaults, explicit `LEGACY_*` aliases, stale doc pointers,
   split helper files, and generated-output stability hooks.
 - `tools/check_android_generated_output_stability.py` snapshots and compares
@@ -176,7 +176,7 @@ Makepad dependencies are allowed only in downstream app-shell/UI lanes:
 
 - Hostess Makepad shell crates;
 - Studio Makepad/UI shell crates;
-- public Rusty XR Makepad examples.
+- legacy/public Rusty XR Makepad examples.
 
 Keep Manifold, Manifold packages, Rusty core/CLI crates, descriptor repos, and
 schema/fixture workspaces Makepad-free. Makepad may prove app-shell,

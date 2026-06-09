@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rusty XR guardrails for the maintained Makepad fork."""
+"""Morphospace Makepad guardrails for the maintained Makepad fork."""
 
 from pathlib import Path
 import sys
@@ -190,12 +190,12 @@ def check_split_maps(checks):
 def check_docs(checks):
     docs = [
         "AGENTS.md",
-        "RUSTY_XR_FORK_NOTES.md",
-        "RUSTY_XR_PATCH_LEDGER.md",
-        "RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md",
-        "RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md",
-        "RUSTY_XR_MAKEPAD_ACTIVITY_SPLIT_PLAN.md",
-        "RUSTY_XR_MARKER_COMPATIBILITY.md",
+        "MORPHOSPACE_MAKEPAD_FORK_NOTES.md",
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
+        "MORPHOSPACE_MAKEPAD_H264_ADAPTER_SPLIT_PLAN.md",
+        "MORPHOSPACE_MAKEPAD_ANDROID_COMPILE_SPLIT_PLAN.md",
+        "MORPHOSPACE_MAKEPAD_ACTIVITY_SPLIT_PLAN.md",
+        "MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md",
     ]
     for rel in docs:
         checks.not_contains(
@@ -205,92 +205,92 @@ def check_docs(checks):
         )
 
     checks.contains(
-        "RUSTY_XR_MARKER_COMPATIBILITY.md",
+        "MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md",
         "rename-on-touch",
         "marker compatibility classification",
     )
     checks.contains(
-        "RUSTY_XR_MARKER_COMPATIBILITY.md",
+        "MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md",
         "Runtime Marker Decisions",
         "runtime marker decision table",
     )
     checks.contains(
-        "RUSTY_XR_MARKER_COMPATIBILITY.md",
+        "MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md",
         "debug.rustyxr.xr.display.refresh.rate.hz",
         "debug.rustyxr compatibility classification",
     )
     checks.contains(
-        "RUSTY_XR_MARKER_COMPATIBILITY.md",
+        "MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md",
         "rusty.xr.makepad-broker-h264-*",
         "rusty.xr.makepad broker H264 classification",
     )
     checks.contains(
-        "RUSTY_XR_MARKER_COMPATIBILITY.md",
+        "MORPHOSPACE_MAKEPAD_MARKER_BOUNDARY.md",
         "Manifold-owned only if the event becomes a Manifold contract",
         "Manifold replacement boundary",
     )
     checks.contains(
-        "RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md",
+        "MORPHOSPACE_MAKEPAD_H264_ADAPTER_SPLIT_PLAN.md",
         "Decoder Loop Preflight",
         "decoder loop preflight section",
     )
     checks.contains(
-        "RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md",
+        "MORPHOSPACE_MAKEPAD_H264_ADAPTER_SPLIT_PLAN.md",
         "Decoder Loop Ownership Map",
         "decoder loop ownership map",
     )
     checks.contains(
-        "RUSTY_XR_H264_ADAPTER_SPLIT_PLAN.md",
+        "MORPHOSPACE_MAKEPAD_H264_ADAPTER_SPLIT_PLAN.md",
         "BrokerH264VideoPlayer.java remains the decoder orchestrator",
         "decoder split stop decision",
     )
     checks.contains(
-        "RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md",
+        "MORPHOSPACE_MAKEPAD_ANDROID_COMPILE_SPLIT_PLAN.md",
         "Generated Output Stability Preflight",
         "generated output stability section",
     )
     checks.contains(
-        "RUSTY_XR_ANDROID_COMPILE_SPLIT_PLAN.md",
+        "MORPHOSPACE_MAKEPAD_ANDROID_COMPILE_SPLIT_PLAN.md",
         "check_android_generated_output_stability.py --snapshot-out",
         "generated output snapshot command",
     )
     checks.contains(
         "AGENTS.md",
-        "public Rusty XR Makepad examples",
+        "legacy/public Rusty XR Makepad examples",
         "Makepad dependency boundary in agent notes",
     )
     checks.contains(
-        "RUSTY_XR_FORK_NOTES.md",
+        "MORPHOSPACE_MAKEPAD_FORK_NOTES.md",
         "Keep Manifold, Manifold packages, Rusty core/CLI crates, descriptor repos",
         "Makepad dependency boundary in fork notes",
     )
     checks.contains(
-        "RUSTY_XR_PATCH_LEDGER.md",
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "Hostess Makepad shell crates",
         "Makepad dependency boundary in patch ledger",
     )
     checks.contains(
-        "RUSTY_XR_PATCH_LEDGER.md",
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "This is a watchlist, not an active split queue",
         "split-pressure watchlist policy",
     )
     checks.contains(
-        "RUSTY_XR_PATCH_LEDGER.md",
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "do not continue splitting `MakepadActivity.java` by line",
         "MakepadActivity facade stop condition",
     )
     checks.contains(
-        "RUSTY_XR_PATCH_LEDGER.md",
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "leave `BrokerH264VideoPlayer.java` as the decoder",
         "H264 decoder facade stop condition",
     )
     checks.contains(
-        "RUSTY_XR_PATCH_LEDGER.md",
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "do not continue splitting `compile.rs` by line",
         "compile facade stop condition",
     )
     checks.contains(
-        "RUSTY_XR_PATCH_LEDGER.md",
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "Platform/video watchlist",
         "platform video watchlist",
     )
@@ -306,13 +306,13 @@ def main():
         for failure in checks.failures:
             print(f"[FAIL] {failure}", file=sys.stderr)
         print(
-            f"Rusty XR Makepad guardrails: fail "
+            f"Morphospace Makepad guardrails: fail "
             f"({len(checks.failures)} failures, {checks.passed} passes)",
             file=sys.stderr,
         )
         return 1
 
-    print(f"Rusty XR Makepad guardrails: pass ({checks.passed} checks)")
+    print(f"Morphospace Makepad guardrails: pass ({checks.passed} checks)")
     return 0
 
 

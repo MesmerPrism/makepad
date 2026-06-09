@@ -1,4 +1,4 @@
-# Rusty XR External H264 Adapter Split Plan
+# Morphospace Makepad External H264 Adapter Split Plan
 
 This is a mechanical split preflight for
 `tools/cargo_makepad/src/android/java/dev/makepad/android/BrokerH264VideoPlayer.java`.
@@ -7,7 +7,7 @@ before moving Java code.
 
 The goal is pressure release, not behavior change. `BrokerH264VideoPlayer`
 should remain the package-private compatibility facade until downstream
-generated activity code and public Rusty XR examples no longer reference that
+generated activity code and legacy/public Rusty XR examples no longer reference that
 name.
 
 ## Current Facade Contract
@@ -241,7 +241,7 @@ Preserved boundary:
 For documentation-only preflight changes:
 
 ```powershell
-python tools\rusty_xr_format.py --changed --check
+python tools\makepad_fork_format.py --changed --check
 cargo metadata --no-deps --format-version 1
 git diff --check
 ```
@@ -249,8 +249,8 @@ git diff --check
 For Java movement:
 
 ```powershell
-python tools\rusty_xr_format.py --changed --check
-python tools\check_rusty_xr_makepad_guards.py
+python tools\makepad_fork_format.py --changed --check
+python tools\check_morphospace_makepad_guards.py
 cargo metadata --no-deps --format-version 1
 cargo check -p cargo-makepad
 ```

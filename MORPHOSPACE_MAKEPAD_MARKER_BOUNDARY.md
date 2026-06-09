@@ -1,7 +1,7 @@
-# Rusty XR Marker Compatibility Map
+# Morphospace Makepad Marker Boundary Map
 
 This branch still contains historical Rusty XR marker strings because it is a
-maintained Makepad fork for the public Rusty XR Makepad-first Quest lane. Treat
+maintained Makepad fork for the public Morphospace Makepad Quest lane. Treat
 these strings as compatibility evidence unless this file says they are active
 defaults.
 
@@ -29,7 +29,7 @@ same slice.
 
 | Runtime marker family | Keep compatibility | Rename-on-touch | Retire | Replace with owner |
 | --- | --- | --- | --- | --- |
-| `debug.rustyxr.xr.display.refresh.rate.hz` | yes | yes; keep a compatibility read path if public Rusty XR wrappers still set it | no immediate retire | Quest/Makepad-owned Android display-refresh property, not Manifold authority |
+| `debug.rustyxr.xr.display.refresh.rate.hz` | yes | yes; keep a compatibility read path if legacy/public Rusty XR wrappers still set it | no immediate retire | Quest/Makepad-owned Android display-refresh property, not Manifold authority |
 | `rusty.xr.makepad-android-bootstrap.v1` and `rusty.xr.makepad-android-activity.v1` | yes | yes | no immediate retire | Makepad-owned Android app-shell phase marker |
 | `rusty.xr.makepad-camera-frame-flow.v1` | yes | yes | retire duplicate phases only after downstream frame-flow evidence no longer consumes them | Quest/Makepad-owned camera frame-flow diagnostic |
 | `rusty.xr.makepad-broker-h264-*` | yes | yes; replace `broker` wording only in the touched H.264 stream/slot slice | no immediate retire | Makepad-owned H.264 diagnostic, or Manifold-owned only if the event becomes a Manifold contract |
@@ -50,7 +50,7 @@ Use this queue when an affected behavior slice is already editing the owner:
 7. Display refresh debug property in `platform/src/os/linux/android/android.rs`.
 
 Each rename-on-touch slice needs a downstream evidence-tool scan before commit.
-If a marker is still consumed by public Rusty XR validation tools, either keep a
+If a marker is still consumed by legacy/public Rusty XR validation tools, either keep a
 compatibility alias or update the validator and this map together.
 
 ## Guard
@@ -58,7 +58,7 @@ compatibility alias or update the validator and this map together.
 Run:
 
 ```powershell
-python tools\check_rusty_xr_makepad_guards.py
+python tools\check_morphospace_makepad_guards.py
 ```
 
 This checks the active Manifold H.264 defaults, explicit legacy aliases, stale

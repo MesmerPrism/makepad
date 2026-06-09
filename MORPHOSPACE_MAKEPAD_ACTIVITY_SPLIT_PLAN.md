@@ -1,11 +1,11 @@
-# Rusty XR Makepad Activity Split Plan
+# Morphospace Makepad Activity Split Plan
 
 This is a mechanical split preflight for
 `tools/cargo_makepad/src/android/java/dev/makepad/android/MakepadActivity.java`.
 
 The goal is pressure release, not Android lifecycle behavior change.
 `MakepadActivity` should remain the generated Android activity facade while
-Rusty-owned app-shell helper families move into package-private helpers under
+Morphospace-owned app-shell helper families move into package-private helpers under
 `dev.makepad.android`.
 
 ## Current Facade Contract
@@ -23,7 +23,7 @@ Keep these stable during split intervals:
 - `prepareBrokerH264VideoPlayback` public entrypoint and argument order;
 - MediaProjection request code, default delay, default host/port/size, and
   foreground-service payload extras;
-- Rusty activity phase-marker schema text and phase names.
+- Morphospace activity phase-marker schema text and phase names.
 
 Do not add Manifold, Hostess, Studio, Quest runtime authority, sockets, or
 app-specific policy to `MakepadActivity`. Manifold remains command/session
@@ -35,7 +35,7 @@ authority; this file is Android app-shell glue.
 | --- | --- | --- |
 | Upstream Android lifecycle and view setup | `onCreate`, `onResume`, `onPause`, `onDestroy`, surface/layout methods | Keep in `MakepadActivity.java`; do not broad-refactor. |
 | Rusty activity phase markers | `rustyXrActivityMarker`, static load markers, onCreate/native onCreate markers | Move marker formatting/logging into `RustyXrActivitySupport.java`, keep phase call sites in the activity. |
-| Rusty intent-extra parsing | `rustyXrIntentBooleanExtra`, `rustyXrIntentIntExtra`, `rustyXrIntentLongExtra` | Move typed parsing into `RustyXrActivitySupport.java`, passing an explicit `Intent`. |
+| Morphospace intent-extra parsing | `rustyXrIntentBooleanExtra`, `rustyXrIntentIntExtra`, `rustyXrIntentLongExtra` | Move typed parsing into `RustyXrActivitySupport.java`, passing an explicit `Intent`. |
 | MediaProjection request/result flow | `mRustyXrMediaProjectionManager`, request constants, `requestRustyXrMediaProjectionIfEnabled`, `requestRustyXrMediaProjection`, MediaProjection branch in `onActivityResult`, service stop in `onDestroy` | Move to `RustyXrMediaProjectionHelper.java`; activity keeps lifecycle call sites and delegates request/result handling. |
 | H264/external-video entrypoint | `prepareBrokerH264VideoPlayback` config construction and runnable insertion | Later helper only if it can preserve the public method signature and video-thread/map ownership. |
 | Generic video playback | `prepareVideoPlayback`, `beginVideoPlayback`, pause/resume/stop, cleanup | Keep in activity unless a video-shell boundary becomes necessary. |
@@ -44,8 +44,8 @@ authority; this file is Android app-shell glue.
 ## Current Slice Status
 
 - Preflight/source map: complete.
-- `RustyXrActivitySupport.java`: complete. Owns Rusty activity marker
-  formatting/logging and typed Rusty intent-extra parsing.
+- `RustyXrActivitySupport.java`: complete. Owns Morphospace activity marker
+  formatting/logging and typed Morphospace intent-extra parsing.
 - `RustyXrMediaProjectionHelper.java`: complete. Owns MediaProjection enable
   parsing, delayed consent request, consent result handling, foreground-service
   payload construction, and service stop glue.
@@ -61,7 +61,7 @@ authority; this file is Android app-shell glue.
 Recommended first movement:
 
 1. Add `RustyXrActivitySupport.java`.
-2. Move activity phase-marker formatting/logging and typed Rusty intent-extra
+2. Move activity phase-marker formatting/logging and typed Morphospace intent-extra
    parsing into static package-private helper methods.
 3. Keep all phase call sites and MediaProjection call sites in
    `MakepadActivity.java`.
@@ -104,7 +104,7 @@ count alone.
 For documentation-only preflight changes:
 
 ```powershell
-python tools\rusty_xr_format.py --changed --check
+python tools\makepad_fork_format.py --changed --check
 cargo metadata --no-deps --format-version 1
 git diff --check
 ```
@@ -112,7 +112,7 @@ git diff --check
 For Java helper movement:
 
 ```powershell
-python tools\rusty_xr_format.py --changed --check
+python tools\makepad_fork_format.py --changed --check
 cargo metadata --no-deps --format-version 1
 cargo check -p cargo-makepad
 javac -cp S:\Work\tools\Android\windows-sdk\platforms\android-35\android.jar -d <temp> `
