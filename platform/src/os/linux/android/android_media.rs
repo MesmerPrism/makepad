@@ -7,7 +7,6 @@ use {
     std::sync::{Arc, Mutex},
 };
 
-#[derive(Default)]
 pub struct CxAndroidMedia {
     pub(crate) android_audio_change: SignalToUI,
     pub(crate) android_audio: Option<Arc<Mutex<AndroidAudioAccess>>>,
@@ -15,6 +14,21 @@ pub struct CxAndroidMedia {
     pub(crate) android_midi: Option<Arc<Mutex<AndroidMidiAccess>>>,
     pub(crate) android_camera_change: SignalToUI,
     pub(crate) android_camera: Option<Arc<Mutex<AndroidCameraAccess>>>,
+    pub(crate) video_input_discovery_enabled: bool,
+}
+
+impl Default for CxAndroidMedia {
+    fn default() -> Self {
+        Self {
+            android_audio_change: Default::default(),
+            android_audio: Default::default(),
+            android_midi_change: Default::default(),
+            android_midi: Default::default(),
+            android_camera_change: Default::default(),
+            android_camera: Default::default(),
+            video_input_discovery_enabled: true,
+        }
+    }
 }
 
 impl Cx {
@@ -41,17 +55,21 @@ impl Cx {
                 self.call_event_handler(&Event::MidiPorts(MidiPortsEvent { descs }));
             }
         }
-        // Lazily initialize camera subsystem on first media signal check.
-        let camera_first = self.os.media.android_camera.is_none();
-        if camera_first || self.os.media.android_camera_change.check_and_clear() {
-            let descs = self
-                .os
-                .media
-                .android_camera()
-                .lock()
-                .unwrap()
-                .get_updated_descs();
-            self.call_event_handler(&Event::VideoInputs(VideoInputsEvent { descs }));
+        if self.os.media.video_input_discovery_enabled {
+            // Lazily initialize camera subsystem on first media signal check.
+            let camera_first = self.os.media.android_camera.is_none();
+            if camera_first || self.os.media.android_camera_change.check_and_clear() {
+                let descs = self
+                    .os
+                    .media
+                    .android_camera()
+                    .lock()
+                    .unwrap()
+                    .get_updated_descs();
+                self.call_event_handler(&Event::VideoInputs(VideoInputsEvent { descs }));
+            }
+        } else {
+            self.os.media.android_camera_change.check_and_clear();
         }
     }
 
@@ -88,6 +106,19 @@ impl CxAndroidMedia {
                 Some(AndroidCameraAccess::new(self.android_camera_change.clone()));
         }
         self.android_camera.as_ref().unwrap().clone()
+    }
+
+    pub fn set_video_input_discovery_enabled(&mut self, enabled: bool) {
+        if self.video_input_discovery_enabled == enabled {
+            return;
+        }
+        self.video_input_discovery_enabled = enabled;
+        if enabled {
+            self.android_camera_change.set();
+        } else if let Some(camera) = &self.android_camera {
+            camera.lock().unwrap().use_video_input(&[]);
+            self.android_camera_change.check_and_clear();
+        }
     }
 }
 
@@ -312,6 +343,10 @@ impl CxMediaApi for Cx {
             VideoCapabilities { codecs },
             crate::media_video_capabilities(),
         )
+    }
+
+    fn set_video_input_discovery_enabled(&mut self, enabled: bool) {
+        self.os.media.set_video_input_discovery_enabled(enabled);
     }
 
     fn use_video_input(&mut self, inputs: &[(VideoInputId, VideoFormatId)]) {

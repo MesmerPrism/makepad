@@ -90,6 +90,11 @@ This branch currently carries:
   `--quest-camera-permissions=false`, for generated XR APKs that still need
   `.MakepadAppXr`, OpenXR broker queries, and Quest VR metadata but must not
   declare Android, headset, or spatial camera permissions.
+- Android video-input discovery gating so camera-free XR apps can opt out of
+  passive `ACameraManager` enumeration. This is separate from manifest
+  permission filtering: camera-free apps need both no camera permissions in the
+  generated APK and no passive runtime camera discovery when streaming is
+  disabled.
 - Quest manifest launch semantics for generated XR activities, including
   VR-only/focus-aware metadata and non-resizeable activity declarations needed
   to distinguish immersive presentation from Horizon OS volumetric-window

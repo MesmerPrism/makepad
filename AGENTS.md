@@ -51,6 +51,9 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
   `cargo makepad android --variant=quest --quest-camera-permissions=false` for
   generated XR APKs that must keep `MakepadAppXr`/OpenXR metadata but must not
   request Android/headset/spatial camera access.
+- Android video-input discovery gating so XR apps that have camera streaming
+  disabled can avoid passive `ACameraManager` enumeration while still retaining
+  explicit camera/video playback paths when the app opts in.
 - Quest manifest XR launch metadata and non-resizeable activity declarations
   used to keep generated Quest XR activities on the immersive path instead of
   Horizon OS volumetric-window handling.

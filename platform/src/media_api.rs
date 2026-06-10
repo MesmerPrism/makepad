@@ -127,5 +127,12 @@ pub trait CxMediaApi {
         VideoCapabilities::default()
     }
 
+    /// Enables or disables passive video-input device discovery.
+    ///
+    /// This does not change explicit camera playback setup. It lets apps that
+    /// have no active camera feature avoid backend camera enumeration on
+    /// platforms where discovery itself can require privileged camera access.
+    fn set_video_input_discovery_enabled(&mut self, _enabled: bool) {}
+
     fn use_video_input(&mut self, devices: &[(VideoInputId, VideoFormatId)]);
 }
