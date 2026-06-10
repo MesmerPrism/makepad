@@ -86,6 +86,10 @@ This branch currently carries:
 - Quest manifest camera permission and optional camera feature declarations so
   public examples can validate Android NDK Camera2 metadata and acquisition
   through the generated Android shell.
+- A Quest manifest camera-permission opt-out flag,
+  `--quest-camera-permissions=false`, for generated XR APKs that still need
+  `.MakepadAppXr`, OpenXR broker queries, and Quest VR metadata but must not
+  declare Android, headset, or spatial camera permissions.
 - Quest manifest launch semantics for generated XR activities, including
   VR-only/focus-aware metadata and non-resizeable activity declarations needed
   to distinguish immersive presentation from Horizon OS volumetric-window

@@ -170,6 +170,7 @@ pub(super) fn prepare_build(opts: &PrepareBuildOpts<'_>) -> Result<BuildPaths, S
         debuggable: opts.debuggable,
         screen_orientation: opts.config.screen_orientation.as_deref(),
         resizeable_activity: opts.config.resizeable_activity,
+        quest_camera_permissions: opts.config.quest_camera_permissions.unwrap_or(true),
     };
     let custom_template = build_crate_dir.join("resources/android/AndroidManifest.xml.template");
     let manifest_xml = if custom_template.is_file() {

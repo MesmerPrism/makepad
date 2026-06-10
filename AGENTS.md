@@ -47,6 +47,10 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
   Makepad Quest validation lane before Camera2 work starts.
 - Quest manifest camera permission and optional camera feature declarations
   needed by public examples that exercise Android NDK Camera2 diagnostics.
+- Quest manifest camera-permission opt-out through
+  `cargo makepad android --variant=quest --quest-camera-permissions=false` for
+  generated XR APKs that must keep `MakepadAppXr`/OpenXR metadata but must not
+  request Android/headset/spatial camera access.
 - Quest manifest XR launch metadata and non-resizeable activity declarations
   used to keep generated Quest XR activities on the immersive path instead of
   Horizon OS volumetric-window handling.
@@ -119,6 +123,20 @@ If Android Java bridge code or `cargo-makepad` generated-template code changes,
 run a touched-class Java compile against the Android target platform jar, then
 reinstall `cargo-makepad` from this checkout before rebuilding downstream APKs.
 The downstream Rust dependency lockfile does not update the installed packager.
+For the Hostess Matter/SDF/particle Quest APK specifically, the known-good
+debug build route from `S:\Work\repos\active\rusty-hostess\apps\hostess-t-makepad`
+is:
+
+```powershell
+& 'S:\Work\tools\Quest\Use-QuestTooling.ps1'
+cargo install --path S:\Work\repos\active\makepad-morphospace\tools\cargo_makepad --force
+cargo makepad android --variant=quest --abi=aarch64 --sdk-path="$env:ANDROID_HOME" --package-name=io.github.mesmerprism.rustyhostess.makepad --app-label="Rusty Hostess Makepad" --quest-camera-permissions=false build -p hostess-t-makepad
+```
+
+Do not replace this with an app-local AndroidManifest template just to remove
+camera permissions. Use the generated Quest manifest plus the explicit
+camera-permission opt-out so OpenXR broker queries and `.MakepadAppXr` stay
+intact.
 
 Broker H.264 stream semantics matter for validation: `max_packets=0` means
 live/unbounded, not one packet. A run that only proves stream-header metadata

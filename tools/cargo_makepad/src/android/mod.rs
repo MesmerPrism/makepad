@@ -21,6 +21,7 @@ pub struct AndroidConfig {
     pub small_fonts: bool,
     pub screen_orientation: Option<String>,
     pub resizeable_activity: Option<bool>,
+    pub quest_camera_permissions: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +37,7 @@ pub struct ManifestArgs<'a> {
     pub debuggable: bool,
     pub screen_orientation: Option<&'a str>,
     pub resizeable_activity: Option<bool>,
+    pub quest_camera_permissions: bool,
 }
 
 fn parse_android_bool_flag(name: &str, value: &str) -> Result<bool, String> {
@@ -86,6 +88,7 @@ impl AndroidVariant {
             debuggable,
             screen_orientation,
             resizeable_activity,
+            quest_camera_permissions,
         } = args;
         let icon_attr = if *has_icon {
             "\n                    android:icon=\"@mipmap/ic_launcher\""
@@ -109,6 +112,16 @@ impl AndroidVariant {
             "true"
         } else {
             "false"
+        };
+        let quest_camera_declarations = if *quest_camera_permissions {
+            r#"
+                <uses-feature android:name="android.hardware.camera" android:required="false"/>
+                <uses-feature android:name="android.hardware.camera2.full" android:required="false"/>
+                <uses-permission android:name="android.permission.CAMERA"/>
+                <uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
+                <uses-permission android:name="horizonos.permission.SPATIAL_CAMERA" />"#
+        } else {
+            ""
         };
 
         match self {
@@ -184,8 +197,7 @@ impl AndroidVariant {
                 <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true"/>
                 <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="true"/>
                 <uses-feature android:name="com.oculus.feature.CONTEXTUAL_BOUNDARYLESS_APP" android:required="false"/>
-                <uses-feature android:name="android.hardware.camera" android:required="false"/>
-                <uses-feature android:name="android.hardware.camera2.full" android:required="false"/>
+                {quest_camera_declarations}
                 <uses-permission android:name="com.oculus.permission.USE_SCENE" />
                 <!-- Request hand and keyboard tracking for keyboard hand presence testing -->
                 <uses-feature android:name="oculus.software.handtracking" android:required="false"/>
@@ -195,9 +207,6 @@ impl AndroidVariant {
                 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
                 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
                 <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-                <uses-permission android:name="android.permission.CAMERA"/>
-                <uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
-                <uses-permission android:name="horizonos.permission.SPATIAL_CAMERA" />
                 <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
                 <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
                 <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
@@ -514,6 +523,7 @@ Common options:\n\
   --small-fonts\n\
   --screen-orientation=<value>            Adds android:screenOrientation to the generated launcher activity\n\
   --resizeable-activity=true|false        Adds android:resizeableActivity to the generated launcher activity\n\
+  --quest-camera-permissions=true|false   Quest only: include Android/headset/spatial camera declarations (default true)\n\
   --no-icon\n\
   --sdk-path=<path>\n\
   --host-os=linux-x64|windows-x64|macos-aarch64|macos-x64\n\
@@ -745,6 +755,9 @@ pub fn handle_android(mut args: &[String]) -> Result<(), String> {
         } else if let Some(opt) = v.strip_prefix("--resizeable-activity=") {
             config.resizeable_activity =
                 Some(parse_android_bool_flag("--resizeable-activity", opt)?);
+        } else if let Some(opt) = v.strip_prefix("--quest-camera-permissions=") {
+            config.quest_camera_permissions =
+                Some(parse_android_bool_flag("--quest-camera-permissions", opt)?);
         } else if v.trim() == "--no-icon" {
             no_icon = true;
         } else if v.trim() == "--keep-sdk-sources" {
@@ -909,6 +922,7 @@ mod tests {
             debuggable: true,
             screen_orientation: None,
             resizeable_activity: None,
+            quest_camera_permissions: true,
         }
     }
 
@@ -952,6 +966,22 @@ mod tests {
         assert!(xml.contains("android:targetSdkVersion=\"35\""));
         assert!(xml.contains("android:versionCode=\"7\""));
         assert!(xml.contains("android:versionName=\"1.2.3\""));
+    }
+
+    #[test]
+    fn quest_manifest_can_omit_camera_permissions() {
+        let mut args = test_manifest_args("App", "dev.makepad.app");
+        args.quest_camera_permissions = false;
+        let xml = AndroidVariant::Quest.manifest_xml(&args);
+        assert!(!xml.contains("android.permission.CAMERA"));
+        assert!(!xml.contains("horizonos.permission.HEADSET_CAMERA"));
+        assert!(!xml.contains("horizonos.permission.SPATIAL_CAMERA"));
+        assert!(!xml.contains("android.hardware.camera"));
+        assert!(!xml.contains("android.hardware.camera2.full"));
+        assert!(xml.contains("org.khronos.openxr.permission.OPENXR"));
+        assert!(xml.contains("org.khronos.openxr.permission.OPENXR_SYSTEM"));
+        assert!(xml.contains("MakepadAppXr"));
+        assert!(xml.contains("com.oculus.intent.category.VR"));
     }
 
     #[test]
