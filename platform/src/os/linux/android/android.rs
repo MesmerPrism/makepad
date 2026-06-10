@@ -157,6 +157,14 @@ fn rusty_xr_android_bootstrap_marker(phase: &str) {
     );
 }
 
+const MAKEPAD_FRAME_DIAGNOSTIC_MARKER_LIMIT: u64 = 24;
+const MAKEPAD_FRAME_DIAGNOSTIC_MARKER_PERIOD: u64 = 120;
+
+fn should_emit_makepad_frame_diagnostic_marker(sequence: u64) -> bool {
+    sequence <= MAKEPAD_FRAME_DIAGNOSTIC_MARKER_LIMIT
+        || sequence % MAKEPAD_FRAME_DIAGNOSTIC_MARKER_PERIOD == 0
+}
+
 fn android_panic_summary(info: &std::panic::PanicHookInfo<'_>) -> String {
     let payload = if let Some(payload) = info.payload().downcast_ref::<&str>() {
         (*payload).to_string()
@@ -729,21 +737,23 @@ impl Cx {
 
         match (first_result, second_result) {
             (Ok((first_yuv, first_metadata)), Ok((second_yuv, second_metadata))) => {
-                crate::log!(
-                    "RUSTY_XR_MAKEPAD_DIRECT_STEREO_HARDWARE_BUFFER_FRAME schema=rusty.xr.makepad-direct-stereo-hardware-buffer-frame.v1 phase=texture-updated status=ok pairIndex={} pairDeltaNs={} firstVideoId={} secondVideoId={} firstFrameSeq={} secondFrameSeq={} firstTimestampNs={} secondTimestampNs={} firstWidth={} firstHeight={} secondWidth={} secondHeight={} policy=latest-complete-stereo-pair",
-                    pair_index,
-                    pair_delta_ns,
-                    first_video_id.0,
-                    second_video_id.0,
-                    first_frame.sequence,
-                    second_frame.sequence,
-                    first_frame.timestamp_ns,
-                    second_frame.timestamp_ns,
-                    first_frame.width,
-                    first_frame.height,
-                    second_frame.width,
-                    second_frame.height,
-                );
+                if should_emit_makepad_frame_diagnostic_marker(pair_index) {
+                    crate::log!(
+                        "RUSTY_XR_MAKEPAD_DIRECT_STEREO_HARDWARE_BUFFER_FRAME schema=rusty.xr.makepad-direct-stereo-hardware-buffer-frame.v1 phase=texture-updated status=ok pairIndex={} pairDeltaNs={} firstVideoId={} secondVideoId={} firstFrameSeq={} secondFrameSeq={} firstTimestampNs={} secondTimestampNs={} firstWidth={} firstHeight={} secondWidth={} secondHeight={} policy=latest-complete-stereo-pair",
+                        pair_index,
+                        pair_delta_ns,
+                        first_video_id.0,
+                        second_video_id.0,
+                        first_frame.sequence,
+                        second_frame.sequence,
+                        first_frame.timestamp_ns,
+                        second_frame.timestamp_ns,
+                        first_frame.width,
+                        first_frame.height,
+                        second_frame.width,
+                        second_frame.height,
+                    );
+                }
                 {
                     let first_player = players.get_mut(&first_video_id).unwrap();
                     Self::push_android_direct_camera_hardware_buffer_texture_update(
@@ -3935,6 +3945,7 @@ fn string_to_permission(permission_str: &str) -> Option<crate::permission::Permi
         "android.permission.RECORD_AUDIO" => Some(crate::permission::Permission::AudioInput),
         "android.permission.CAMERA" => Some(crate::permission::Permission::Camera),
         "horizonos.permission.HEADSET_CAMERA" => Some(crate::permission::Permission::HeadsetCamera),
+        "horizonos.permission.SPATIAL_CAMERA" => Some(crate::permission::Permission::HeadsetCamera),
         "com.oculus.permission.USE_SCENE" => Some(crate::permission::Permission::SceneAccess),
         _ => None,
     }

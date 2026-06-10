@@ -197,6 +197,7 @@ impl AndroidVariant {
                 <uses-permission android:name="android.permission.RECORD_AUDIO"/>
                 <uses-permission android:name="android.permission.CAMERA"/>
                 <uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
+                <uses-permission android:name="horizonos.permission.SPATIAL_CAMERA" />
                 <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
                 <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
                 <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
@@ -932,6 +933,7 @@ mod tests {
         assert!(xml.contains("android:theme=\"@style/MakepadLaunchTheme\""));
         assert!(xml.contains("android.permission.CAMERA"));
         assert!(xml.contains("horizonos.permission.HEADSET_CAMERA"));
+        assert!(xml.contains("horizonos.permission.SPATIAL_CAMERA"));
         assert!(xml.contains("android.hardware.camera"));
         assert!(xml.contains("android.hardware.camera2.full"));
         assert!(xml.contains("android.hardware.vr.headtracking"));

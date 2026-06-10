@@ -65,24 +65,28 @@ pub(super) fn compile_java(
     let makepad_java_classes_dir = &cargo_manifest_dir
         .join("src/android/java/")
         .join(makepad_package_path);
-    let java_sources = vec![
-        r_class_path.clone(),
-        makepad_java_classes_dir.join("MakepadNative.java"),
-        makepad_java_classes_dir.join("MakepadActivity.java"),
-        makepad_java_classes_dir.join("MakepadInputConnection.java"),
-        makepad_java_classes_dir.join("MakepadNetwork.java"),
-        makepad_java_classes_dir.join("MakepadSocketStream.java"),
-        makepad_java_classes_dir.join("MakepadWebSocket.java"),
-        makepad_java_classes_dir.join("MakepadWebSocketReader.java"),
-        makepad_java_classes_dir.join("MediaProjectionStreamService.java"),
-        makepad_java_classes_dir.join("ByteArrayMediaDataSource.java"),
-        makepad_java_classes_dir.join("VideoPlayer.java"),
-        makepad_java_classes_dir.join("BrokerH264VideoPlayer.java"),
-        makepad_java_classes_dir.join("VideoPlayerRunnable.java"),
-        makepad_java_classes_dir.join("H264Encoder.java"),
-        build_paths.java_file.clone(),
-        build_paths.xr_file.clone(),
-    ];
+    let mut makepad_java_sources = fs::read_dir(makepad_java_classes_dir)
+        .map_err(|e| {
+            format!(
+                "failed to list Makepad Android Java sources {:?}: {e}",
+                makepad_java_classes_dir
+            )
+        })?
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|e| format!("failed to read Makepad Android Java source entry: {e}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    makepad_java_sources
+        .retain(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"));
+    makepad_java_sources.sort();
+
+    let mut java_sources = Vec::with_capacity(makepad_java_sources.len() + 3);
+    java_sources.push(r_class_path.clone());
+    java_sources.extend(makepad_java_sources);
+    java_sources.push(build_paths.java_file.clone());
+    java_sources.push(build_paths.xr_file.clone());
 
     let mut hasher = DefaultHasher::new();
     for source in &java_sources {

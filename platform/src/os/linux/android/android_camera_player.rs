@@ -29,6 +29,14 @@ enum AndroidCameraTextureMode {
     HardwareBufferExternal,
 }
 
+const RUSTY_CAMERA_FRAME_FLOW_MARKER_LIMIT: u64 = 24;
+const RUSTY_CAMERA_FRAME_FLOW_MARKER_PERIOD: u64 = 120;
+
+fn should_emit_camera_frame_flow_marker(sequence: u64) -> bool {
+    sequence <= RUSTY_CAMERA_FRAME_FLOW_MARKER_LIMIT
+        || sequence % RUSTY_CAMERA_FRAME_FLOW_MARKER_PERIOD == 0
+}
+
 pub struct AndroidCameraPlayer {
     pub video_id: LiveId,
     texture_id: TextureId,
@@ -99,6 +107,7 @@ impl AndroidCameraPlayer {
             let video_id_value = video_id.0;
             let input_id_value = (input_id.0).0;
             let format_id_value = (format_id.0).0;
+            let mut dropped_marker_seq = 0u64;
             Box::new(move |frame_ref: CameraFrameRef<'_>| {
                 let frame_timestamp_ns = frame_ref.timestamp_ns;
                 let width = frame_ref.width;
@@ -108,29 +117,38 @@ impl AndroidCameraPlayer {
                 match frame_ring
                     .publish_i420_copy_with_seq_and_acquire_time_ns(frame_ref, capture_time_ns)
                 {
-                    Some(camera_frame_seq) => crate::log!(
-                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv videoId={} inputId={} formatId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
-                        video_id_value,
-                        input_id_value,
-                        format_id_value,
-                        camera_frame_seq,
-                        frame_timestamp_ns,
-                        capture_time_ms,
-                        capture_time_ns,
-                        width,
-                        height,
-                    ),
-                    None => crate::log!(
-                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv videoId={} inputId={} formatId={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
-                        video_id_value,
-                        input_id_value,
-                        format_id_value,
-                        frame_timestamp_ns,
-                        capture_time_ms,
-                        capture_time_ns,
-                        width,
-                        height,
-                    ),
+                    Some(camera_frame_seq) => {
+                        if should_emit_camera_frame_flow_marker(camera_frame_seq) {
+                            crate::log!(
+                                "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv videoId={} inputId={} formatId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
+                                video_id_value,
+                                input_id_value,
+                                format_id_value,
+                                camera_frame_seq,
+                                frame_timestamp_ns,
+                                capture_time_ms,
+                                capture_time_ns,
+                                width,
+                                height,
+                            );
+                        }
+                    }
+                    None => {
+                        dropped_marker_seq = dropped_marker_seq.saturating_add(1);
+                        if should_emit_camera_frame_flow_marker(dropped_marker_seq) {
+                            crate::log!(
+                                "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv videoId={} inputId={} formatId={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
+                                video_id_value,
+                                input_id_value,
+                                format_id_value,
+                                frame_timestamp_ns,
+                                capture_time_ms,
+                                capture_time_ns,
+                                width,
+                                height,
+                            );
+                        }
+                    }
                 }
             }) as CameraFrameInputFn
         });
@@ -144,17 +162,19 @@ impl AndroidCameraPlayer {
                 camera_frame_seq = camera_frame_seq.saturating_add(1);
                 frame.sequence = camera_frame_seq;
                 frame.acquire_time_ns = diagnostic_time_ns();
-                crate::log!(
-                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=hardware-buffer-external videoId={} inputId={} formatId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeNs={} width={} height={} layout=AHardwareBuffer",
-                    video_id_value,
-                    input_id_value,
-                    format_id_value,
-                    frame.sequence,
-                    frame.timestamp_ns,
-                    frame.acquire_time_ns,
-                    frame.width,
-                    frame.height,
-                );
+                if should_emit_camera_frame_flow_marker(frame.sequence) {
+                    crate::log!(
+                        "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=hardware-buffer-external videoId={} inputId={} formatId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeNs={} width={} height={} layout=AHardwareBuffer",
+                        video_id_value,
+                        input_id_value,
+                        format_id_value,
+                        frame.sequence,
+                        frame.timestamp_ns,
+                        frame.acquire_time_ns,
+                        frame.width,
+                        frame.height,
+                    );
+                }
                 *latest.lock().unwrap() = Some(frame);
             }) as CameraHardwareBufferInputFn
         });
@@ -259,6 +279,7 @@ impl AndroidCameraPlayer {
         let video_id_value = self.video_id.0;
         let input_id_value = (self.input_id.0).0;
         let format_id_value = (self.format_id.0).0;
+        let mut dropped_marker_seq = 0u64;
         let frame_cb = Box::new(move |frame_ref: CameraFrameRef<'_>| {
             let frame_timestamp_ns = frame_ref.timestamp_ns;
             let width = frame_ref.width;
@@ -268,29 +289,38 @@ impl AndroidCameraPlayer {
             match frame_ring
                 .publish_i420_copy_with_seq_and_acquire_time_ns(frame_ref, capture_time_ns)
             {
-                Some(camera_frame_seq) => crate::log!(
-                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv-fallback videoId={} inputId={} formatId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
-                    video_id_value,
-                    input_id_value,
-                    format_id_value,
-                    camera_frame_seq,
-                    frame_timestamp_ns,
-                    capture_time_ms,
-                    capture_time_ns,
-                    width,
-                    height,
-                ),
-                None => crate::log!(
-                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv-fallback videoId={} inputId={} formatId={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
-                    video_id_value,
-                    input_id_value,
-                    format_id_value,
-                    frame_timestamp_ns,
-                    capture_time_ms,
-                    capture_time_ns,
-                    width,
-                    height,
-                ),
+                Some(camera_frame_seq) => {
+                    if should_emit_camera_frame_flow_marker(camera_frame_seq) {
+                        crate::log!(
+                            "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=published path=cpu-yuv-fallback videoId={} inputId={} formatId={} cameraFrameSeq={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
+                            video_id_value,
+                            input_id_value,
+                            format_id_value,
+                            camera_frame_seq,
+                            frame_timestamp_ns,
+                            capture_time_ms,
+                            capture_time_ns,
+                            width,
+                            height,
+                        );
+                    }
+                }
+                None => {
+                    dropped_marker_seq = dropped_marker_seq.saturating_add(1);
+                    if should_emit_camera_frame_flow_marker(dropped_marker_seq) {
+                        crate::log!(
+                            "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=acquire status=dropped path=cpu-yuv-fallback videoId={} inputId={} formatId={} cameraTimestampNs={} captureTimeMs={} captureTimeNs={} width={} height={} layout=I420",
+                            video_id_value,
+                            input_id_value,
+                            format_id_value,
+                            frame_timestamp_ns,
+                            capture_time_ms,
+                            capture_time_ns,
+                            width,
+                            height,
+                        );
+                    }
+                }
             }
         }) as CameraFrameInputFn;
 
@@ -483,24 +513,26 @@ impl AndroidCameraPlayer {
             self.cpu_yuv_upload_seq = self.cpu_yuv_upload_seq.saturating_add(1);
             let upload_time_ns = diagnostic_time_ns();
             metadata = metadata.with_cpu_yuv_upload(self.cpu_yuv_upload_seq, upload_time_ns);
-            crate::log!(
-                "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=cpu-yuv-upload status=ok path=cpu-yuv videoId={} inputId={} formatId={} uploadSeq={} cameraFrameSeq={} cameraTimestampNs={} acquireTimeNs={} uploadTimeMs={} uploadTimeNs={} width={} height={} yBytes={} uBytes={} vBytes={} totalBytes={}",
-                self.video_id.0,
-                (self.input_id.0).0,
-                (self.format_id.0).0,
-                self.cpu_yuv_upload_seq,
-                frame_seq,
-                frame_timestamp_ns,
-                frame.acquire_time_ns,
-                upload_time_ns / 1_000_000,
-                upload_time_ns,
-                width,
-                height,
-                y_bytes,
-                u_bytes,
-                v_bytes,
-                y_bytes + u_bytes + v_bytes,
-            );
+            if should_emit_camera_frame_flow_marker(self.cpu_yuv_upload_seq) {
+                crate::log!(
+                    "RUSTY_XR_MAKEPAD_CAMERA_FRAME_FLOW schema=rusty.xr.makepad-camera-frame-flow.v1 phase=cpu-yuv-upload status=ok path=cpu-yuv videoId={} inputId={} formatId={} uploadSeq={} cameraFrameSeq={} cameraTimestampNs={} acquireTimeNs={} uploadTimeMs={} uploadTimeNs={} width={} height={} yBytes={} uBytes={} vBytes={} totalBytes={}",
+                    self.video_id.0,
+                    (self.input_id.0).0,
+                    (self.format_id.0).0,
+                    self.cpu_yuv_upload_seq,
+                    frame_seq,
+                    frame_timestamp_ns,
+                    frame.acquire_time_ns,
+                    upload_time_ns / 1_000_000,
+                    upload_time_ns,
+                    width,
+                    height,
+                    y_bytes,
+                    u_bytes,
+                    v_bytes,
+                    y_bytes + u_bytes + v_bytes,
+                );
+            }
         } else {
             let Some(gl) = gl else {
                 return None;
