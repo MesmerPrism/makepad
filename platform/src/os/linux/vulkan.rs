@@ -1,5 +1,7 @@
 #![cfg(target_os = "android")]
 
+mod skinning_mesh_probe;
+
 use crate::{
     cx::Cx,
     cx_api::{
@@ -158,7 +160,6 @@ fn compute_main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 }
 "#;
-
 fn expected_xr_gpu_u32_compute_probe_words(
     input_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
 ) -> [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS] {
@@ -662,6 +663,8 @@ pub struct CxVulkan {
     xr_u32_compute_probe_resources: Vec<VulkanXrU32ComputeProbeResources>,
     xr_f32_force_probe_resources: Vec<VulkanXrF32ForceProbeResources>,
     xr_f32_skinning_probe_resources: Vec<VulkanXrF32SkinningProbeResources>,
+    xr_f32_skinning_mesh_probe_resources:
+        Vec<skinning_mesh_probe::VulkanXrF32SkinningMeshProbeResources>,
     xr_storage_buffer_probe_resources: Vec<VulkanXrStorageBufferProbeResources>,
 }
 
@@ -1001,6 +1004,7 @@ impl CxVulkan {
             xr_u32_compute_probe_resources: Vec::new(),
             xr_f32_force_probe_resources: Vec::new(),
             xr_f32_skinning_probe_resources: Vec::new(),
+            xr_f32_skinning_mesh_probe_resources: Vec::new(),
             xr_storage_buffer_probe_resources: Vec::new(),
         };
 
@@ -1412,6 +1416,7 @@ impl CxVulkan {
             xr_u32_compute_probe_resources: Vec::new(),
             xr_f32_force_probe_resources: Vec::new(),
             xr_f32_skinning_probe_resources: Vec::new(),
+            xr_f32_skinning_mesh_probe_resources: Vec::new(),
             xr_storage_buffer_probe_resources: Vec::new(),
         };
 
@@ -9992,6 +9997,7 @@ impl Drop for CxVulkan {
         self.destroy_xr_u32_compute_probe_resources();
         self.destroy_xr_f32_force_probe_resources();
         self.destroy_xr_f32_skinning_probe_resources();
+        self.destroy_xr_f32_skinning_mesh_probe_resources();
         self.destroy_geometry_resources();
         self.destroy_texture_resources();
         self.destroy_external_ycbcr_samplers();

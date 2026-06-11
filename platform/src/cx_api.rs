@@ -240,6 +240,17 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_skinning_mesh_probe(
+        &mut self,
+        _vertices: &[XrGpuF32SkinningMeshVertex],
+        _triangles: &[XrGpuSkinningMeshTriangle],
+        _sample_vertex_indices: [u32; XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES],
+        _sample_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32SkinningMeshProbeResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -357,6 +368,62 @@ pub struct XrGpuF32SkinningProbeResult {
     pub sample_count: usize,
     pub component_count: usize,
     pub mismatched_components: usize,
+    pub max_abs_error: f32,
+    pub tolerance: f32,
+    pub queue_submit_serial: u64,
+    pub fence_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+    pub retired_after_fence_count: usize,
+    pub queue_wait_idle_performed: bool,
+    pub elapsed_ms: f64,
+}
+
+pub const XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES: usize = 4;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32SkinningMeshVertex {
+    pub bind_position: [f32; 4],
+    pub joint_weights: [f32; 4],
+    pub matrix0_row0: [f32; 4],
+    pub matrix0_row1: [f32; 4],
+    pub matrix0_row2: [f32; 4],
+    pub matrix0_row3: [f32; 4],
+    pub matrix1_row0: [f32; 4],
+    pub matrix1_row1: [f32; 4],
+    pub matrix1_row2: [f32; 4],
+    pub matrix1_row3: [f32; 4],
+    pub matrix2_row0: [f32; 4],
+    pub matrix2_row1: [f32; 4],
+    pub matrix2_row2: [f32; 4],
+    pub matrix2_row3: [f32; 4],
+    pub matrix3_row0: [f32; 4],
+    pub matrix3_row1: [f32; 4],
+    pub matrix3_row2: [f32; 4],
+    pub matrix3_row3: [f32; 4],
+    pub expected_position: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct XrGpuSkinningMeshTriangle {
+    pub indices: [u32; 4],
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct XrGpuF32SkinningMeshProbeResult {
+    pub vertex_count: usize,
+    pub triangle_count: usize,
+    pub index_count: usize,
+    pub sample_count: usize,
+    pub sample_vertex_indices: [u32; XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES],
+    pub output_sample_positions: [[f32; 4]; XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES],
+    pub expected_sample_positions: [[f32; 4]; XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES],
+    pub checked_position_components: usize,
+    pub mismatched_position_components: usize,
+    pub mismatched_triangle_indices: usize,
     pub max_abs_error: f32,
     pub tolerance: f32,
     pub queue_submit_serial: u64,
@@ -782,6 +849,24 @@ impl Cx {
         tolerance: f32,
     ) -> Option<XrGpuF32SkinningProbeResult> {
         <Self as CxOsApi>::xr_gpu_f32_skinning_probe(self, samples, sample_count, tolerance)
+    }
+
+    pub fn xr_gpu_f32_skinning_mesh_probe(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        sample_vertex_indices: [u32; XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32SkinningMeshProbeResult> {
+        <Self as CxOsApi>::xr_gpu_f32_skinning_mesh_probe(
+            self,
+            vertices,
+            triangles,
+            sample_vertex_indices,
+            sample_count,
+            tolerance,
+        )
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
