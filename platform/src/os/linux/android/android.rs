@@ -33,8 +33,10 @@ use {
         cx::{AndroidParams, Cx, OsType},
         cx_api::{
             CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown, XrGpuF32ForceProbeResult,
-            XrGpuF32ForceProbeSample, XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
-            XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_U32_COMPUTE_PROBE_WORDS,
+            XrGpuF32ForceProbeSample, XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample,
+            XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
+            XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_SKINNING_PROBE_SAMPLES,
+            XR_GPU_U32_COMPUTE_PROBE_WORDS,
         },
         draw_pass::CxDrawPassParent,
         draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
@@ -3847,6 +3849,33 @@ impl CxOsApi for Cx {
                 Ok(result) => Some(result),
                 Err(err) => {
                     crate::warning!("OpenXR Vulkan f32 force probe failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (samples, sample_count, tolerance);
+            None
+        }
+    }
+
+    fn xr_gpu_f32_skinning_probe(
+        &mut self,
+        samples: [XrGpuF32SkinningProbeSample; XR_GPU_F32_SKINNING_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32SkinningProbeResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_f32_skinning_probe(samples, sample_count, tolerance) {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan f32 skinning probe failed: {err}");
                     None
                 }
             }
