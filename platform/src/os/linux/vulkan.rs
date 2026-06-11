@@ -1753,6 +1753,9 @@ impl CxVulkan {
         input_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
     ) -> Result<XrGpuU32ComputeProbeResult, String> {
         let started = Instant::now();
+        let mut queue_submit_serial = 0;
+        let mut fence_serial = 0;
+        let mut queue_wait_idle_performed = false;
         let expected_words = expected_xr_gpu_u32_compute_probe_words(input_words);
         let byte_len =
             std::mem::size_of::<[u32; XR_GPU_U32_COMPUTE_PROBE_WORDS]>() as vk::DeviceSize;
@@ -2068,12 +2071,19 @@ impl CxVulkan {
                         fence,
                     )
                     .map_err(|e| format!("queue_submit(u32 compute probe) failed: {e:?}"))?;
+                self.gpu_submit_serial = self.gpu_submit_serial.saturating_add(1);
+                queue_submit_serial = self.gpu_submit_serial;
                 self.device
                     .wait_for_fences(&[fence], true, u64::MAX)
                     .map_err(|e| format!("wait_for_fences(u32 compute probe) failed: {e:?}"))?;
+                fence_serial = queue_submit_serial;
                 self.device
                     .queue_wait_idle(self.queue)
                     .map_err(|e| format!("queue_wait_idle(u32 compute probe) failed: {e:?}"))?;
+                queue_wait_idle_performed = true;
+                self.gpu_completed_submit_serial =
+                    self.gpu_completed_submit_serial.max(queue_submit_serial);
+                self.collect_retired_texture_resources();
             }
             Ok(())
         })();
@@ -2107,6 +2117,7 @@ impl CxVulkan {
                 .unwrap_or_else(|| "unknown u32 compute probe command failure".to_string()))
         };
 
+        let resource_generation = self.xr_u32_compute_probe_resources.len() as u64 + 1;
         self.xr_u32_compute_probe_resources
             .push(VulkanXrU32ComputeProbeResources {
                 input,
@@ -2119,6 +2130,9 @@ impl CxVulkan {
                 command_buffer,
                 fence,
             });
+        let retained_resource_count = self.xr_u32_compute_probe_resources.len();
+        let pending_retire_count = retained_resource_count;
+        let retired_after_fence_count = 0;
 
         let output_words = read_result?;
         let mismatched_words = output_words
@@ -2132,6 +2146,13 @@ impl CxVulkan {
             expected_words,
             word_count: XR_GPU_U32_COMPUTE_PROBE_WORDS,
             mismatched_words,
+            queue_submit_serial,
+            fence_serial,
+            resource_generation,
+            pending_retire_count,
+            retained_resource_count,
+            retired_after_fence_count,
+            queue_wait_idle_performed,
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         })
     }

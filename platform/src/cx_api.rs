@@ -264,6 +264,13 @@ pub struct XrGpuU32ComputeProbeResult {
     pub expected_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
     pub word_count: usize,
     pub mismatched_words: usize,
+    pub queue_submit_serial: u64,
+    pub fence_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+    pub retired_after_fence_count: usize,
+    pub queue_wait_idle_performed: bool,
     pub elapsed_ms: f64,
 }
 
