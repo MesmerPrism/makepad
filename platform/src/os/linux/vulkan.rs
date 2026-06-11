@@ -98,10 +98,23 @@ const XR_GPU_F32_SKINNING_PROBE_ENTRY: &str = "compute_main";
 const XR_GPU_F32_SKINNING_PROBE_WGSL: &str = r#"
 struct SkinningProbeSample {
     bind_position: vec4<f32>,
-    delta0_weight: vec4<f32>,
-    delta1_weight: vec4<f32>,
-    delta2_weight: vec4<f32>,
-    delta3_weight: vec4<f32>,
+    joint_weights: vec4<f32>,
+    matrix0_row0: vec4<f32>,
+    matrix0_row1: vec4<f32>,
+    matrix0_row2: vec4<f32>,
+    matrix0_row3: vec4<f32>,
+    matrix1_row0: vec4<f32>,
+    matrix1_row1: vec4<f32>,
+    matrix1_row2: vec4<f32>,
+    matrix1_row3: vec4<f32>,
+    matrix2_row0: vec4<f32>,
+    matrix2_row1: vec4<f32>,
+    matrix2_row2: vec4<f32>,
+    matrix2_row3: vec4<f32>,
+    matrix3_row0: vec4<f32>,
+    matrix3_row1: vec4<f32>,
+    matrix3_row2: vec4<f32>,
+    matrix3_row3: vec4<f32>,
     expected_position: vec4<f32>,
 };
 
@@ -113,12 +126,35 @@ fn compute_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
     if (index < 4u) {
         let sample = input_samples[index];
-        let offset =
-            sample.delta0_weight.xyz * sample.delta0_weight.w +
-            sample.delta1_weight.xyz * sample.delta1_weight.w +
-            sample.delta2_weight.xyz * sample.delta2_weight.w +
-            sample.delta3_weight.xyz * sample.delta3_weight.w;
-        output_positions[index] = vec4<f32>(sample.bind_position.xyz + offset, 1.0);
+        let p = sample.bind_position;
+        let p0 = vec3<f32>(
+            dot(sample.matrix0_row0, p),
+            dot(sample.matrix0_row1, p),
+            dot(sample.matrix0_row2, p)
+        );
+        let p1 = vec3<f32>(
+            dot(sample.matrix1_row0, p),
+            dot(sample.matrix1_row1, p),
+            dot(sample.matrix1_row2, p)
+        );
+        let p2 = vec3<f32>(
+            dot(sample.matrix2_row0, p),
+            dot(sample.matrix2_row1, p),
+            dot(sample.matrix2_row2, p)
+        );
+        let p3 = vec3<f32>(
+            dot(sample.matrix3_row0, p),
+            dot(sample.matrix3_row1, p),
+            dot(sample.matrix3_row2, p)
+        );
+        let weights = sample.joint_weights;
+        let total_weight = weights.x + weights.y + weights.z + weights.w;
+        if (total_weight > 0.0) {
+            let weighted = p0 * weights.x + p1 * weights.y + p2 * weights.z + p3 * weights.w;
+            output_positions[index] = vec4<f32>(weighted / total_weight, 1.0);
+        } else {
+            output_positions[index] = sample.bind_position;
+        }
     }
 }
 "#;

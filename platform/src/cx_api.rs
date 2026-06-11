@@ -329,10 +329,23 @@ pub const XR_GPU_F32_SKINNING_PROBE_SAMPLES: usize = 4;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct XrGpuF32SkinningProbeSample {
     pub bind_position: [f32; 4],
-    pub delta0_weight: [f32; 4],
-    pub delta1_weight: [f32; 4],
-    pub delta2_weight: [f32; 4],
-    pub delta3_weight: [f32; 4],
+    pub joint_weights: [f32; 4],
+    pub matrix0_row0: [f32; 4],
+    pub matrix0_row1: [f32; 4],
+    pub matrix0_row2: [f32; 4],
+    pub matrix0_row3: [f32; 4],
+    pub matrix1_row0: [f32; 4],
+    pub matrix1_row1: [f32; 4],
+    pub matrix1_row2: [f32; 4],
+    pub matrix1_row3: [f32; 4],
+    pub matrix2_row0: [f32; 4],
+    pub matrix2_row1: [f32; 4],
+    pub matrix2_row2: [f32; 4],
+    pub matrix2_row3: [f32; 4],
+    pub matrix3_row0: [f32; 4],
+    pub matrix3_row1: [f32; 4],
+    pub matrix3_row2: [f32; 4],
+    pub matrix3_row3: [f32; 4],
     pub expected_position: [f32; 4],
 }
 
