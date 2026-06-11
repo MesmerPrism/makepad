@@ -33,11 +33,13 @@ use {
         cx::{AndroidParams, Cx, OsType},
         cx_api::{
             CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown, XrGpuF32ForceProbeResult,
-            XrGpuF32ForceProbeSample, XrGpuF32SkinningMeshProbeResult, XrGpuF32SkinningMeshVertex,
+            XrGpuF32ForceProbeSample, XrGpuF32MeshSdfProbeGrid, XrGpuF32MeshSdfProbeResult,
+            XrGpuF32SkinningMeshProbeResult, XrGpuF32SkinningMeshVertex,
             XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample, XrGpuSkinningMeshTriangle,
             XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
-            XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES,
-            XR_GPU_F32_SKINNING_PROBE_SAMPLES, XR_GPU_U32_COMPUTE_PROBE_WORDS,
+            XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
+            XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES, XR_GPU_F32_SKINNING_PROBE_SAMPLES,
+            XR_GPU_U32_COMPUTE_PROBE_WORDS,
         },
         draw_pass::CxDrawPassParent,
         draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
@@ -3922,6 +3924,53 @@ impl CxOsApi for Cx {
                 vertices,
                 triangles,
                 sample_vertex_indices,
+                sample_count,
+                tolerance,
+            );
+            None
+        }
+    }
+
+    fn xr_gpu_f32_mesh_sdf_probe(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        grid: XrGpuF32MeshSdfProbeGrid,
+        sample_linear_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32MeshSdfProbeResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_f32_mesh_sdf_probe(
+                vertices,
+                triangles,
+                grid,
+                sample_linear_indices,
+                expected_distances,
+                sample_count,
+                tolerance,
+            ) {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan f32 mesh SDF probe failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (
+                vertices,
+                triangles,
+                grid,
+                sample_linear_indices,
+                expected_distances,
                 sample_count,
                 tolerance,
             );

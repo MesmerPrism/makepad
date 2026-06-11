@@ -251,6 +251,19 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_mesh_sdf_probe(
+        &mut self,
+        _vertices: &[XrGpuF32SkinningMeshVertex],
+        _triangles: &[XrGpuSkinningMeshTriangle],
+        _grid: XrGpuF32MeshSdfProbeGrid,
+        _sample_linear_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        _expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        _sample_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32MeshSdfProbeResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -424,6 +437,39 @@ pub struct XrGpuF32SkinningMeshProbeResult {
     pub checked_position_components: usize,
     pub mismatched_position_components: usize,
     pub mismatched_triangle_indices: usize,
+    pub max_abs_error: f32,
+    pub tolerance: f32,
+    pub queue_submit_serial: u64,
+    pub fence_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+    pub retired_after_fence_count: usize,
+    pub queue_wait_idle_performed: bool,
+    pub elapsed_ms: f64,
+}
+
+pub const XR_GPU_F32_MESH_SDF_PROBE_SAMPLES: usize = 4;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32MeshSdfProbeGrid {
+    pub origin_voxel_size: [f32; 4],
+    pub dimensions: [u32; 4],
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct XrGpuF32MeshSdfProbeResult {
+    pub vertex_count: usize,
+    pub triangle_count: usize,
+    pub index_count: usize,
+    pub voxel_count: usize,
+    pub sample_count: usize,
+    pub checked_sample_count: usize,
+    pub sample_linear_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+    pub output_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+    pub expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+    pub mismatched_samples: usize,
     pub max_abs_error: f32,
     pub tolerance: f32,
     pub queue_submit_serial: u64,
@@ -864,6 +910,28 @@ impl Cx {
             vertices,
             triangles,
             sample_vertex_indices,
+            sample_count,
+            tolerance,
+        )
+    }
+
+    pub fn xr_gpu_f32_mesh_sdf_probe(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        grid: XrGpuF32MeshSdfProbeGrid,
+        sample_linear_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32MeshSdfProbeResult> {
+        <Self as CxOsApi>::xr_gpu_f32_mesh_sdf_probe(
+            self,
+            vertices,
+            triangles,
+            grid,
+            sample_linear_indices,
+            expected_distances,
             sample_count,
             tolerance,
         )
