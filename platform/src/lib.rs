@@ -106,7 +106,10 @@ pub use {
         component::{ComponentInfo, ComponentRegistries, ComponentRegistry},
         cursor::MouseCursor,
         cx::{Cx, CxRef, LinuxWindowParams, OsType},
-        cx_api::{AccessibilityUpdatePayload, CxOsApi, CxOsOp, CxThreadPriority, OpenUrlInPlace},
+        cx_api::{
+            AccessibilityUpdatePayload, CxOsApi, CxOsOp, CxThreadPriority, OpenUrlInPlace,
+            XrGpuF32ForceProbeResult, XrGpuF32ForceProbeSample, XR_GPU_F32_FORCE_PROBE_SAMPLES,
+        },
         display_context::{DisplayContext, SystemBarAppearance},
         draw_list::{CxDrawCall, CxDrawItem, CxDrawListPool, CxRectArea, DrawList, DrawListId},
         draw_matrix::DrawMatrix,
