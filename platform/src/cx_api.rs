@@ -222,6 +222,15 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_force_probe(
+        &mut self,
+        _samples: [XrGpuF32ForceProbeSample; XR_GPU_F32_FORCE_PROBE_SAMPLES],
+        _sample_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32ForceProbeResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -264,6 +273,37 @@ pub struct XrGpuU32ComputeProbeResult {
     pub expected_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
     pub word_count: usize,
     pub mismatched_words: usize,
+    pub queue_submit_serial: u64,
+    pub fence_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+    pub retired_after_fence_count: usize,
+    pub queue_wait_idle_performed: bool,
+    pub elapsed_ms: f64,
+}
+
+pub const XR_GPU_F32_FORCE_PROBE_SAMPLES: usize = 4;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32ForceProbeSample {
+    pub position_radius: [f32; 4],
+    pub distance_target_strength: [f32; 4],
+    pub outward: [f32; 4],
+    pub expected_acceleration: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32ForceProbeResult {
+    pub samples: [XrGpuF32ForceProbeSample; XR_GPU_F32_FORCE_PROBE_SAMPLES],
+    pub output_accelerations: [[f32; 4]; XR_GPU_F32_FORCE_PROBE_SAMPLES],
+    pub expected_accelerations: [[f32; 4]; XR_GPU_F32_FORCE_PROBE_SAMPLES],
+    pub sample_count: usize,
+    pub component_count: usize,
+    pub mismatched_components: usize,
+    pub max_abs_error: f32,
+    pub tolerance: f32,
     pub queue_submit_serial: u64,
     pub fence_serial: u64,
     pub resource_generation: u64,
@@ -669,6 +709,15 @@ impl Cx {
         input_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
     ) -> Option<XrGpuU32ComputeProbeResult> {
         <Self as CxOsApi>::xr_gpu_u32_compute_probe(self, input_words)
+    }
+
+    pub fn xr_gpu_f32_force_probe(
+        &mut self,
+        samples: [XrGpuF32ForceProbeSample; XR_GPU_F32_FORCE_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32ForceProbeResult> {
+        <Self as CxOsApi>::xr_gpu_f32_force_probe(self, samples, sample_count, tolerance)
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
