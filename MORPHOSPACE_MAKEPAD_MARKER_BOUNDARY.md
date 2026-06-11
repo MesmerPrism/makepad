@@ -21,6 +21,15 @@ slice.
 | Android debug properties | `debug.rustyxr.*` | compatibility property alias | Keep read/cleanup compatibility. New defaults should be owner-neutral or app/Quest/Manifold-owned when that route is next edited. |
 | MediaProjection launch extras | `rustyquest.makepad.mediaProjection*` | active Quest/Makepad launch surface | Keep as the active Activity-extra surface for Makepad media projection. Do not treat it as Manifold command authority. |
 
+## Downstream Probe Markers
+
+These markers are emitted by downstream app shells or Quest-Makepad contracts,
+not by this Makepad fork. Keep the Makepad side generic and data-limited.
+
+| Downstream marker family | Makepad-side surface | Rule |
+| --- | --- | --- |
+| `rusty.quest.makepad.gpu_storage_probe.v1` / `RUSTY_QUEST_MAKEPAD_GPU_STORAGE_PROBE` | `Cx::xr_gpu_storage_buffer_probe` returning `XrGpuStorageBufferProbeResult` | Makepad may expose a bounded XR/Vulkan storage-buffer fill/copy/readback probe. It must not emit Morphospace field/particle authority, claim a compute shader, or route high-rate particles, fields, meshes, or GPU buffers through settings/control JSON. |
+
 ## Runtime Marker Decisions
 
 Do not rename these markers as cleanup. Use this table only when a behavior

@@ -2,6 +2,7 @@
 
 use crate::{
     cx::Cx,
+    cx_api::XrGpuStorageBufferProbeResult,
     draw_list::DrawListId,
     draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
     draw_shader::DrawShaderAttrFormat,
@@ -1509,6 +1510,184 @@ impl CxVulkan {
             result?;
         }
         Ok(())
+    }
+
+    pub(crate) fn submit_xr_storage_buffer_probe(
+        &mut self,
+        requested_bytes: usize,
+        pattern: u32,
+    ) -> Result<XrGpuStorageBufferProbeResult, String> {
+        let started = Instant::now();
+        let byte_len = Self::align_device_size(requested_bytes.max(4) as vk::DeviceSize, 4);
+        let word_count = (byte_len / 4) as usize;
+        let storage = self.create_host_buffer(
+            vk::BufferUsageFlags::STORAGE_BUFFER
+                | vk::BufferUsageFlags::TRANSFER_SRC
+                | vk::BufferUsageFlags::TRANSFER_DST,
+            byte_len,
+        )?;
+        let readback = match self.create_host_buffer(vk::BufferUsageFlags::TRANSFER_DST, byte_len) {
+            Ok(buffer) => buffer,
+            Err(err) => {
+                self.destroy_buffer(storage);
+                return Err(err);
+            }
+        };
+
+        let command_buffer = {
+            let alloc_info = vk::CommandBufferAllocateInfo::default()
+                .command_pool(self.command_pool)
+                .level(vk::CommandBufferLevel::PRIMARY)
+                .command_buffer_count(1);
+            match unsafe { self.device.allocate_command_buffers(&alloc_info) } {
+                Ok(buffers) => buffers[0],
+                Err(err) => {
+                    self.destroy_buffer(readback);
+                    self.destroy_buffer(storage);
+                    return Err(format!(
+                        "allocate_command_buffers(storage probe) failed: {err:?}"
+                    ));
+                }
+            }
+        };
+        let fence = {
+            let fence_info = vk::FenceCreateInfo::default();
+            match unsafe { self.device.create_fence(&fence_info, None) } {
+                Ok(fence) => fence,
+                Err(err) => {
+                    unsafe {
+                        self.device
+                            .free_command_buffers(self.command_pool, &[command_buffer]);
+                    }
+                    self.destroy_buffer(readback);
+                    self.destroy_buffer(storage);
+                    return Err(format!("create_fence(storage probe) failed: {err:?}"));
+                }
+            }
+        };
+
+        let command_result = (|| -> Result<(), String> {
+            unsafe {
+                self.device
+                    .begin_command_buffer(
+                        command_buffer,
+                        &vk::CommandBufferBeginInfo::default()
+                            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                    )
+                    .map_err(|e| format!("begin_command_buffer(storage probe) failed: {e:?}"))?;
+                self.device
+                    .cmd_fill_buffer(command_buffer, storage.buffer, 0, byte_len, pattern);
+
+                let storage_barrier = vk::BufferMemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .buffer(storage.buffer)
+                    .offset(0)
+                    .size(byte_len);
+                self.device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[storage_barrier],
+                    &[],
+                );
+
+                let copy_region = vk::BufferCopy::default()
+                    .src_offset(0)
+                    .dst_offset(0)
+                    .size(byte_len);
+                self.device.cmd_copy_buffer(
+                    command_buffer,
+                    storage.buffer,
+                    readback.buffer,
+                    &[copy_region],
+                );
+
+                let readback_barrier = vk::BufferMemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::HOST_READ)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .buffer(readback.buffer)
+                    .offset(0)
+                    .size(byte_len);
+                self.device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::HOST,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[readback_barrier],
+                    &[],
+                );
+
+                self.device
+                    .end_command_buffer(command_buffer)
+                    .map_err(|e| format!("end_command_buffer(storage probe) failed: {e:?}"))?;
+                self.device
+                    .queue_submit(
+                        self.queue,
+                        &[vk::SubmitInfo::default().command_buffers(&[command_buffer])],
+                        fence,
+                    )
+                    .map_err(|e| format!("queue_submit(storage probe) failed: {e:?}"))?;
+                self.device
+                    .wait_for_fences(&[fence], true, u64::MAX)
+                    .map_err(|e| format!("wait_for_fences(storage probe) failed: {e:?}"))?;
+            }
+            Ok(())
+        })();
+
+        let read_result = if command_result.is_ok() {
+            unsafe {
+                match self.device.map_memory(
+                    readback.memory,
+                    0,
+                    byte_len,
+                    vk::MemoryMapFlags::empty(),
+                ) {
+                    Ok(mapped) => {
+                        let words = std::slice::from_raw_parts(mapped as *const u32, word_count);
+                        let first_word = words.first().copied().unwrap_or(0);
+                        let mismatched_words =
+                            words.iter().filter(|word| **word != pattern).count();
+                        self.device.unmap_memory(readback.memory);
+                        Ok((first_word, mismatched_words))
+                    }
+                    Err(err) => Err(format!(
+                        "map_memory(storage probe readback) failed: {err:?}"
+                    )),
+                }
+            }
+        } else {
+            Err(command_result
+                .err()
+                .unwrap_or_else(|| "unknown storage probe command failure".to_string()))
+        };
+
+        unsafe {
+            self.device.destroy_fence(fence, None);
+            self.device
+                .free_command_buffers(self.command_pool, &[command_buffer]);
+        }
+        self.destroy_buffer(readback);
+        self.destroy_buffer(storage);
+
+        let (first_word, mismatched_words) = read_result?;
+        Ok(XrGpuStorageBufferProbeResult {
+            requested_bytes,
+            storage_buffer_bytes: byte_len as usize,
+            readback_bytes: byte_len as usize,
+            pattern,
+            first_word,
+            word_count,
+            mismatched_words,
+            elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        })
     }
 
     fn destroy_xr_in_flight_frames(&mut self) {

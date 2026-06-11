@@ -207,6 +207,14 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_storage_buffer_probe(
+        &mut self,
+        _requested_bytes: usize,
+        _pattern: u32,
+    ) -> Option<XrGpuStorageBufferProbeResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -226,6 +234,18 @@ pub trait CxOsApi {
     /*
     fn web_socket_open(&mut self, url: String, rec: WebSocketAutoReconnect) -> WebSocket;
     fn web_socket_send(&mut self, socket: WebSocket, data: Vec<u8>);*/
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuStorageBufferProbeResult {
+    pub requested_bytes: usize,
+    pub storage_buffer_bytes: usize,
+    pub readback_bytes: usize,
+    pub pattern: u32,
+    pub first_word: u32,
+    pub word_count: usize,
+    pub mismatched_words: usize,
+    pub elapsed_ms: f64,
 }
 
 /// Type-erased accessibility tree update payload. PartialEq always returns
@@ -608,6 +628,14 @@ impl Cx {
 
     pub fn xr_depth_readback_cpu_time_ms(&self) -> Option<f64> {
         <Self as CxOsApi>::xr_depth_readback_cpu_time_ms(self)
+    }
+
+    pub fn xr_gpu_storage_buffer_probe(
+        &mut self,
+        requested_bytes: usize,
+        pattern: u32,
+    ) -> Option<XrGpuStorageBufferProbeResult> {
+        <Self as CxOsApi>::xr_gpu_storage_buffer_probe(self, requested_bytes, pattern)
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {

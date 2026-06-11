@@ -31,7 +31,9 @@ use {
     },
     crate::{
         cx::{AndroidParams, Cx, OsType},
-        cx_api::{CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown},
+        cx_api::{
+            CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown, XrGpuStorageBufferProbeResult,
+        },
         draw_pass::CxDrawPassParent,
         draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
         event::xr::XrHandMeshBindData,
@@ -3774,6 +3776,32 @@ impl CxOsApi for Cx {
 
     fn xr_depth_readback_cpu_time_ms(&self) -> Option<f64> {
         self.os.xr_depth_readback_cpu_time_ms
+    }
+
+    fn xr_gpu_storage_buffer_probe(
+        &mut self,
+        requested_bytes: usize,
+        pattern: u32,
+    ) -> Option<XrGpuStorageBufferProbeResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_storage_buffer_probe(requested_bytes, pattern) {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan storage-buffer probe failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (requested_bytes, pattern);
+            None
+        }
     }
 
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {

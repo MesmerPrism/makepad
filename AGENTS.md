@@ -69,6 +69,11 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
 - Generic OpenXR hand-mesh bind-data access for runtimes that expose
   `XR_FB_hand_tracking_mesh`, kept as mesh counts/status plus an on-demand API
   rather than app-specific recording behavior.
+- Generic XR/Vulkan storage-buffer command/readback probes used by downstream
+  app-shell evidence to prove command-buffer submission and bounded readback.
+  Keep these APIs data-limited and generic; downstream crates own any
+  Quest-Makepad marker contract, and this fork must not define Matter
+  field/particle semantics or GPU compute readiness.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 
