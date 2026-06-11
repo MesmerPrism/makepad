@@ -215,6 +215,13 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_u32_compute_probe(
+        &mut self,
+        _input_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
+    ) -> Option<XrGpuU32ComputeProbeResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -243,6 +250,18 @@ pub struct XrGpuStorageBufferProbeResult {
     pub readback_bytes: usize,
     pub pattern: u32,
     pub first_word: u32,
+    pub word_count: usize,
+    pub mismatched_words: usize,
+    pub elapsed_ms: f64,
+}
+
+pub const XR_GPU_U32_COMPUTE_PROBE_WORDS: usize = 4;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuU32ComputeProbeResult {
+    pub input_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
+    pub output_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
+    pub expected_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
     pub word_count: usize,
     pub mismatched_words: usize,
     pub elapsed_ms: f64,
@@ -636,6 +655,13 @@ impl Cx {
         pattern: u32,
     ) -> Option<XrGpuStorageBufferProbeResult> {
         <Self as CxOsApi>::xr_gpu_storage_buffer_probe(self, requested_bytes, pattern)
+    }
+
+    pub fn xr_gpu_u32_compute_probe(
+        &mut self,
+        input_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
+    ) -> Option<XrGpuU32ComputeProbeResult> {
+        <Self as CxOsApi>::xr_gpu_u32_compute_probe(self, input_words)
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {

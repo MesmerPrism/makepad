@@ -33,6 +33,7 @@ use {
         cx::{AndroidParams, Cx, OsType},
         cx_api::{
             CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown, XrGpuStorageBufferProbeResult,
+            XrGpuU32ComputeProbeResult, XR_GPU_U32_COMPUTE_PROBE_WORDS,
         },
         draw_pass::CxDrawPassParent,
         draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
@@ -3800,6 +3801,31 @@ impl CxOsApi for Cx {
         #[cfg(not(use_vulkan))]
         {
             let _ = (requested_bytes, pattern);
+            None
+        }
+    }
+
+    fn xr_gpu_u32_compute_probe(
+        &mut self,
+        input_words: [u32; XR_GPU_U32_COMPUTE_PROBE_WORDS],
+    ) -> Option<XrGpuU32ComputeProbeResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_u32_compute_probe(input_words) {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan u32 compute probe failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = input_words;
             None
         }
     }

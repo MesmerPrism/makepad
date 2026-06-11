@@ -252,6 +252,80 @@ fn reflect_shader_resource_interface(module: &naga::Module) -> CxVulkanShaderRes
     CxVulkanShaderResourceInterface { bindings }
 }
 
+pub(crate) fn compile_compute_wgsl_to_spirv(
+    wgsl: &str,
+    entry_point: &str,
+) -> Result<Vec<u32>, String> {
+    use naga::{back::spv, valid};
+
+    fn extract_error_line(details: &str) -> Option<usize> {
+        let marker = "wgsl:";
+        let start = details.find(marker)? + marker.len();
+        let rest = &details[start..];
+        let end = rest.find(':')?;
+        rest[..end].trim().parse::<usize>().ok()
+    }
+
+    fn wgsl_context(wgsl: &str, line: usize, radius: usize) -> String {
+        let start = line.saturating_sub(radius).max(1);
+        let end = line.saturating_add(radius);
+        let mut out = String::new();
+        for (i, src_line) in wgsl.lines().enumerate() {
+            let ln = i + 1;
+            if ln >= start && ln <= end {
+                let _ = writeln!(out, "{ln:4} | {src_line}");
+            }
+        }
+        out
+    }
+
+    let module = naga::front::wgsl::parse_str(wgsl).map_err(|e| {
+        let details = e.emit_to_string(wgsl);
+        let context = extract_error_line(&details)
+            .map(|line| {
+                format!(
+                    "\nWGSL context around line {line}:\n{}",
+                    wgsl_context(wgsl, line, 4)
+                )
+            })
+            .unwrap_or_default();
+        format!("WGSL parse error: {e}\n{details}{context}")
+    })?;
+    let mut validator =
+        valid::Validator::new(valid::ValidationFlags::all(), valid::Capabilities::all());
+    let module_info = validator
+        .validate(&module)
+        .map_err(|e| format!("WGSL validation error: {e}"))?;
+    let has_compute = module
+        .entry_points
+        .iter()
+        .any(|ep| ep.stage == naga::ShaderStage::Compute && ep.name == entry_point);
+    if !has_compute {
+        return Err(format!(
+            "WGSL module has no compute entry point `{entry_point}`"
+        ));
+    }
+
+    let options = spv::Options {
+        lang_version: (1, 3),
+        flags: spv::WriterFlags::empty(),
+        fake_missing_bindings: true,
+        binding_map: spv::BindingMap::default(),
+        capabilities: None,
+        bounds_check_policies: naga::proc::BoundsCheckPolicies::default(),
+        zero_initialize_workgroup_memory: spv::ZeroInitializeWorkgroupMemoryMode::None,
+        force_loop_bounding: false,
+        use_storage_input_output_16: false,
+        debug_info: None,
+    };
+    let pipeline = spv::PipelineOptions {
+        shader_stage: naga::ShaderStage::Compute,
+        entry_point: entry_point.to_owned(),
+    };
+    spv::write_vec(&module, &module_info, &options, Some(&pipeline))
+        .map_err(|e| format!("SPIR-V write failed for {entry_point}: {e}"))
+}
+
 pub(crate) fn compile_draw_shader_wgsl_to_spirv(
     vm: &mut ScriptVm,
     io_self: ScriptObject,
