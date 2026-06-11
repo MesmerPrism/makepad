@@ -84,9 +84,9 @@ fn compute_main(@builtin(global_invocation_id) id: vec3<u32>) {
     if (index < 4u) {
         let sample = input_samples[index];
         let distance = sample.distance_target_strength.x;
-        let target = sample.distance_target_strength.y;
+        let target_distance = sample.distance_target_strength.y;
         let strength = sample.distance_target_strength.z;
-        let error = distance - target;
+        let error = distance - target_distance;
         let scale = -error * strength;
         output_accelerations[index] = vec4<f32>(sample.outward.xyz * scale, 0.0);
     }
