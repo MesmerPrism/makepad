@@ -34,9 +34,9 @@ use {
         cx_api::{
             CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown, XrGpuF32ForceProbeResult,
             XrGpuF32ForceProbeSample, XrGpuF32MeshSdfProbeGrid, XrGpuF32MeshSdfProbeResult,
-            XrGpuF32SkinningMeshProbeResult, XrGpuF32SkinningMeshVertex,
-            XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample, XrGpuSkinningMeshTriangle,
-            XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
+            XrGpuF32MeshSdfProbeTicket, XrGpuF32SkinningMeshProbeResult,
+            XrGpuF32SkinningMeshVertex, XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample,
+            XrGpuSkinningMeshTriangle, XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
             XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
             XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES, XR_GPU_F32_SKINNING_PROBE_SAMPLES,
             XR_GPU_U32_COMPUTE_PROBE_WORDS,
@@ -3974,6 +3974,78 @@ impl CxOsApi for Cx {
                 sample_count,
                 tolerance,
             );
+            None
+        }
+    }
+
+    fn xr_gpu_f32_mesh_sdf_probe_submit(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        grid: XrGpuF32MeshSdfProbeGrid,
+        sample_linear_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32MeshSdfProbeTicket> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_f32_mesh_sdf_probe_async(
+                vertices,
+                triangles,
+                grid,
+                sample_linear_indices,
+                expected_distances,
+                sample_count,
+                tolerance,
+            ) {
+                Ok(ticket) => Some(ticket),
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan f32 mesh SDF probe submit failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (
+                vertices,
+                triangles,
+                grid,
+                sample_linear_indices,
+                expected_distances,
+                sample_count,
+                tolerance,
+            );
+            None
+        }
+    }
+
+    fn xr_gpu_f32_mesh_sdf_probe_poll(
+        &mut self,
+        request_id: u64,
+    ) -> Option<XrGpuF32MeshSdfProbeResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.poll_xr_f32_mesh_sdf_probe(request_id) {
+                Ok(result) => result,
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan f32 mesh SDF probe poll failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = request_id;
             None
         }
     }

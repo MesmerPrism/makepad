@@ -1,7 +1,7 @@
 use crate::{
     cx_api::{
-        XrGpuF32MeshSdfProbeGrid, XrGpuF32MeshSdfProbeResult, XrGpuF32SkinningMeshVertex,
-        XrGpuSkinningMeshTriangle, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
+        XrGpuF32MeshSdfProbeGrid, XrGpuF32MeshSdfProbeResult, XrGpuF32MeshSdfProbeTicket,
+        XrGpuF32SkinningMeshVertex, XrGpuSkinningMeshTriangle, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
     },
     os::linux::vulkan_naga::compile_compute_wgsl_to_spirv,
 };
@@ -207,6 +207,18 @@ fn sdf_main(@builtin(global_invocation_id) id: vec3<u32>) {
 "#;
 
 pub(super) struct VulkanXrF32MeshSdfProbeResources {
+    request_id: u64,
+    started: Instant,
+    vertex_count: usize,
+    triangle_count: usize,
+    voxel_count: usize,
+    sample_count: usize,
+    sample_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+    expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+    tolerance: f32,
+    queue_submit_serial: u64,
+    resource_generation: u64,
+    completed: bool,
     vertices: VulkanBuffer,
     triangles: VulkanBuffer,
     skinned_positions: VulkanBuffer,
@@ -235,6 +247,28 @@ impl CxVulkan {
         sample_count: usize,
         tolerance: f32,
     ) -> Result<XrGpuF32MeshSdfProbeResult, String> {
+        let ticket = self.submit_xr_f32_mesh_sdf_probe_async(
+            vertices,
+            triangles,
+            grid,
+            sample_linear_indices,
+            expected_distances,
+            sample_count,
+            tolerance,
+        )?;
+        self.wait_xr_f32_mesh_sdf_probe(ticket.request_id)
+    }
+
+    pub(crate) fn submit_xr_f32_mesh_sdf_probe_async(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        grid: XrGpuF32MeshSdfProbeGrid,
+        sample_linear_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Result<XrGpuF32MeshSdfProbeTicket, String> {
         let started = Instant::now();
         if vertices.is_empty() {
             return Err("f32 mesh SDF probe requires vertices".to_string());
@@ -667,8 +701,6 @@ impl CxVulkan {
         };
 
         let mut queue_submit_serial = 0;
-        let mut fence_serial = 0;
-        let mut queue_wait_idle_performed = false;
         let command_result = (|| -> Result<(), String> {
             unsafe {
                 self.device
@@ -777,48 +809,54 @@ impl CxVulkan {
                     .map_err(|e| format!("queue_submit(f32 mesh SDF probe) failed: {e:?}"))?;
                 self.gpu_submit_serial = self.gpu_submit_serial.saturating_add(1);
                 queue_submit_serial = self.gpu_submit_serial;
-                self.device
-                    .wait_for_fences(&[fence], true, u64::MAX)
-                    .map_err(|e| format!("wait_for_fences(f32 mesh SDF probe) failed: {e:?}"))?;
-                fence_serial = queue_submit_serial;
-                self.device
-                    .queue_wait_idle(self.queue)
-                    .map_err(|e| format!("queue_wait_idle(f32 mesh SDF probe) failed: {e:?}"))?;
-                queue_wait_idle_performed = true;
-                self.gpu_completed_submit_serial =
-                    self.gpu_completed_submit_serial.max(queue_submit_serial);
-                self.collect_retired_texture_resources();
             }
             Ok(())
         })();
-
-        let read_result = if command_result.is_ok() {
+        if let Err(err) = command_result {
             unsafe {
-                let mapped = self
-                    .device
-                    .map_memory(
-                        sdf_distances.memory,
-                        0,
-                        sdf_distance_byte_len,
-                        vk::MemoryMapFlags::empty(),
-                    )
-                    .map_err(|err| {
-                        format!("map_memory(f32 mesh SDF distance readback) failed: {err:?}")
-                    })?;
-                let rows = std::slice::from_raw_parts(mapped as *const f32, voxel_count);
-                let output_distances = rows.to_vec();
-                self.device.unmap_memory(sdf_distances.memory);
-                Ok(output_distances)
+                if fence != vk::Fence::null() {
+                    self.device.destroy_fence(fence, None);
+                }
+                if command_buffer != vk::CommandBuffer::null()
+                    && self.command_pool != vk::CommandPool::null()
+                {
+                    self.device
+                        .free_command_buffers(self.command_pool, &[command_buffer]);
+                }
+                self.device.destroy_descriptor_pool(descriptor_pool, None);
+                self.device.destroy_pipeline(sdf_pipeline, None);
+                self.device.destroy_pipeline(skin_pipeline, None);
+                self.device.destroy_pipeline_layout(pipeline_layout, None);
+                self.device
+                    .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                self.device.destroy_shader_module(sdf_shader_module, None);
+                self.device.destroy_shader_module(skin_shader_module, None);
             }
-        } else {
-            Err(command_result
-                .err()
-                .unwrap_or_else(|| "unknown f32 mesh SDF probe command failure".to_string()))
-        };
+            self.destroy_buffer(grid_buffer);
+            self.destroy_buffer(params_buffer);
+            self.destroy_buffer(sdf_distances);
+            self.destroy_buffer(skinned_positions);
+            self.destroy_buffer(triangle_buffer);
+            self.destroy_buffer(vertex_buffer);
+            return Err(err);
+        }
 
         let resource_generation = self.xr_f32_mesh_sdf_probe_resources.len() as u64 + 1;
+        let request_id = queue_submit_serial;
         self.xr_f32_mesh_sdf_probe_resources
             .push(VulkanXrF32MeshSdfProbeResources {
+                request_id,
+                started,
+                vertex_count,
+                triangle_count,
+                voxel_count,
+                sample_count,
+                sample_indices,
+                expected_distances,
+                tolerance,
+                queue_submit_serial,
+                resource_generation,
+                completed: false,
                 vertices: vertex_buffer,
                 triangles: triangle_buffer,
                 skinned_positions,
@@ -837,9 +875,142 @@ impl CxVulkan {
             });
         let retained_resource_count = self.xr_f32_mesh_sdf_probe_resources.len();
         let pending_retire_count = retained_resource_count;
-        let retired_after_fence_count = 0;
 
-        let dense_distances = read_result?;
+        Ok(XrGpuF32MeshSdfProbeTicket {
+            request_id,
+            queue_submit_serial,
+            resource_generation,
+            pending_retire_count,
+            retained_resource_count,
+        })
+    }
+
+    pub(crate) fn poll_xr_f32_mesh_sdf_probe(
+        &mut self,
+        request_id: u64,
+    ) -> Result<Option<XrGpuF32MeshSdfProbeResult>, String> {
+        let Some(resource_index) = self
+            .xr_f32_mesh_sdf_probe_resources
+            .iter()
+            .position(|resource| resource.request_id == request_id)
+        else {
+            return Ok(None);
+        };
+        if self.xr_f32_mesh_sdf_probe_resources[resource_index].completed {
+            return Ok(None);
+        }
+
+        let fence = self.xr_f32_mesh_sdf_probe_resources[resource_index].fence;
+        let queue_submit_serial =
+            self.xr_f32_mesh_sdf_probe_resources[resource_index].queue_submit_serial;
+        match unsafe { self.device.get_fence_status(fence) } {
+            Ok(true) => {
+                self.gpu_completed_submit_serial =
+                    self.gpu_completed_submit_serial.max(queue_submit_serial);
+                self.collect_retired_texture_resources();
+                self.complete_xr_f32_mesh_sdf_probe(resource_index, false)
+                    .map(Some)
+            }
+            Ok(false) => Ok(None),
+            Err(err) => Err(format!(
+                "get_fence_status(f32 mesh SDF probe {request_id}) failed: {err:?}"
+            )),
+        }
+    }
+
+    fn wait_xr_f32_mesh_sdf_probe(
+        &mut self,
+        request_id: u64,
+    ) -> Result<XrGpuF32MeshSdfProbeResult, String> {
+        let resource_index = self
+            .xr_f32_mesh_sdf_probe_resources
+            .iter()
+            .position(|resource| resource.request_id == request_id)
+            .ok_or_else(|| format!("f32 mesh SDF probe {request_id} was not found"))?;
+        if self.xr_f32_mesh_sdf_probe_resources[resource_index].completed {
+            return Err(format!(
+                "f32 mesh SDF probe {request_id} was already completed"
+            ));
+        }
+
+        let fence = self.xr_f32_mesh_sdf_probe_resources[resource_index].fence;
+        let queue_submit_serial =
+            self.xr_f32_mesh_sdf_probe_resources[resource_index].queue_submit_serial;
+        unsafe {
+            self.device
+                .wait_for_fences(&[fence], true, u64::MAX)
+                .map_err(|e| format!("wait_for_fences(f32 mesh SDF probe) failed: {e:?}"))?;
+            self.device
+                .queue_wait_idle(self.queue)
+                .map_err(|e| format!("queue_wait_idle(f32 mesh SDF probe) failed: {e:?}"))?;
+        }
+        self.gpu_completed_submit_serial =
+            self.gpu_completed_submit_serial.max(queue_submit_serial);
+        self.collect_retired_texture_resources();
+        self.complete_xr_f32_mesh_sdf_probe(resource_index, true)
+    }
+
+    fn complete_xr_f32_mesh_sdf_probe(
+        &mut self,
+        resource_index: usize,
+        queue_wait_idle_performed: bool,
+    ) -> Result<XrGpuF32MeshSdfProbeResult, String> {
+        let (
+            started,
+            vertex_count,
+            triangle_count,
+            voxel_count,
+            sample_count,
+            sample_indices,
+            expected_distances,
+            tolerance,
+            queue_submit_serial,
+            resource_generation,
+            sdf_distances,
+        ) = {
+            let resource = self
+                .xr_f32_mesh_sdf_probe_resources
+                .get(resource_index)
+                .ok_or_else(|| "f32 mesh SDF probe resource index is stale".to_string())?;
+            if resource.completed {
+                return Err(format!(
+                    "f32 mesh SDF probe {} was already completed",
+                    resource.request_id
+                ));
+            }
+            (
+                resource.started,
+                resource.vertex_count,
+                resource.triangle_count,
+                resource.voxel_count,
+                resource.sample_count,
+                resource.sample_indices,
+                resource.expected_distances,
+                resource.tolerance,
+                resource.queue_submit_serial,
+                resource.resource_generation,
+                resource.sdf_distances,
+            )
+        };
+        let sdf_distance_byte_len = (std::mem::size_of::<f32>() * voxel_count) as vk::DeviceSize;
+        let dense_distances = unsafe {
+            let mapped = self
+                .device
+                .map_memory(
+                    sdf_distances.memory,
+                    0,
+                    sdf_distance_byte_len,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .map_err(|err| {
+                    format!("map_memory(f32 mesh SDF distance readback) failed: {err:?}")
+                })?;
+            let rows = std::slice::from_raw_parts(mapped as *const f32, voxel_count);
+            let output_distances = rows.to_vec();
+            self.device.unmap_memory(sdf_distances.memory);
+            output_distances
+        };
+
         let mut output_samples = [0.0; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES];
         let mut expected_samples = [0.0; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES];
         let mut mismatched_samples = 0;
@@ -865,6 +1036,16 @@ impl CxVulkan {
             }
         }
 
+        if let Some(resource) = self.xr_f32_mesh_sdf_probe_resources.get_mut(resource_index) {
+            resource.completed = true;
+        }
+        let retained_resource_count = self.xr_f32_mesh_sdf_probe_resources.len();
+        let pending_retire_count = self
+            .xr_f32_mesh_sdf_probe_resources
+            .iter()
+            .filter(|resource| !resource.completed)
+            .count();
+
         Ok(XrGpuF32MeshSdfProbeResult {
             vertex_count,
             triangle_count,
@@ -879,11 +1060,11 @@ impl CxVulkan {
             max_abs_error,
             tolerance,
             queue_submit_serial,
-            fence_serial,
+            fence_serial: queue_submit_serial,
             resource_generation,
             pending_retire_count,
             retained_resource_count,
-            retired_after_fence_count,
+            retired_after_fence_count: 0,
             queue_wait_idle_performed,
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         })

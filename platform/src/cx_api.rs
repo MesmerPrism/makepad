@@ -264,6 +264,26 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_mesh_sdf_probe_submit(
+        &mut self,
+        _vertices: &[XrGpuF32SkinningMeshVertex],
+        _triangles: &[XrGpuSkinningMeshTriangle],
+        _grid: XrGpuF32MeshSdfProbeGrid,
+        _sample_linear_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        _expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        _sample_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32MeshSdfProbeTicket> {
+        None
+    }
+
+    fn xr_gpu_f32_mesh_sdf_probe_poll(
+        &mut self,
+        _request_id: u64,
+    ) -> Option<XrGpuF32MeshSdfProbeResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -456,6 +476,15 @@ pub const XR_GPU_F32_MESH_SDF_PROBE_SAMPLES: usize = 4;
 pub struct XrGpuF32MeshSdfProbeGrid {
     pub origin_voxel_size: [f32; 4],
     pub dimensions: [u32; 4],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct XrGpuF32MeshSdfProbeTicket {
+    pub request_id: u64,
+    pub queue_submit_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -935,6 +964,35 @@ impl Cx {
             sample_count,
             tolerance,
         )
+    }
+
+    pub fn xr_gpu_f32_mesh_sdf_probe_submit(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        grid: XrGpuF32MeshSdfProbeGrid,
+        sample_linear_indices: [u32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        expected_distances: [f32; XR_GPU_F32_MESH_SDF_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32MeshSdfProbeTicket> {
+        <Self as CxOsApi>::xr_gpu_f32_mesh_sdf_probe_submit(
+            self,
+            vertices,
+            triangles,
+            grid,
+            sample_linear_indices,
+            expected_distances,
+            sample_count,
+            tolerance,
+        )
+    }
+
+    pub fn xr_gpu_f32_mesh_sdf_probe_poll(
+        &mut self,
+        request_id: u64,
+    ) -> Option<XrGpuF32MeshSdfProbeResult> {
+        <Self as CxOsApi>::xr_gpu_f32_mesh_sdf_probe_poll(self, request_id)
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
