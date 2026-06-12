@@ -521,7 +521,7 @@ pub struct XrGpuF32SkinningMeshProbeTicket {
     pub retained_resource_count: usize,
 }
 
-pub const XR_GPU_F32_MESH_SDF_PROBE_SAMPLES: usize = 4;
+pub const XR_GPU_F32_MESH_SDF_PROBE_SAMPLES: usize = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
