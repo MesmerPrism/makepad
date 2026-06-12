@@ -32,12 +32,13 @@ use {
     crate::{
         cx::{AndroidParams, Cx, OsType},
         cx_api::{
-            CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown, XrGpuF32ForceProbeResult,
-            XrGpuF32ForceProbeSample, XrGpuF32MeshSdfProbeGrid, XrGpuF32MeshSdfProbeResult,
-            XrGpuF32MeshSdfProbeTicket, XrGpuF32SkinningMeshProbeResult,
-            XrGpuF32SkinningMeshProbeTicket, XrGpuF32SkinningMeshVertex,
-            XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample, XrGpuF32SkinningProbeTicket,
-            XrGpuSkinningMeshTriangle, XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
+            CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown, XrGpuF32FieldSampleProbeResult,
+            XrGpuF32ForceProbeResult, XrGpuF32ForceProbeSample, XrGpuF32MeshSdfProbeGrid,
+            XrGpuF32MeshSdfProbeResult, XrGpuF32MeshSdfProbeTicket,
+            XrGpuF32SkinningMeshProbeResult, XrGpuF32SkinningMeshProbeTicket,
+            XrGpuF32SkinningMeshVertex, XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample,
+            XrGpuF32SkinningProbeTicket, XrGpuSkinningMeshTriangle, XrGpuStorageBufferProbeResult,
+            XrGpuU32ComputeProbeResult, XR_GPU_F32_FIELD_SAMPLE_PROBE_SAMPLES,
             XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
             XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES, XR_GPU_F32_SKINNING_PROBE_SAMPLES,
             XR_GPU_U32_COMPUTE_PROBE_WORDS,
@@ -4169,6 +4170,44 @@ impl CxOsApi for Cx {
         #[cfg(not(use_vulkan))]
         {
             let _ = request_id;
+            None
+        }
+    }
+
+    fn xr_gpu_f32_field_sample_probe(
+        &mut self,
+        sample_linear_indices: [u32; XR_GPU_F32_FIELD_SAMPLE_PROBE_SAMPLES],
+        expected_distances: [f32; XR_GPU_F32_FIELD_SAMPLE_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32FieldSampleProbeResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_f32_field_sample_probe(
+                sample_linear_indices,
+                expected_distances,
+                sample_count,
+                tolerance,
+            ) {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan f32 field sample probe failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (
+                sample_linear_indices,
+                expected_distances,
+                sample_count,
+                tolerance,
+            );
             None
         }
     }

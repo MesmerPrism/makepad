@@ -256,6 +256,13 @@ pub(super) struct VulkanXrF32MeshSdfProbeDerivedBuffers {
     sdf_distances: VulkanBuffer,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct VulkanXrF32MeshSdfResidentFieldUse {
+    pub(super) generation: u64,
+    pub(super) sdf_distance_byte_len: vk::DeviceSize,
+    pub(super) sdf_distances: VulkanBuffer,
+}
+
 struct VulkanXrF32MeshSdfProbeDerivedBufferUse {
     generation: u64,
     resident: bool,
@@ -308,6 +315,17 @@ pub(super) struct VulkanXrF32MeshSdfProbeResources {
 }
 
 impl CxVulkan {
+    pub(super) fn xr_f32_mesh_sdf_resident_field_for_sampling(
+        &self,
+    ) -> Option<VulkanXrF32MeshSdfResidentFieldUse> {
+        let buffers = self.xr_f32_mesh_sdf_probe_derived_buffers.as_ref()?;
+        Some(VulkanXrF32MeshSdfResidentFieldUse {
+            generation: buffers.generation,
+            sdf_distance_byte_len: buffers.sdf_distance_byte_len,
+            sdf_distances: buffers.sdf_distances,
+        })
+    }
+
     fn ensure_xr_f32_mesh_sdf_probe_program(
         &mut self,
     ) -> Result<VulkanXrF32MeshSdfProbeProgramUse, String> {
