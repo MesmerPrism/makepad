@@ -318,6 +318,31 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_volume_probe(
+        &mut self,
+        _samples: [XrGpuF32VolumeProbeSample; XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+        _sample_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32VolumeProbeResult> {
+        None
+    }
+
+    fn xr_gpu_f32_volume_probe_submit(
+        &mut self,
+        _samples: [XrGpuF32VolumeProbeSample; XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+        _sample_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32VolumeProbeTicket> {
+        None
+    }
+
+    fn xr_gpu_f32_volume_probe_poll(
+        &mut self,
+        _request_id: u64,
+    ) -> Option<XrGpuF32VolumeProbeResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -575,6 +600,79 @@ pub struct XrGpuF32MeshSdfProbeResult {
     pub retired_after_fence_count: usize,
     pub queue_wait_idle_performed: bool,
     pub elapsed_ms: f64,
+}
+
+pub const XR_GPU_F32_VOLUME_PROBE_SAMPLES: usize = 8;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32VolumeProbeSample {
+    pub uv_eye_time: [f32; 4],
+    pub ray_origin_depth: [f32; 4],
+    pub ray_direction_step: [f32; 4],
+    pub volume_params: [f32; 4],
+    pub expected_rgba: [f32; 4],
+    pub expected_density_depth_status: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32VolumeProbeOutput {
+    pub rgba: [f32; 4],
+    pub density_depth_status: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct XrGpuF32VolumeProbeTicket {
+    pub request_id: u64,
+    pub queue_submit_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct XrGpuF32VolumeProbeResult {
+    pub samples: [XrGpuF32VolumeProbeSample; XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+    pub outputs: [XrGpuF32VolumeProbeOutput; XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+    pub expected_outputs: [XrGpuF32VolumeProbeOutput; XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+    pub sample_count: usize,
+    pub component_count: usize,
+    pub mismatched_components: usize,
+    pub max_abs_error: f32,
+    pub tolerance: f32,
+    pub queue_submit_serial: u64,
+    pub fence_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+    pub retired_after_fence_count: usize,
+    pub queue_wait_idle_performed: bool,
+    pub elapsed_ms: f64,
+}
+
+impl Default for XrGpuF32VolumeProbeResult {
+    fn default() -> Self {
+        Self {
+            samples: [XrGpuF32VolumeProbeSample::default(); XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+            outputs: [XrGpuF32VolumeProbeOutput::default(); XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+            expected_outputs: [XrGpuF32VolumeProbeOutput::default();
+                XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+            sample_count: 0,
+            component_count: 0,
+            mismatched_components: 0,
+            max_abs_error: 0.0,
+            tolerance: 0.0,
+            queue_submit_serial: 0,
+            fence_serial: 0,
+            resource_generation: 0,
+            pending_retire_count: 0,
+            retained_resource_count: 0,
+            retired_after_fence_count: 0,
+            queue_wait_idle_performed: false,
+            elapsed_ms: 0.0,
+        }
+    }
 }
 
 /// Type-erased accessibility tree update payload. PartialEq always returns
@@ -1100,6 +1198,31 @@ impl Cx {
         request_id: u64,
     ) -> Option<XrGpuF32MeshSdfProbeResult> {
         <Self as CxOsApi>::xr_gpu_f32_mesh_sdf_probe_poll(self, request_id)
+    }
+
+    pub fn xr_gpu_f32_volume_probe(
+        &mut self,
+        samples: [XrGpuF32VolumeProbeSample; XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32VolumeProbeResult> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_probe(self, samples, sample_count, tolerance)
+    }
+
+    pub fn xr_gpu_f32_volume_probe_submit(
+        &mut self,
+        samples: [XrGpuF32VolumeProbeSample; XR_GPU_F32_VOLUME_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32VolumeProbeTicket> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_probe_submit(self, samples, sample_count, tolerance)
+    }
+
+    pub fn xr_gpu_f32_volume_probe_poll(
+        &mut self,
+        request_id: u64,
+    ) -> Option<XrGpuF32VolumeProbeResult> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_probe_poll(self, request_id)
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
