@@ -580,6 +580,8 @@ pub struct CxVulkan {
     xr_f32_skinning_mesh_probe_resources:
         Vec<skinning_mesh_probe::VulkanXrF32SkinningMeshProbeResources>,
     xr_f32_mesh_sdf_probe_program: Option<mesh_sdf_probe::VulkanXrF32MeshSdfProbeProgram>,
+    xr_f32_mesh_sdf_probe_source_mesh_buffers:
+        Option<mesh_sdf_probe::VulkanXrF32MeshSdfProbeSourceMeshBuffers>,
     xr_f32_mesh_sdf_probe_resources: Vec<mesh_sdf_probe::VulkanXrF32MeshSdfProbeResources>,
     xr_storage_buffer_probe_resources: Vec<VulkanXrStorageBufferProbeResources>,
 }
@@ -922,6 +924,7 @@ impl CxVulkan {
             xr_f32_skinning_probe_resources: Vec::new(),
             xr_f32_skinning_mesh_probe_resources: Vec::new(),
             xr_f32_mesh_sdf_probe_program: None,
+            xr_f32_mesh_sdf_probe_source_mesh_buffers: None,
             xr_f32_mesh_sdf_probe_resources: Vec::new(),
             xr_storage_buffer_probe_resources: Vec::new(),
         };
@@ -1336,6 +1339,7 @@ impl CxVulkan {
             xr_f32_skinning_probe_resources: Vec::new(),
             xr_f32_skinning_mesh_probe_resources: Vec::new(),
             xr_f32_mesh_sdf_probe_program: None,
+            xr_f32_mesh_sdf_probe_source_mesh_buffers: None,
             xr_f32_mesh_sdf_probe_resources: Vec::new(),
             xr_storage_buffer_probe_resources: Vec::new(),
         };
@@ -9442,6 +9446,7 @@ impl Drop for CxVulkan {
         self.destroy_xr_f32_skinning_probe_resources();
         self.destroy_xr_f32_skinning_mesh_probe_resources();
         self.destroy_xr_f32_mesh_sdf_probe_resources();
+        self.destroy_xr_f32_mesh_sdf_probe_source_mesh_buffers();
         self.destroy_xr_f32_mesh_sdf_probe_program();
         self.destroy_geometry_resources();
         self.destroy_texture_resources();

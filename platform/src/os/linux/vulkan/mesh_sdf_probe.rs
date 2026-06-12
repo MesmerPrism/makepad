@@ -228,6 +228,26 @@ struct VulkanXrF32MeshSdfProbeProgramUse {
     sdf_pipeline: vk::Pipeline,
 }
 
+pub(super) struct VulkanXrF32MeshSdfProbeSourceMeshBuffers {
+    generation: u64,
+    vertex_byte_len: vk::DeviceSize,
+    triangle_byte_len: vk::DeviceSize,
+    vertices: VulkanBuffer,
+    triangles: VulkanBuffer,
+}
+
+struct VulkanXrF32MeshSdfProbeSourceMeshBufferUse {
+    generation: u64,
+    resident: bool,
+    reused: bool,
+    vertex_byte_len: vk::DeviceSize,
+    triangle_byte_len: vk::DeviceSize,
+    vertices: VulkanBuffer,
+    triangles: VulkanBuffer,
+    owned_vertices: Option<VulkanBuffer>,
+    owned_triangles: Option<VulkanBuffer>,
+}
+
 pub(super) struct VulkanXrF32MeshSdfProbeResources {
     request_id: u64,
     started: Instant,
@@ -244,9 +264,14 @@ pub(super) struct VulkanXrF32MeshSdfProbeResources {
     program_reused: bool,
     shader_compiled_this_submit: bool,
     pipeline_created_this_submit: bool,
+    source_mesh_buffer_generation: u64,
+    source_mesh_buffers_resident: bool,
+    source_mesh_buffers_reused: bool,
+    source_vertex_buffer_bytes: vk::DeviceSize,
+    source_triangle_buffer_bytes: vk::DeviceSize,
     completed: bool,
-    vertices: VulkanBuffer,
-    triangles: VulkanBuffer,
+    owned_vertices: Option<VulkanBuffer>,
+    owned_triangles: Option<VulkanBuffer>,
     skinned_positions: VulkanBuffer,
     sdf_distances: VulkanBuffer,
     params: VulkanBuffer,
@@ -417,6 +442,170 @@ impl CxVulkan {
         })
     }
 
+    fn prepare_xr_f32_mesh_sdf_source_mesh_buffers(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        vertex_byte_len: vk::DeviceSize,
+        triangle_byte_len: vk::DeviceSize,
+    ) -> Result<VulkanXrF32MeshSdfProbeSourceMeshBufferUse, String> {
+        let has_pending_reader = self
+            .xr_f32_mesh_sdf_probe_resources
+            .iter()
+            .any(|resource| !resource.completed);
+        if has_pending_reader {
+            return self.create_owned_xr_f32_mesh_sdf_source_mesh_buffers(
+                vertices,
+                triangles,
+                vertex_byte_len,
+                triangle_byte_len,
+            );
+        }
+
+        let mut generation = self
+            .xr_f32_mesh_sdf_probe_source_mesh_buffers
+            .as_ref()
+            .map_or(1, |buffers| buffers.generation);
+        let reused = self
+            .xr_f32_mesh_sdf_probe_source_mesh_buffers
+            .as_ref()
+            .is_some_and(|buffers| {
+                buffers.vertex_byte_len == vertex_byte_len
+                    && buffers.triangle_byte_len == triangle_byte_len
+            });
+        if !reused {
+            if let Some(old_buffers) = self.xr_f32_mesh_sdf_probe_source_mesh_buffers.take() {
+                generation = old_buffers.generation.saturating_add(1);
+                self.destroy_buffer(old_buffers.triangles);
+                self.destroy_buffer(old_buffers.vertices);
+            }
+            let vertex_buffer =
+                self.create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, vertices)?;
+            let triangle_buffer = match self
+                .create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, triangles)
+            {
+                Ok(buffer) => buffer,
+                Err(err) => {
+                    self.destroy_buffer(vertex_buffer);
+                    return Err(err);
+                }
+            };
+            self.xr_f32_mesh_sdf_probe_source_mesh_buffers =
+                Some(VulkanXrF32MeshSdfProbeSourceMeshBuffers {
+                    generation,
+                    vertex_byte_len,
+                    triangle_byte_len,
+                    vertices: vertex_buffer,
+                    triangles: triangle_buffer,
+                });
+        }
+
+        let buffers = self
+            .xr_f32_mesh_sdf_probe_source_mesh_buffers
+            .as_ref()
+            .ok_or_else(|| "f32 mesh SDF resident source mesh buffers missing".to_string())?;
+        let vertices_buffer = buffers.vertices;
+        let triangles_buffer = buffers.triangles;
+        let generation = buffers.generation;
+        self.write_xr_f32_mesh_sdf_host_buffer(
+            vertices_buffer,
+            vertices,
+            vertex_byte_len,
+            "source vertices",
+        )?;
+        self.write_xr_f32_mesh_sdf_host_buffer(
+            triangles_buffer,
+            triangles,
+            triangle_byte_len,
+            "source triangles",
+        )?;
+
+        Ok(VulkanXrF32MeshSdfProbeSourceMeshBufferUse {
+            generation,
+            resident: true,
+            reused,
+            vertex_byte_len,
+            triangle_byte_len,
+            vertices: vertices_buffer,
+            triangles: triangles_buffer,
+            owned_vertices: None,
+            owned_triangles: None,
+        })
+    }
+
+    fn create_owned_xr_f32_mesh_sdf_source_mesh_buffers(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        vertex_byte_len: vk::DeviceSize,
+        triangle_byte_len: vk::DeviceSize,
+    ) -> Result<VulkanXrF32MeshSdfProbeSourceMeshBufferUse, String> {
+        let vertex_buffer =
+            self.create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, vertices)?;
+        let triangle_buffer = match self
+            .create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, triangles)
+        {
+            Ok(buffer) => buffer,
+            Err(err) => {
+                self.destroy_buffer(vertex_buffer);
+                return Err(err);
+            }
+        };
+        Ok(VulkanXrF32MeshSdfProbeSourceMeshBufferUse {
+            generation: 0,
+            resident: false,
+            reused: false,
+            vertex_byte_len,
+            triangle_byte_len,
+            vertices: vertex_buffer,
+            triangles: triangle_buffer,
+            owned_vertices: Some(vertex_buffer),
+            owned_triangles: Some(triangle_buffer),
+        })
+    }
+
+    fn write_xr_f32_mesh_sdf_host_buffer<T: Copy>(
+        &self,
+        buffer: VulkanBuffer,
+        data: &[T],
+        byte_len: vk::DeviceSize,
+        label: &str,
+    ) -> Result<(), String> {
+        if byte_len > buffer.size {
+            return Err(format!(
+                "f32 mesh SDF {label} data exceeds resident buffer size"
+            ));
+        }
+        if data.is_empty() {
+            return Ok(());
+        }
+        unsafe {
+            let mapped = self
+                .device
+                .map_memory(buffer.memory, 0, buffer.size, vk::MemoryMapFlags::empty())
+                .map_err(|err| format!("map_memory(f32 mesh SDF {label}) failed: {err:?}"))?;
+            std::ptr::copy_nonoverlapping(
+                data.as_ptr() as *const u8,
+                mapped as *mut u8,
+                byte_len as usize,
+            );
+            self.device.unmap_memory(buffer.memory);
+        }
+        Ok(())
+    }
+
+    fn destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(
+        &self,
+        buffers: VulkanXrF32MeshSdfProbeSourceMeshBufferUse,
+    ) {
+        if let Some(buffer) = buffers.owned_triangles {
+            self.destroy_buffer(buffer);
+        }
+        if let Some(buffer) = buffers.owned_vertices {
+            self.destroy_buffer(buffer);
+        }
+    }
+
     pub(crate) fn submit_xr_f32_mesh_sdf_probe(
         &mut self,
         vertices: &[XrGpuF32SkinningMeshVertex],
@@ -522,25 +711,21 @@ impl CxVulkan {
         let skin_pipeline = program.skin_pipeline;
         let sdf_pipeline = program.sdf_pipeline;
 
-        let vertex_buffer =
-            self.create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, vertices)?;
-        let triangle_buffer = match self
-            .create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, triangles)
-        {
-            Ok(buffer) => buffer,
-            Err(err) => {
-                self.destroy_buffer(vertex_buffer);
-                return Err(err);
-            }
-        };
+        let source_mesh_buffers = self.prepare_xr_f32_mesh_sdf_source_mesh_buffers(
+            vertices,
+            triangles,
+            vertex_byte_len,
+            triangle_byte_len,
+        )?;
+        let vertex_buffer = source_mesh_buffers.vertices;
+        let triangle_buffer = source_mesh_buffers.triangles;
         let skinned_positions = match self.create_host_buffer(
             vk::BufferUsageFlags::STORAGE_BUFFER,
             skinned_position_byte_len,
         ) {
             Ok(buffer) => buffer,
             Err(err) => {
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
+                self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(err);
             }
         };
@@ -550,8 +735,7 @@ impl CxVulkan {
             Ok(buffer) => buffer,
             Err(err) => {
                 self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
+                self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(err);
             }
         };
@@ -562,8 +746,7 @@ impl CxVulkan {
             Err(err) => {
                 self.destroy_buffer(sdf_distances);
                 self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
+                self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(err);
             }
         };
@@ -575,8 +758,7 @@ impl CxVulkan {
                 self.destroy_buffer(params_buffer);
                 self.destroy_buffer(sdf_distances);
                 self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
+                self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(err);
             }
         };
@@ -600,8 +782,7 @@ impl CxVulkan {
                 self.destroy_buffer(params_buffer);
                 self.destroy_buffer(sdf_distances);
                 self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
+                self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(format!(
                     "create_descriptor_pool(f32 mesh SDF probe) failed: {err:?}"
                 ));
@@ -621,8 +802,7 @@ impl CxVulkan {
                     self.destroy_buffer(params_buffer);
                     self.destroy_buffer(sdf_distances);
                     self.destroy_buffer(skinned_positions);
-                    self.destroy_buffer(triangle_buffer);
-                    self.destroy_buffer(vertex_buffer);
+                    self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                     return Err(format!(
                         "allocate_descriptor_sets(f32 mesh SDF probe) failed: {err:?}"
                     ));
@@ -669,8 +849,7 @@ impl CxVulkan {
                     self.destroy_buffer(params_buffer);
                     self.destroy_buffer(sdf_distances);
                     self.destroy_buffer(skinned_positions);
-                    self.destroy_buffer(triangle_buffer);
-                    self.destroy_buffer(vertex_buffer);
+                    self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                     return Err(format!(
                         "allocate_command_buffers(f32 mesh SDF probe) failed: {err:?}"
                     ));
@@ -691,8 +870,7 @@ impl CxVulkan {
                     self.destroy_buffer(params_buffer);
                     self.destroy_buffer(sdf_distances);
                     self.destroy_buffer(skinned_positions);
-                    self.destroy_buffer(triangle_buffer);
-                    self.destroy_buffer(vertex_buffer);
+                    self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                     return Err(format!("create_fence(f32 mesh SDF probe) failed: {err:?}"));
                 }
             }
@@ -827,8 +1005,7 @@ impl CxVulkan {
             self.destroy_buffer(params_buffer);
             self.destroy_buffer(sdf_distances);
             self.destroy_buffer(skinned_positions);
-            self.destroy_buffer(triangle_buffer);
-            self.destroy_buffer(vertex_buffer);
+            self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
             return Err(err);
         }
 
@@ -851,9 +1028,14 @@ impl CxVulkan {
                 program_reused: program.program_reused,
                 shader_compiled_this_submit: program.shader_compiled_this_submit,
                 pipeline_created_this_submit: program.pipeline_created_this_submit,
+                source_mesh_buffer_generation: source_mesh_buffers.generation,
+                source_mesh_buffers_resident: source_mesh_buffers.resident,
+                source_mesh_buffers_reused: source_mesh_buffers.reused,
+                source_vertex_buffer_bytes: source_mesh_buffers.vertex_byte_len,
+                source_triangle_buffer_bytes: source_mesh_buffers.triangle_byte_len,
                 completed: false,
-                vertices: vertex_buffer,
-                triangles: triangle_buffer,
+                owned_vertices: source_mesh_buffers.owned_vertices,
+                owned_triangles: source_mesh_buffers.owned_triangles,
                 skinned_positions,
                 sdf_distances,
                 params: params_buffer,
@@ -959,6 +1141,11 @@ impl CxVulkan {
             program_reused,
             shader_compiled_this_submit,
             pipeline_created_this_submit,
+            source_mesh_buffer_generation,
+            source_mesh_buffers_resident,
+            source_mesh_buffers_reused,
+            source_vertex_buffer_bytes,
+            source_triangle_buffer_bytes,
             sdf_distances,
         ) = {
             let resource = self
@@ -986,6 +1173,11 @@ impl CxVulkan {
                 resource.program_reused,
                 resource.shader_compiled_this_submit,
                 resource.pipeline_created_this_submit,
+                resource.source_mesh_buffer_generation,
+                resource.source_mesh_buffers_resident,
+                resource.source_mesh_buffers_reused,
+                resource.source_vertex_buffer_bytes,
+                resource.source_triangle_buffer_bytes,
                 resource.sdf_distances,
             )
         };
@@ -1063,6 +1255,11 @@ impl CxVulkan {
             program_reused,
             shader_compiled_this_submit,
             pipeline_created_this_submit,
+            source_mesh_buffer_generation,
+            source_mesh_buffers_resident,
+            source_mesh_buffers_reused,
+            source_vertex_buffer_bytes: source_vertex_buffer_bytes as u64,
+            source_triangle_buffer_bytes: source_triangle_buffer_bytes as u64,
             pending_retire_count,
             retained_resource_count,
             retired_after_fence_count: 0,
@@ -1093,8 +1290,19 @@ impl CxVulkan {
             self.destroy_buffer(resource.params);
             self.destroy_buffer(resource.sdf_distances);
             self.destroy_buffer(resource.skinned_positions);
-            self.destroy_buffer(resource.triangles);
-            self.destroy_buffer(resource.vertices);
+            if let Some(buffer) = resource.owned_triangles {
+                self.destroy_buffer(buffer);
+            }
+            if let Some(buffer) = resource.owned_vertices {
+                self.destroy_buffer(buffer);
+            }
+        }
+    }
+
+    pub(super) fn destroy_xr_f32_mesh_sdf_probe_source_mesh_buffers(&mut self) {
+        if let Some(buffers) = self.xr_f32_mesh_sdf_probe_source_mesh_buffers.take() {
+            self.destroy_buffer(buffers.triangles);
+            self.destroy_buffer(buffers.vertices);
         }
     }
 
