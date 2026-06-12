@@ -248,6 +248,26 @@ struct VulkanXrF32MeshSdfProbeSourceMeshBufferUse {
     owned_triangles: Option<VulkanBuffer>,
 }
 
+pub(super) struct VulkanXrF32MeshSdfProbeDerivedBuffers {
+    generation: u64,
+    skinned_position_byte_len: vk::DeviceSize,
+    sdf_distance_byte_len: vk::DeviceSize,
+    skinned_positions: VulkanBuffer,
+    sdf_distances: VulkanBuffer,
+}
+
+struct VulkanXrF32MeshSdfProbeDerivedBufferUse {
+    generation: u64,
+    resident: bool,
+    reused: bool,
+    skinned_position_byte_len: vk::DeviceSize,
+    sdf_distance_byte_len: vk::DeviceSize,
+    skinned_positions: VulkanBuffer,
+    sdf_distances: VulkanBuffer,
+    owned_skinned_positions: Option<VulkanBuffer>,
+    owned_sdf_distances: Option<VulkanBuffer>,
+}
+
 pub(super) struct VulkanXrF32MeshSdfProbeResources {
     request_id: u64,
     started: Instant,
@@ -269,9 +289,16 @@ pub(super) struct VulkanXrF32MeshSdfProbeResources {
     source_mesh_buffers_reused: bool,
     source_vertex_buffer_bytes: vk::DeviceSize,
     source_triangle_buffer_bytes: vk::DeviceSize,
+    derived_buffer_generation: u64,
+    derived_buffers_resident: bool,
+    derived_buffers_reused: bool,
+    skinned_position_buffer_bytes: vk::DeviceSize,
+    sdf_distance_buffer_bytes: vk::DeviceSize,
     completed: bool,
     owned_vertices: Option<VulkanBuffer>,
     owned_triangles: Option<VulkanBuffer>,
+    owned_skinned_positions: Option<VulkanBuffer>,
+    owned_sdf_distances: Option<VulkanBuffer>,
     skinned_positions: VulkanBuffer,
     sdf_distances: VulkanBuffer,
     params: VulkanBuffer,
@@ -564,6 +591,110 @@ impl CxVulkan {
         })
     }
 
+    fn prepare_xr_f32_mesh_sdf_derived_buffers(
+        &mut self,
+        skinned_position_byte_len: vk::DeviceSize,
+        sdf_distance_byte_len: vk::DeviceSize,
+    ) -> Result<VulkanXrF32MeshSdfProbeDerivedBufferUse, String> {
+        let has_pending_reader = self
+            .xr_f32_mesh_sdf_probe_resources
+            .iter()
+            .any(|resource| !resource.completed);
+        if has_pending_reader {
+            return self.create_owned_xr_f32_mesh_sdf_derived_buffers(
+                skinned_position_byte_len,
+                sdf_distance_byte_len,
+            );
+        }
+
+        let mut generation = self
+            .xr_f32_mesh_sdf_probe_derived_buffers
+            .as_ref()
+            .map_or(1, |buffers| buffers.generation);
+        let reused = self
+            .xr_f32_mesh_sdf_probe_derived_buffers
+            .as_ref()
+            .is_some_and(|buffers| {
+                buffers.skinned_position_byte_len == skinned_position_byte_len
+                    && buffers.sdf_distance_byte_len == sdf_distance_byte_len
+            });
+        if !reused {
+            if let Some(old_buffers) = self.xr_f32_mesh_sdf_probe_derived_buffers.take() {
+                generation = old_buffers.generation.saturating_add(1);
+                self.destroy_buffer(old_buffers.sdf_distances);
+                self.destroy_buffer(old_buffers.skinned_positions);
+            }
+            let skinned_positions = self.create_host_buffer(
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                skinned_position_byte_len,
+            )?;
+            let sdf_distances = match self
+                .create_host_buffer(vk::BufferUsageFlags::STORAGE_BUFFER, sdf_distance_byte_len)
+            {
+                Ok(buffer) => buffer,
+                Err(err) => {
+                    self.destroy_buffer(skinned_positions);
+                    return Err(err);
+                }
+            };
+            self.xr_f32_mesh_sdf_probe_derived_buffers =
+                Some(VulkanXrF32MeshSdfProbeDerivedBuffers {
+                    generation,
+                    skinned_position_byte_len,
+                    sdf_distance_byte_len,
+                    skinned_positions,
+                    sdf_distances,
+                });
+        }
+
+        let buffers = self
+            .xr_f32_mesh_sdf_probe_derived_buffers
+            .as_ref()
+            .ok_or_else(|| "f32 mesh SDF resident derived buffers missing".to_string())?;
+        Ok(VulkanXrF32MeshSdfProbeDerivedBufferUse {
+            generation: buffers.generation,
+            resident: true,
+            reused,
+            skinned_position_byte_len: buffers.skinned_position_byte_len,
+            sdf_distance_byte_len: buffers.sdf_distance_byte_len,
+            skinned_positions: buffers.skinned_positions,
+            sdf_distances: buffers.sdf_distances,
+            owned_skinned_positions: None,
+            owned_sdf_distances: None,
+        })
+    }
+
+    fn create_owned_xr_f32_mesh_sdf_derived_buffers(
+        &mut self,
+        skinned_position_byte_len: vk::DeviceSize,
+        sdf_distance_byte_len: vk::DeviceSize,
+    ) -> Result<VulkanXrF32MeshSdfProbeDerivedBufferUse, String> {
+        let skinned_positions = self.create_host_buffer(
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            skinned_position_byte_len,
+        )?;
+        let sdf_distances = match self
+            .create_host_buffer(vk::BufferUsageFlags::STORAGE_BUFFER, sdf_distance_byte_len)
+        {
+            Ok(buffer) => buffer,
+            Err(err) => {
+                self.destroy_buffer(skinned_positions);
+                return Err(err);
+            }
+        };
+        Ok(VulkanXrF32MeshSdfProbeDerivedBufferUse {
+            generation: 0,
+            resident: false,
+            reused: false,
+            skinned_position_byte_len,
+            sdf_distance_byte_len,
+            skinned_positions,
+            sdf_distances,
+            owned_skinned_positions: Some(skinned_positions),
+            owned_sdf_distances: Some(sdf_distances),
+        })
+    }
+
     fn write_xr_f32_mesh_sdf_host_buffer<T: Copy>(
         &self,
         buffer: VulkanBuffer,
@@ -602,6 +733,18 @@ impl CxVulkan {
             self.destroy_buffer(buffer);
         }
         if let Some(buffer) = buffers.owned_vertices {
+            self.destroy_buffer(buffer);
+        }
+    }
+
+    fn destroy_xr_f32_mesh_sdf_owned_derived_buffers(
+        &self,
+        buffers: VulkanXrF32MeshSdfProbeDerivedBufferUse,
+    ) {
+        if let Some(buffer) = buffers.owned_sdf_distances {
+            self.destroy_buffer(buffer);
+        }
+        if let Some(buffer) = buffers.owned_skinned_positions {
             self.destroy_buffer(buffer);
         }
     }
@@ -719,33 +862,24 @@ impl CxVulkan {
         )?;
         let vertex_buffer = source_mesh_buffers.vertices;
         let triangle_buffer = source_mesh_buffers.triangles;
-        let skinned_positions = match self.create_host_buffer(
-            vk::BufferUsageFlags::STORAGE_BUFFER,
+        let derived_buffers = match self.prepare_xr_f32_mesh_sdf_derived_buffers(
             skinned_position_byte_len,
+            sdf_distance_byte_len,
         ) {
-            Ok(buffer) => buffer,
+            Ok(buffers) => buffers,
             Err(err) => {
                 self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(err);
             }
         };
-        let sdf_distances = match self
-            .create_host_buffer(vk::BufferUsageFlags::STORAGE_BUFFER, sdf_distance_byte_len)
-        {
-            Ok(buffer) => buffer,
-            Err(err) => {
-                self.destroy_buffer(skinned_positions);
-                self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
-                return Err(err);
-            }
-        };
+        let skinned_positions = derived_buffers.skinned_positions;
+        let sdf_distances = derived_buffers.sdf_distances;
         let params_buffer = match self
             .create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, &params)
         {
             Ok(buffer) => buffer,
             Err(err) => {
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
+                self.destroy_xr_f32_mesh_sdf_owned_derived_buffers(derived_buffers);
                 self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(err);
             }
@@ -756,8 +890,7 @@ impl CxVulkan {
             Ok(buffer) => buffer,
             Err(err) => {
                 self.destroy_buffer(params_buffer);
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
+                self.destroy_xr_f32_mesh_sdf_owned_derived_buffers(derived_buffers);
                 self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(err);
             }
@@ -780,8 +913,7 @@ impl CxVulkan {
             Err(err) => {
                 self.destroy_buffer(grid_buffer);
                 self.destroy_buffer(params_buffer);
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
+                self.destroy_xr_f32_mesh_sdf_owned_derived_buffers(derived_buffers);
                 self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                 return Err(format!(
                     "create_descriptor_pool(f32 mesh SDF probe) failed: {err:?}"
@@ -800,8 +932,7 @@ impl CxVulkan {
                     }
                     self.destroy_buffer(grid_buffer);
                     self.destroy_buffer(params_buffer);
-                    self.destroy_buffer(sdf_distances);
-                    self.destroy_buffer(skinned_positions);
+                    self.destroy_xr_f32_mesh_sdf_owned_derived_buffers(derived_buffers);
                     self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                     return Err(format!(
                         "allocate_descriptor_sets(f32 mesh SDF probe) failed: {err:?}"
@@ -847,8 +978,7 @@ impl CxVulkan {
                     }
                     self.destroy_buffer(grid_buffer);
                     self.destroy_buffer(params_buffer);
-                    self.destroy_buffer(sdf_distances);
-                    self.destroy_buffer(skinned_positions);
+                    self.destroy_xr_f32_mesh_sdf_owned_derived_buffers(derived_buffers);
                     self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                     return Err(format!(
                         "allocate_command_buffers(f32 mesh SDF probe) failed: {err:?}"
@@ -868,8 +998,7 @@ impl CxVulkan {
                     }
                     self.destroy_buffer(grid_buffer);
                     self.destroy_buffer(params_buffer);
-                    self.destroy_buffer(sdf_distances);
-                    self.destroy_buffer(skinned_positions);
+                    self.destroy_xr_f32_mesh_sdf_owned_derived_buffers(derived_buffers);
                     self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
                     return Err(format!("create_fence(f32 mesh SDF probe) failed: {err:?}"));
                 }
@@ -1003,8 +1132,7 @@ impl CxVulkan {
             }
             self.destroy_buffer(grid_buffer);
             self.destroy_buffer(params_buffer);
-            self.destroy_buffer(sdf_distances);
-            self.destroy_buffer(skinned_positions);
+            self.destroy_xr_f32_mesh_sdf_owned_derived_buffers(derived_buffers);
             self.destroy_xr_f32_mesh_sdf_owned_source_mesh_buffers(source_mesh_buffers);
             return Err(err);
         }
@@ -1033,9 +1161,16 @@ impl CxVulkan {
                 source_mesh_buffers_reused: source_mesh_buffers.reused,
                 source_vertex_buffer_bytes: source_mesh_buffers.vertex_byte_len,
                 source_triangle_buffer_bytes: source_mesh_buffers.triangle_byte_len,
+                derived_buffer_generation: derived_buffers.generation,
+                derived_buffers_resident: derived_buffers.resident,
+                derived_buffers_reused: derived_buffers.reused,
+                skinned_position_buffer_bytes: derived_buffers.skinned_position_byte_len,
+                sdf_distance_buffer_bytes: derived_buffers.sdf_distance_byte_len,
                 completed: false,
                 owned_vertices: source_mesh_buffers.owned_vertices,
                 owned_triangles: source_mesh_buffers.owned_triangles,
+                owned_skinned_positions: derived_buffers.owned_skinned_positions,
+                owned_sdf_distances: derived_buffers.owned_sdf_distances,
                 skinned_positions,
                 sdf_distances,
                 params: params_buffer,
@@ -1146,6 +1281,11 @@ impl CxVulkan {
             source_mesh_buffers_reused,
             source_vertex_buffer_bytes,
             source_triangle_buffer_bytes,
+            derived_buffer_generation,
+            derived_buffers_resident,
+            derived_buffers_reused,
+            skinned_position_buffer_bytes,
+            sdf_distance_buffer_bytes,
             sdf_distances,
         ) = {
             let resource = self
@@ -1178,6 +1318,11 @@ impl CxVulkan {
                 resource.source_mesh_buffers_reused,
                 resource.source_vertex_buffer_bytes,
                 resource.source_triangle_buffer_bytes,
+                resource.derived_buffer_generation,
+                resource.derived_buffers_resident,
+                resource.derived_buffers_reused,
+                resource.skinned_position_buffer_bytes,
+                resource.sdf_distance_buffer_bytes,
                 resource.sdf_distances,
             )
         };
@@ -1260,6 +1405,11 @@ impl CxVulkan {
             source_mesh_buffers_reused,
             source_vertex_buffer_bytes: source_vertex_buffer_bytes as u64,
             source_triangle_buffer_bytes: source_triangle_buffer_bytes as u64,
+            derived_buffer_generation,
+            derived_buffers_resident,
+            derived_buffers_reused,
+            skinned_position_buffer_bytes: skinned_position_buffer_bytes as u64,
+            sdf_distance_buffer_bytes: sdf_distance_buffer_bytes as u64,
             pending_retire_count,
             retained_resource_count,
             retired_after_fence_count: 0,
@@ -1288,14 +1438,25 @@ impl CxVulkan {
             }
             self.destroy_buffer(resource.grid);
             self.destroy_buffer(resource.params);
-            self.destroy_buffer(resource.sdf_distances);
-            self.destroy_buffer(resource.skinned_positions);
+            if let Some(buffer) = resource.owned_sdf_distances {
+                self.destroy_buffer(buffer);
+            }
+            if let Some(buffer) = resource.owned_skinned_positions {
+                self.destroy_buffer(buffer);
+            }
             if let Some(buffer) = resource.owned_triangles {
                 self.destroy_buffer(buffer);
             }
             if let Some(buffer) = resource.owned_vertices {
                 self.destroy_buffer(buffer);
             }
+        }
+    }
+
+    pub(super) fn destroy_xr_f32_mesh_sdf_probe_derived_buffers(&mut self) {
+        if let Some(buffers) = self.xr_f32_mesh_sdf_probe_derived_buffers.take() {
+            self.destroy_buffer(buffers.sdf_distances);
+            self.destroy_buffer(buffers.skinned_positions);
         }
     }
 

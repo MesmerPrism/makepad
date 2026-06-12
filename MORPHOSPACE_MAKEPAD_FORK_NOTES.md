@@ -139,11 +139,13 @@ This branch currently carries:
   status/counts in XR hand state, and full bind poses, joint parents, vertices,
   normals, UVs, blend indices/weights, and indices behind an on-demand Cx API.
 - Generic XR/Vulkan f32 mesh-to-SDF proof plumbing that caches shader modules,
-  descriptor-set layout, pipeline layout, and compute pipelines for the
-  renderer lifetime while keeping source mesh, skinned vertex, dense-SDF,
-  descriptor-pool, command-buffer, fence, and readback resources scoped to each
-  bounded proof submission. It reports program generation and setup reuse
-  without defining Matter field, particle, or SDF authority in Makepad.
+  descriptor-set layout, pipeline layout, compute pipelines, source mesh
+  buffers, and derived skinned-position/dense-SDF buffers for the renderer
+  lifetime when no unfinished proof still needs the previous output. It keeps
+  descriptor pools, command buffers, fences, params, grids, and compact
+  readback resources scoped to each bounded proof submission. It reports
+  program, source-buffer, and derived-buffer generation/reuse without defining
+  Matter field, particle, or SDF authority in Makepad.
 - An XR environment camera guard so `XrEnv` does not acquire a passthrough
   camera stream unless the environment cube is enabled. This keeps custom
   raw-camera projection examples from competing with Makepad's environment
