@@ -1,6 +1,7 @@
 use crate::{
     cx_api::{
-        XrGpuF32SkinningMeshProbeResult, XrGpuF32SkinningMeshVertex, XrGpuSkinningMeshTriangle,
+        XrGpuF32SkinningMeshProbeResult, XrGpuF32SkinningMeshProbeTicket,
+        XrGpuF32SkinningMeshVertex, XrGpuSkinningMeshTriangle,
         XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES,
     },
     os::linux::vulkan_naga::compile_compute_wgsl_to_spirv,
@@ -87,6 +88,18 @@ fn compute_main(@builtin(global_invocation_id) id: vec3<u32>) {
 "#;
 
 pub(super) struct VulkanXrF32SkinningMeshProbeResources {
+    request_id: u64,
+    started: Instant,
+    vertex_count: usize,
+    triangle_count: usize,
+    sample_count: usize,
+    sample_indices: [u32; XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES],
+    expected_positions: Vec<[f32; 4]>,
+    expected_triangles: Vec<[u32; 4]>,
+    tolerance: f32,
+    queue_submit_serial: u64,
+    resource_generation: u64,
+    completed: bool,
     vertices: VulkanBuffer,
     triangles: VulkanBuffer,
     output_positions: VulkanBuffer,
@@ -110,6 +123,24 @@ impl CxVulkan {
         sample_count: usize,
         tolerance: f32,
     ) -> Result<XrGpuF32SkinningMeshProbeResult, String> {
+        let ticket = self.submit_xr_f32_skinning_mesh_probe_async(
+            vertices,
+            triangles,
+            sample_vertex_indices,
+            sample_count,
+            tolerance,
+        )?;
+        self.wait_xr_f32_skinning_mesh_probe(ticket.request_id)
+    }
+
+    pub(crate) fn submit_xr_f32_skinning_mesh_probe_async(
+        &mut self,
+        vertices: &[XrGpuF32SkinningMeshVertex],
+        triangles: &[XrGpuSkinningMeshTriangle],
+        sample_vertex_indices: [u32; XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Result<XrGpuF32SkinningMeshProbeTicket, String> {
         let started = Instant::now();
         if vertices.is_empty() {
             return Err("full f32 skinning mesh probe requires vertices".to_string());
@@ -139,6 +170,14 @@ impl CxVulkan {
                 0
             };
         }
+        let expected_positions = vertices
+            .iter()
+            .map(|vertex| vertex.expected_position)
+            .collect::<Vec<_>>();
+        let expected_triangles = triangles
+            .iter()
+            .map(|triangle| triangle.indices)
+            .collect::<Vec<_>>();
         let params = [[vertex_count as u32, triangle_count as u32, 0, 0]];
 
         let vertex_byte_len = std::mem::size_of_val(vertices) as vk::DeviceSize;
@@ -497,8 +536,6 @@ impl CxVulkan {
         };
 
         let mut queue_submit_serial = 0;
-        let mut fence_serial = 0;
-        let mut queue_wait_idle_performed = false;
         let command_result = (|| -> Result<(), String> {
             unsafe {
                 self.device
@@ -608,71 +645,51 @@ impl CxVulkan {
                     })?;
                 self.gpu_submit_serial = self.gpu_submit_serial.saturating_add(1);
                 queue_submit_serial = self.gpu_submit_serial;
-                self.device
-                    .wait_for_fences(&[fence], true, u64::MAX)
-                    .map_err(|e| {
-                        format!("wait_for_fences(full f32 skinning mesh probe) failed: {e:?}")
-                    })?;
-                fence_serial = queue_submit_serial;
-                self.device.queue_wait_idle(self.queue).map_err(|e| {
-                    format!("queue_wait_idle(full f32 skinning mesh probe) failed: {e:?}")
-                })?;
-                queue_wait_idle_performed = true;
-                self.gpu_completed_submit_serial =
-                    self.gpu_completed_submit_serial.max(queue_submit_serial);
-                self.collect_retired_texture_resources();
             }
             Ok(())
         })();
-
-        let read_result = if command_result.is_ok() {
+        if let Err(err) = command_result {
             unsafe {
-                let mapped_positions = self
-                    .device
-                    .map_memory(
-                        output_positions.memory,
-                        0,
-                        output_position_byte_len,
-                        vk::MemoryMapFlags::empty(),
-                    )
-                    .map_err(|err| {
-                        format!(
-                            "map_memory(full f32 skinning mesh position readback) failed: {err:?}"
-                        )
-                    })?;
-                let position_rows =
-                    std::slice::from_raw_parts(mapped_positions as *const [f32; 4], vertex_count);
-                let output_position_rows = position_rows.to_vec();
-                self.device.unmap_memory(output_positions.memory);
-
-                let mapped_triangles = self
-                    .device
-                    .map_memory(
-                        triangle_observations.memory,
-                        0,
-                        triangle_observation_byte_len,
-                        vk::MemoryMapFlags::empty(),
-                    )
-                    .map_err(|err| {
-                        format!(
-                            "map_memory(full f32 skinning mesh triangle readback) failed: {err:?}"
-                        )
-                    })?;
-                let triangle_rows =
-                    std::slice::from_raw_parts(mapped_triangles as *const [u32; 4], triangle_count);
-                let triangle_observation_rows = triangle_rows.to_vec();
-                self.device.unmap_memory(triangle_observations.memory);
-                Ok((output_position_rows, triangle_observation_rows))
+                if fence != vk::Fence::null() {
+                    self.device.destroy_fence(fence, None);
+                }
+                if command_buffer != vk::CommandBuffer::null()
+                    && self.command_pool != vk::CommandPool::null()
+                {
+                    self.device
+                        .free_command_buffers(self.command_pool, &[command_buffer]);
+                }
+                self.device.destroy_descriptor_pool(descriptor_pool, None);
+                self.device.destroy_pipeline(compute_pipeline, None);
+                self.device.destroy_pipeline_layout(pipeline_layout, None);
+                self.device
+                    .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                self.device.destroy_shader_module(shader_module, None);
             }
-        } else {
-            Err(command_result.err().unwrap_or_else(|| {
-                "unknown full f32 skinning mesh probe command failure".to_string()
-            }))
-        };
+            self.destroy_buffer(params_buffer);
+            self.destroy_buffer(triangle_observations);
+            self.destroy_buffer(output_positions);
+            self.destroy_buffer(triangle_buffer);
+            self.destroy_buffer(vertex_buffer);
+            return Err(err);
+        }
 
         let resource_generation = self.xr_f32_skinning_mesh_probe_resources.len() as u64 + 1;
+        let request_id = queue_submit_serial;
         self.xr_f32_skinning_mesh_probe_resources
             .push(VulkanXrF32SkinningMeshProbeResources {
+                request_id,
+                started,
+                vertex_count,
+                triangle_count,
+                sample_count,
+                sample_indices,
+                expected_positions,
+                expected_triangles,
+                tolerance,
+                queue_submit_serial,
+                resource_generation,
+                completed: false,
                 vertices: vertex_buffer,
                 triangles: triangle_buffer,
                 output_positions,
@@ -688,13 +705,177 @@ impl CxVulkan {
             });
         let retained_resource_count = self.xr_f32_skinning_mesh_probe_resources.len();
         let pending_retire_count = retained_resource_count;
-        let retired_after_fence_count = 0;
 
-        let (output_positions, triangle_observations) = read_result?;
+        Ok(XrGpuF32SkinningMeshProbeTicket {
+            request_id,
+            queue_submit_serial,
+            resource_generation,
+            pending_retire_count,
+            retained_resource_count,
+        })
+    }
+
+    pub(crate) fn poll_xr_f32_skinning_mesh_probe(
+        &mut self,
+        request_id: u64,
+    ) -> Result<Option<XrGpuF32SkinningMeshProbeResult>, String> {
+        let Some(resource_index) = self
+            .xr_f32_skinning_mesh_probe_resources
+            .iter()
+            .position(|resource| resource.request_id == request_id)
+        else {
+            return Ok(None);
+        };
+        if self.xr_f32_skinning_mesh_probe_resources[resource_index].completed {
+            return Ok(None);
+        }
+
+        let fence = self.xr_f32_skinning_mesh_probe_resources[resource_index].fence;
+        let queue_submit_serial =
+            self.xr_f32_skinning_mesh_probe_resources[resource_index].queue_submit_serial;
+        match unsafe { self.device.get_fence_status(fence) } {
+            Ok(true) => {
+                self.gpu_completed_submit_serial =
+                    self.gpu_completed_submit_serial.max(queue_submit_serial);
+                self.collect_retired_texture_resources();
+                self.complete_xr_f32_skinning_mesh_probe(resource_index, false)
+                    .map(Some)
+            }
+            Ok(false) => Ok(None),
+            Err(err) => Err(format!(
+                "get_fence_status(full f32 skinning mesh probe {request_id}) failed: {err:?}"
+            )),
+        }
+    }
+
+    fn wait_xr_f32_skinning_mesh_probe(
+        &mut self,
+        request_id: u64,
+    ) -> Result<XrGpuF32SkinningMeshProbeResult, String> {
+        let resource_index = self
+            .xr_f32_skinning_mesh_probe_resources
+            .iter()
+            .position(|resource| resource.request_id == request_id)
+            .ok_or_else(|| format!("full f32 skinning mesh probe {request_id} was not found"))?;
+        if self.xr_f32_skinning_mesh_probe_resources[resource_index].completed {
+            return Err(format!(
+                "full f32 skinning mesh probe {request_id} was already completed"
+            ));
+        }
+
+        let fence = self.xr_f32_skinning_mesh_probe_resources[resource_index].fence;
+        let queue_submit_serial =
+            self.xr_f32_skinning_mesh_probe_resources[resource_index].queue_submit_serial;
+        unsafe {
+            self.device
+                .wait_for_fences(&[fence], true, u64::MAX)
+                .map_err(|e| {
+                    format!("wait_for_fences(full f32 skinning mesh probe) failed: {e:?}")
+                })?;
+            self.device.queue_wait_idle(self.queue).map_err(|e| {
+                format!("queue_wait_idle(full f32 skinning mesh probe) failed: {e:?}")
+            })?;
+        }
+        self.gpu_completed_submit_serial =
+            self.gpu_completed_submit_serial.max(queue_submit_serial);
+        self.collect_retired_texture_resources();
+        self.complete_xr_f32_skinning_mesh_probe(resource_index, true)
+    }
+
+    fn complete_xr_f32_skinning_mesh_probe(
+        &mut self,
+        resource_index: usize,
+        queue_wait_idle_performed: bool,
+    ) -> Result<XrGpuF32SkinningMeshProbeResult, String> {
+        let (
+            started,
+            vertex_count,
+            triangle_count,
+            sample_count,
+            sample_indices,
+            expected_positions,
+            expected_triangles,
+            tolerance,
+            queue_submit_serial,
+            resource_generation,
+            output_positions_buffer,
+            triangle_observations_buffer,
+        ) = {
+            let resource = self
+                .xr_f32_skinning_mesh_probe_resources
+                .get(resource_index)
+                .ok_or_else(|| {
+                    "full f32 skinning mesh probe resource index is stale".to_string()
+                })?;
+            if resource.completed {
+                return Err(format!(
+                    "full f32 skinning mesh probe {} was already completed",
+                    resource.request_id
+                ));
+            }
+            (
+                resource.started,
+                resource.vertex_count,
+                resource.triangle_count,
+                resource.sample_count,
+                resource.sample_indices,
+                resource.expected_positions.clone(),
+                resource.expected_triangles.clone(),
+                resource.tolerance,
+                resource.queue_submit_serial,
+                resource.resource_generation,
+                resource.output_positions,
+                resource.triangle_observations,
+            )
+        };
+        let output_position_byte_len =
+            (std::mem::size_of::<[f32; 4]>() * vertex_count) as vk::DeviceSize;
+        let triangle_observation_byte_len =
+            (std::mem::size_of::<[u32; 4]>() * triangle_count) as vk::DeviceSize;
+
+        let output_positions = unsafe {
+            let mapped_positions = self
+                .device
+                .map_memory(
+                    output_positions_buffer.memory,
+                    0,
+                    output_position_byte_len,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .map_err(|err| {
+                    format!("map_memory(full f32 skinning mesh position readback) failed: {err:?}")
+                })?;
+            let position_rows =
+                std::slice::from_raw_parts(mapped_positions as *const [f32; 4], vertex_count);
+            let output_position_rows = position_rows.to_vec();
+            self.device.unmap_memory(output_positions_buffer.memory);
+            output_position_rows
+        };
+
+        let triangle_observations = unsafe {
+            let mapped_triangles = self
+                .device
+                .map_memory(
+                    triangle_observations_buffer.memory,
+                    0,
+                    triangle_observation_byte_len,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .map_err(|err| {
+                    format!("map_memory(full f32 skinning mesh triangle readback) failed: {err:?}")
+                })?;
+            let triangle_rows =
+                std::slice::from_raw_parts(mapped_triangles as *const [u32; 4], triangle_count);
+            let triangle_observation_rows = triangle_rows.to_vec();
+            self.device
+                .unmap_memory(triangle_observations_buffer.memory);
+            triangle_observation_rows
+        };
+
         let mut mismatched_position_components = 0;
         let mut max_abs_error = 0.0_f32;
         for (index, output) in output_positions.iter().copied().enumerate() {
-            let expected = vertices[index].expected_position;
+            let expected = expected_positions[index];
             for component in 0..3 {
                 let diff = (output[component] - expected[component]).abs();
                 if !diff.is_finite() {
@@ -711,7 +892,7 @@ impl CxVulkan {
 
         let mut mismatched_triangle_indices = 0;
         for (index, observed) in triangle_observations.iter().copied().enumerate() {
-            let expected = triangles[index].indices;
+            let expected = expected_triangles[index];
             for component in 0..4 {
                 if observed[component] != expected[component] {
                     mismatched_triangle_indices += 1;
@@ -724,8 +905,21 @@ impl CxVulkan {
         for index in 0..sample_count {
             let vertex_index = sample_indices[index] as usize;
             output_sample_positions[index] = output_positions[vertex_index];
-            expected_sample_positions[index] = vertices[vertex_index].expected_position;
+            expected_sample_positions[index] = expected_positions[vertex_index];
         }
+
+        if let Some(resource) = self
+            .xr_f32_skinning_mesh_probe_resources
+            .get_mut(resource_index)
+        {
+            resource.completed = true;
+        }
+        let retained_resource_count = self.xr_f32_skinning_mesh_probe_resources.len();
+        let pending_retire_count = self
+            .xr_f32_skinning_mesh_probe_resources
+            .iter()
+            .filter(|resource| !resource.completed)
+            .count();
 
         Ok(XrGpuF32SkinningMeshProbeResult {
             vertex_count,
@@ -741,11 +935,11 @@ impl CxVulkan {
             max_abs_error,
             tolerance,
             queue_submit_serial,
-            fence_serial,
+            fence_serial: queue_submit_serial,
             resource_generation,
             pending_retire_count,
             retained_resource_count,
-            retired_after_fence_count,
+            retired_after_fence_count: 0,
             queue_wait_idle_performed,
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         })
