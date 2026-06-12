@@ -206,6 +206,28 @@ fn sdf_main(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 "#;
 
+pub(super) struct VulkanXrF32MeshSdfProbeProgram {
+    generation: u64,
+    skin_shader_module: vk::ShaderModule,
+    sdf_shader_module: vk::ShaderModule,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    pipeline_layout: vk::PipelineLayout,
+    skin_pipeline: vk::Pipeline,
+    sdf_pipeline: vk::Pipeline,
+}
+
+#[derive(Clone, Copy)]
+struct VulkanXrF32MeshSdfProbeProgramUse {
+    generation: u64,
+    program_reused: bool,
+    shader_compiled_this_submit: bool,
+    pipeline_created_this_submit: bool,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    pipeline_layout: vk::PipelineLayout,
+    skin_pipeline: vk::Pipeline,
+    sdf_pipeline: vk::Pipeline,
+}
+
 pub(super) struct VulkanXrF32MeshSdfProbeResources {
     request_id: u64,
     started: Instant,
@@ -218,6 +240,10 @@ pub(super) struct VulkanXrF32MeshSdfProbeResources {
     tolerance: f32,
     queue_submit_serial: u64,
     resource_generation: u64,
+    program_generation: u64,
+    program_reused: bool,
+    shader_compiled_this_submit: bool,
+    pipeline_created_this_submit: bool,
     completed: bool,
     vertices: VulkanBuffer,
     triangles: VulkanBuffer,
@@ -225,18 +251,172 @@ pub(super) struct VulkanXrF32MeshSdfProbeResources {
     sdf_distances: VulkanBuffer,
     params: VulkanBuffer,
     grid: VulkanBuffer,
-    skin_shader_module: vk::ShaderModule,
-    sdf_shader_module: vk::ShaderModule,
-    descriptor_set_layout: vk::DescriptorSetLayout,
-    pipeline_layout: vk::PipelineLayout,
-    skin_pipeline: vk::Pipeline,
-    sdf_pipeline: vk::Pipeline,
     descriptor_pool: vk::DescriptorPool,
     command_buffer: vk::CommandBuffer,
     fence: vk::Fence,
 }
 
 impl CxVulkan {
+    fn ensure_xr_f32_mesh_sdf_probe_program(
+        &mut self,
+    ) -> Result<VulkanXrF32MeshSdfProbeProgramUse, String> {
+        if let Some(program) = self.xr_f32_mesh_sdf_probe_program.as_ref() {
+            return Ok(VulkanXrF32MeshSdfProbeProgramUse {
+                generation: program.generation,
+                program_reused: true,
+                shader_compiled_this_submit: false,
+                pipeline_created_this_submit: false,
+                descriptor_set_layout: program.descriptor_set_layout,
+                pipeline_layout: program.pipeline_layout,
+                skin_pipeline: program.skin_pipeline,
+                sdf_pipeline: program.sdf_pipeline,
+            });
+        }
+
+        let skin_shader_spv = compile_compute_wgsl_to_spirv(
+            XR_GPU_F32_MESH_SDF_SKINNING_WGSL,
+            XR_GPU_F32_MESH_SDF_SKINNING_ENTRY,
+        )?;
+        let sdf_shader_spv = compile_compute_wgsl_to_spirv(
+            XR_GPU_F32_MESH_SDF_BUILD_WGSL,
+            XR_GPU_F32_MESH_SDF_BUILD_ENTRY,
+        )?;
+
+        let skin_shader_module = unsafe {
+            self.device
+                .create_shader_module(
+                    &vk::ShaderModuleCreateInfo::default().code(&skin_shader_spv),
+                    None,
+                )
+                .map_err(|err| {
+                    format!("create_shader_module(f32 mesh SDF skinning program) failed: {err:?}")
+                })?
+        };
+        let sdf_shader_module = match unsafe {
+            self.device.create_shader_module(
+                &vk::ShaderModuleCreateInfo::default().code(&sdf_shader_spv),
+                None,
+            )
+        } {
+            Ok(shader_module) => shader_module,
+            Err(err) => {
+                unsafe {
+                    self.device.destroy_shader_module(skin_shader_module, None);
+                }
+                return Err(format!(
+                    "create_shader_module(f32 mesh SDF build program) failed: {err:?}"
+                ));
+            }
+        };
+
+        let descriptor_bindings = [
+            descriptor_binding(0),
+            descriptor_binding(1),
+            descriptor_binding(2),
+            descriptor_binding(3),
+            descriptor_binding(4),
+            descriptor_binding(5),
+        ];
+        let descriptor_set_layout_info =
+            vk::DescriptorSetLayoutCreateInfo::default().bindings(&descriptor_bindings);
+        let descriptor_set_layout = match unsafe {
+            self.device
+                .create_descriptor_set_layout(&descriptor_set_layout_info, None)
+        } {
+            Ok(layout) => layout,
+            Err(err) => {
+                unsafe {
+                    self.device.destroy_shader_module(sdf_shader_module, None);
+                    self.device.destroy_shader_module(skin_shader_module, None);
+                }
+                return Err(format!(
+                    "create_descriptor_set_layout(f32 mesh SDF program) failed: {err:?}"
+                ));
+            }
+        };
+
+        let set_layouts = [descriptor_set_layout];
+        let pipeline_layout_info =
+            vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
+        let pipeline_layout = match unsafe {
+            self.device
+                .create_pipeline_layout(&pipeline_layout_info, None)
+        } {
+            Ok(layout) => layout,
+            Err(err) => {
+                unsafe {
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    self.device.destroy_shader_module(sdf_shader_module, None);
+                    self.device.destroy_shader_module(skin_shader_module, None);
+                }
+                return Err(format!(
+                    "create_pipeline_layout(f32 mesh SDF program) failed: {err:?}"
+                ));
+            }
+        };
+
+        let skin_pipeline = match create_compute_pipeline(
+            self,
+            skin_shader_module,
+            pipeline_layout,
+            XR_GPU_F32_MESH_SDF_SKINNING_ENTRY,
+        ) {
+            Ok(pipeline) => pipeline,
+            Err(err) => {
+                unsafe {
+                    self.device.destroy_pipeline_layout(pipeline_layout, None);
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    self.device.destroy_shader_module(sdf_shader_module, None);
+                    self.device.destroy_shader_module(skin_shader_module, None);
+                }
+                return Err(err);
+            }
+        };
+        let sdf_pipeline = match create_compute_pipeline(
+            self,
+            sdf_shader_module,
+            pipeline_layout,
+            XR_GPU_F32_MESH_SDF_BUILD_ENTRY,
+        ) {
+            Ok(pipeline) => pipeline,
+            Err(err) => {
+                unsafe {
+                    self.device.destroy_pipeline(skin_pipeline, None);
+                    self.device.destroy_pipeline_layout(pipeline_layout, None);
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    self.device.destroy_shader_module(sdf_shader_module, None);
+                    self.device.destroy_shader_module(skin_shader_module, None);
+                }
+                return Err(err);
+            }
+        };
+
+        let generation = 1;
+        self.xr_f32_mesh_sdf_probe_program = Some(VulkanXrF32MeshSdfProbeProgram {
+            generation,
+            skin_shader_module,
+            sdf_shader_module,
+            descriptor_set_layout,
+            pipeline_layout,
+            skin_pipeline,
+            sdf_pipeline,
+        });
+
+        Ok(VulkanXrF32MeshSdfProbeProgramUse {
+            generation,
+            program_reused: false,
+            shader_compiled_this_submit: true,
+            pipeline_created_this_submit: true,
+            descriptor_set_layout,
+            pipeline_layout,
+            skin_pipeline,
+            sdf_pipeline,
+        })
+    }
+
     pub(crate) fn submit_xr_f32_mesh_sdf_probe(
         &mut self,
         vertices: &[XrGpuF32SkinningMeshVertex],
@@ -336,14 +516,11 @@ impl CxVulkan {
         let params_byte_len = std::mem::size_of_val(&params) as vk::DeviceSize;
         let grid_byte_len = std::mem::size_of_val(&grid_params) as vk::DeviceSize;
 
-        let skin_shader_spv = compile_compute_wgsl_to_spirv(
-            XR_GPU_F32_MESH_SDF_SKINNING_WGSL,
-            XR_GPU_F32_MESH_SDF_SKINNING_ENTRY,
-        )?;
-        let sdf_shader_spv = compile_compute_wgsl_to_spirv(
-            XR_GPU_F32_MESH_SDF_BUILD_WGSL,
-            XR_GPU_F32_MESH_SDF_BUILD_ENTRY,
-        )?;
+        let program = self.ensure_xr_f32_mesh_sdf_probe_program()?;
+        let descriptor_set_layout = program.descriptor_set_layout;
+        let pipeline_layout = program.pipeline_layout;
+        let skin_pipeline = program.skin_pipeline;
+        let sdf_pipeline = program.sdf_pipeline;
 
         let vertex_buffer =
             self.create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, vertices)?;
@@ -404,156 +581,7 @@ impl CxVulkan {
             }
         };
 
-        let skin_shader_module = match unsafe {
-            self.device.create_shader_module(
-                &vk::ShaderModuleCreateInfo::default().code(&skin_shader_spv),
-                None,
-            )
-        } {
-            Ok(shader_module) => shader_module,
-            Err(err) => {
-                self.destroy_buffer(grid_buffer);
-                self.destroy_buffer(params_buffer);
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
-                return Err(format!(
-                    "create_shader_module(f32 mesh SDF skinning probe) failed: {err:?}"
-                ));
-            }
-        };
-        let sdf_shader_module = match unsafe {
-            self.device.create_shader_module(
-                &vk::ShaderModuleCreateInfo::default().code(&sdf_shader_spv),
-                None,
-            )
-        } {
-            Ok(shader_module) => shader_module,
-            Err(err) => {
-                unsafe {
-                    self.device.destroy_shader_module(skin_shader_module, None);
-                }
-                self.destroy_buffer(grid_buffer);
-                self.destroy_buffer(params_buffer);
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
-                return Err(format!(
-                    "create_shader_module(f32 mesh SDF build probe) failed: {err:?}"
-                ));
-            }
-        };
-
-        let descriptor_bindings = [
-            descriptor_binding(0),
-            descriptor_binding(1),
-            descriptor_binding(2),
-            descriptor_binding(3),
-            descriptor_binding(4),
-            descriptor_binding(5),
-        ];
-        let descriptor_set_layout_info =
-            vk::DescriptorSetLayoutCreateInfo::default().bindings(&descriptor_bindings);
-        let descriptor_set_layout = match unsafe {
-            self.device
-                .create_descriptor_set_layout(&descriptor_set_layout_info, None)
-        } {
-            Ok(layout) => layout,
-            Err(err) => {
-                unsafe {
-                    self.device.destroy_shader_module(sdf_shader_module, None);
-                    self.device.destroy_shader_module(skin_shader_module, None);
-                }
-                self.destroy_buffer(grid_buffer);
-                self.destroy_buffer(params_buffer);
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
-                return Err(format!(
-                    "create_descriptor_set_layout(f32 mesh SDF probe) failed: {err:?}"
-                ));
-            }
-        };
-
         let set_layouts = [descriptor_set_layout];
-        let pipeline_layout_info =
-            vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
-        let pipeline_layout = match unsafe {
-            self.device
-                .create_pipeline_layout(&pipeline_layout_info, None)
-        } {
-            Ok(layout) => layout,
-            Err(err) => {
-                unsafe {
-                    self.device
-                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                    self.device.destroy_shader_module(sdf_shader_module, None);
-                    self.device.destroy_shader_module(skin_shader_module, None);
-                }
-                self.destroy_buffer(grid_buffer);
-                self.destroy_buffer(params_buffer);
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
-                return Err(format!(
-                    "create_pipeline_layout(f32 mesh SDF probe) failed: {err:?}"
-                ));
-            }
-        };
-
-        let skin_pipeline = match create_compute_pipeline(
-            self,
-            skin_shader_module,
-            pipeline_layout,
-            XR_GPU_F32_MESH_SDF_SKINNING_ENTRY,
-        ) {
-            Ok(pipeline) => pipeline,
-            Err(err) => {
-                unsafe {
-                    self.device.destroy_pipeline_layout(pipeline_layout, None);
-                    self.device
-                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                    self.device.destroy_shader_module(sdf_shader_module, None);
-                    self.device.destroy_shader_module(skin_shader_module, None);
-                }
-                self.destroy_buffer(grid_buffer);
-                self.destroy_buffer(params_buffer);
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
-                return Err(err);
-            }
-        };
-        let sdf_pipeline = match create_compute_pipeline(
-            self,
-            sdf_shader_module,
-            pipeline_layout,
-            XR_GPU_F32_MESH_SDF_BUILD_ENTRY,
-        ) {
-            Ok(pipeline) => pipeline,
-            Err(err) => {
-                unsafe {
-                    self.device.destroy_pipeline(skin_pipeline, None);
-                    self.device.destroy_pipeline_layout(pipeline_layout, None);
-                    self.device
-                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                    self.device.destroy_shader_module(sdf_shader_module, None);
-                    self.device.destroy_shader_module(skin_shader_module, None);
-                }
-                self.destroy_buffer(grid_buffer);
-                self.destroy_buffer(params_buffer);
-                self.destroy_buffer(sdf_distances);
-                self.destroy_buffer(skinned_positions);
-                self.destroy_buffer(triangle_buffer);
-                self.destroy_buffer(vertex_buffer);
-                return Err(err);
-            }
-        };
 
         let descriptor_pool_sizes = [vk::DescriptorPoolSize {
             ty: vk::DescriptorType::STORAGE_BUFFER,
@@ -568,15 +596,6 @@ impl CxVulkan {
         } {
             Ok(pool) => pool,
             Err(err) => {
-                unsafe {
-                    self.device.destroy_pipeline(sdf_pipeline, None);
-                    self.device.destroy_pipeline(skin_pipeline, None);
-                    self.device.destroy_pipeline_layout(pipeline_layout, None);
-                    self.device
-                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                    self.device.destroy_shader_module(sdf_shader_module, None);
-                    self.device.destroy_shader_module(skin_shader_module, None);
-                }
                 self.destroy_buffer(grid_buffer);
                 self.destroy_buffer(params_buffer);
                 self.destroy_buffer(sdf_distances);
@@ -597,13 +616,6 @@ impl CxVulkan {
                 Err(err) => {
                     unsafe {
                         self.device.destroy_descriptor_pool(descriptor_pool, None);
-                        self.device.destroy_pipeline(sdf_pipeline, None);
-                        self.device.destroy_pipeline(skin_pipeline, None);
-                        self.device.destroy_pipeline_layout(pipeline_layout, None);
-                        self.device
-                            .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                        self.device.destroy_shader_module(sdf_shader_module, None);
-                        self.device.destroy_shader_module(skin_shader_module, None);
                     }
                     self.destroy_buffer(grid_buffer);
                     self.destroy_buffer(params_buffer);
@@ -652,13 +664,6 @@ impl CxVulkan {
                 Err(err) => {
                     unsafe {
                         self.device.destroy_descriptor_pool(descriptor_pool, None);
-                        self.device.destroy_pipeline(sdf_pipeline, None);
-                        self.device.destroy_pipeline(skin_pipeline, None);
-                        self.device.destroy_pipeline_layout(pipeline_layout, None);
-                        self.device
-                            .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                        self.device.destroy_shader_module(sdf_shader_module, None);
-                        self.device.destroy_shader_module(skin_shader_module, None);
                     }
                     self.destroy_buffer(grid_buffer);
                     self.destroy_buffer(params_buffer);
@@ -681,13 +686,6 @@ impl CxVulkan {
                         self.device
                             .free_command_buffers(self.command_pool, &[command_buffer]);
                         self.device.destroy_descriptor_pool(descriptor_pool, None);
-                        self.device.destroy_pipeline(sdf_pipeline, None);
-                        self.device.destroy_pipeline(skin_pipeline, None);
-                        self.device.destroy_pipeline_layout(pipeline_layout, None);
-                        self.device
-                            .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                        self.device.destroy_shader_module(sdf_shader_module, None);
-                        self.device.destroy_shader_module(skin_shader_module, None);
                     }
                     self.destroy_buffer(grid_buffer);
                     self.destroy_buffer(params_buffer);
@@ -824,13 +822,6 @@ impl CxVulkan {
                         .free_command_buffers(self.command_pool, &[command_buffer]);
                 }
                 self.device.destroy_descriptor_pool(descriptor_pool, None);
-                self.device.destroy_pipeline(sdf_pipeline, None);
-                self.device.destroy_pipeline(skin_pipeline, None);
-                self.device.destroy_pipeline_layout(pipeline_layout, None);
-                self.device
-                    .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                self.device.destroy_shader_module(sdf_shader_module, None);
-                self.device.destroy_shader_module(skin_shader_module, None);
             }
             self.destroy_buffer(grid_buffer);
             self.destroy_buffer(params_buffer);
@@ -856,6 +847,10 @@ impl CxVulkan {
                 tolerance,
                 queue_submit_serial,
                 resource_generation,
+                program_generation: program.generation,
+                program_reused: program.program_reused,
+                shader_compiled_this_submit: program.shader_compiled_this_submit,
+                pipeline_created_this_submit: program.pipeline_created_this_submit,
                 completed: false,
                 vertices: vertex_buffer,
                 triangles: triangle_buffer,
@@ -863,12 +858,6 @@ impl CxVulkan {
                 sdf_distances,
                 params: params_buffer,
                 grid: grid_buffer,
-                skin_shader_module,
-                sdf_shader_module,
-                descriptor_set_layout,
-                pipeline_layout,
-                skin_pipeline,
-                sdf_pipeline,
                 descriptor_pool,
                 command_buffer,
                 fence,
@@ -966,6 +955,10 @@ impl CxVulkan {
             tolerance,
             queue_submit_serial,
             resource_generation,
+            program_generation,
+            program_reused,
+            shader_compiled_this_submit,
+            pipeline_created_this_submit,
             sdf_distances,
         ) = {
             let resource = self
@@ -989,6 +982,10 @@ impl CxVulkan {
                 resource.tolerance,
                 resource.queue_submit_serial,
                 resource.resource_generation,
+                resource.program_generation,
+                resource.program_reused,
+                resource.shader_compiled_this_submit,
+                resource.pipeline_created_this_submit,
                 resource.sdf_distances,
             )
         };
@@ -1062,6 +1059,10 @@ impl CxVulkan {
             queue_submit_serial,
             fence_serial: queue_submit_serial,
             resource_generation,
+            program_generation,
+            program_reused,
+            shader_compiled_this_submit,
+            pipeline_created_this_submit,
             pending_retire_count,
             retained_resource_count,
             retired_after_fence_count: 0,
@@ -1087,28 +1088,6 @@ impl CxVulkan {
                     self.device
                         .destroy_descriptor_pool(resource.descriptor_pool, None);
                 }
-                if resource.sdf_pipeline != vk::Pipeline::null() {
-                    self.device.destroy_pipeline(resource.sdf_pipeline, None);
-                }
-                if resource.skin_pipeline != vk::Pipeline::null() {
-                    self.device.destroy_pipeline(resource.skin_pipeline, None);
-                }
-                if resource.pipeline_layout != vk::PipelineLayout::null() {
-                    self.device
-                        .destroy_pipeline_layout(resource.pipeline_layout, None);
-                }
-                if resource.descriptor_set_layout != vk::DescriptorSetLayout::null() {
-                    self.device
-                        .destroy_descriptor_set_layout(resource.descriptor_set_layout, None);
-                }
-                if resource.sdf_shader_module != vk::ShaderModule::null() {
-                    self.device
-                        .destroy_shader_module(resource.sdf_shader_module, None);
-                }
-                if resource.skin_shader_module != vk::ShaderModule::null() {
-                    self.device
-                        .destroy_shader_module(resource.skin_shader_module, None);
-                }
             }
             self.destroy_buffer(resource.grid);
             self.destroy_buffer(resource.params);
@@ -1116,6 +1095,35 @@ impl CxVulkan {
             self.destroy_buffer(resource.skinned_positions);
             self.destroy_buffer(resource.triangles);
             self.destroy_buffer(resource.vertices);
+        }
+    }
+
+    pub(super) fn destroy_xr_f32_mesh_sdf_probe_program(&mut self) {
+        if let Some(program) = self.xr_f32_mesh_sdf_probe_program.take() {
+            unsafe {
+                if program.sdf_pipeline != vk::Pipeline::null() {
+                    self.device.destroy_pipeline(program.sdf_pipeline, None);
+                }
+                if program.skin_pipeline != vk::Pipeline::null() {
+                    self.device.destroy_pipeline(program.skin_pipeline, None);
+                }
+                if program.pipeline_layout != vk::PipelineLayout::null() {
+                    self.device
+                        .destroy_pipeline_layout(program.pipeline_layout, None);
+                }
+                if program.descriptor_set_layout != vk::DescriptorSetLayout::null() {
+                    self.device
+                        .destroy_descriptor_set_layout(program.descriptor_set_layout, None);
+                }
+                if program.sdf_shader_module != vk::ShaderModule::null() {
+                    self.device
+                        .destroy_shader_module(program.sdf_shader_module, None);
+                }
+                if program.skin_shader_module != vk::ShaderModule::null() {
+                    self.device
+                        .destroy_shader_module(program.skin_shader_module, None);
+                }
+            }
         }
     }
 }

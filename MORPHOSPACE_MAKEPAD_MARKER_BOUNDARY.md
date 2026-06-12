@@ -29,6 +29,7 @@ not by this Makepad fork. Keep the Makepad side generic and data-limited.
 | Downstream marker family | Makepad-side surface | Rule |
 | --- | --- | --- |
 | `rusty.quest.makepad.gpu_storage_probe.v1` / `RUSTY_QUEST_MAKEPAD_GPU_STORAGE_PROBE` | `Cx::xr_gpu_storage_buffer_probe` returning `XrGpuStorageBufferProbeResult` | Makepad may expose a bounded XR/Vulkan storage-buffer fill/copy/readback probe. It must not emit Morphospace field/particle authority, claim a compute shader, or route high-rate particles, fields, meshes, or GPU buffers through settings/control JSON. |
+| `rusty.quest.makepad.gpu_mesh_sdf_probe.v1` / `RUSTY_QUEST_MAKEPAD_GPU_MESH_SDF_PROBE` | `Cx::xr_gpu_f32_mesh_sdf_probe_submit` / `Cx::xr_gpu_f32_mesh_sdf_probe_poll` returning `XrGpuF32MeshSdfProbeResult` | Makepad may expose a bounded XR/Vulkan f32 skinning plus mesh-to-dense-SDF proof with renderer-lifetime program reuse fields. Quest-Makepad owns the Matter CPU-oracle semantics and marker contract; Makepad must stay generic and must not route high-rate meshes, SDF grids, or GPU buffers through settings/control JSON. |
 
 ## Runtime Marker Decisions
 
