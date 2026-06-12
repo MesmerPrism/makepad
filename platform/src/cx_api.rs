@@ -240,6 +240,22 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_skinning_probe_submit(
+        &mut self,
+        _samples: [XrGpuF32SkinningProbeSample; XR_GPU_F32_SKINNING_PROBE_SAMPLES],
+        _sample_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32SkinningProbeTicket> {
+        None
+    }
+
+    fn xr_gpu_f32_skinning_probe_poll(
+        &mut self,
+        _request_id: u64,
+    ) -> Option<XrGpuF32SkinningProbeResult> {
+        None
+    }
+
     fn xr_gpu_f32_skinning_mesh_probe(
         &mut self,
         _vertices: &[XrGpuF32SkinningMeshVertex],
@@ -429,6 +445,15 @@ pub struct XrGpuF32SkinningProbeResult {
     pub retired_after_fence_count: usize,
     pub queue_wait_idle_performed: bool,
     pub elapsed_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct XrGpuF32SkinningProbeTicket {
+    pub request_id: u64,
+    pub queue_submit_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
 }
 
 pub const XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES: usize = 4;
@@ -951,6 +976,22 @@ impl Cx {
         tolerance: f32,
     ) -> Option<XrGpuF32SkinningProbeResult> {
         <Self as CxOsApi>::xr_gpu_f32_skinning_probe(self, samples, sample_count, tolerance)
+    }
+
+    pub fn xr_gpu_f32_skinning_probe_submit(
+        &mut self,
+        samples: [XrGpuF32SkinningProbeSample; XR_GPU_F32_SKINNING_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32SkinningProbeTicket> {
+        <Self as CxOsApi>::xr_gpu_f32_skinning_probe_submit(self, samples, sample_count, tolerance)
+    }
+
+    pub fn xr_gpu_f32_skinning_probe_poll(
+        &mut self,
+        request_id: u64,
+    ) -> Option<XrGpuF32SkinningProbeResult> {
+        <Self as CxOsApi>::xr_gpu_f32_skinning_probe_poll(self, request_id)
     }
 
     pub fn xr_gpu_f32_skinning_mesh_probe(

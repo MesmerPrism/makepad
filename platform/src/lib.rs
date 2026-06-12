@@ -112,7 +112,7 @@ pub use {
             XrGpuF32MeshSdfProbeResult, XrGpuF32MeshSdfProbeTicket,
             XrGpuF32SkinningMeshProbeResult, XrGpuF32SkinningMeshProbeTicket,
             XrGpuF32SkinningMeshVertex, XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample,
-            XrGpuSkinningMeshTriangle, XR_GPU_F32_FORCE_PROBE_SAMPLES,
+            XrGpuF32SkinningProbeTicket, XrGpuSkinningMeshTriangle, XR_GPU_F32_FORCE_PROBE_SAMPLES,
             XR_GPU_F32_MESH_SDF_PROBE_SAMPLES, XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES,
             XR_GPU_F32_SKINNING_PROBE_SAMPLES,
         },

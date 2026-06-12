@@ -36,8 +36,8 @@ use {
             XrGpuF32ForceProbeSample, XrGpuF32MeshSdfProbeGrid, XrGpuF32MeshSdfProbeResult,
             XrGpuF32MeshSdfProbeTicket, XrGpuF32SkinningMeshProbeResult,
             XrGpuF32SkinningMeshProbeTicket, XrGpuF32SkinningMeshVertex,
-            XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample, XrGpuSkinningMeshTriangle,
-            XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
+            XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample, XrGpuF32SkinningProbeTicket,
+            XrGpuSkinningMeshTriangle, XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
             XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
             XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES, XR_GPU_F32_SKINNING_PROBE_SAMPLES,
             XR_GPU_U32_COMPUTE_PROBE_WORDS,
@@ -3887,6 +3887,58 @@ impl CxOsApi for Cx {
         #[cfg(not(use_vulkan))]
         {
             let _ = (samples, sample_count, tolerance);
+            None
+        }
+    }
+
+    fn xr_gpu_f32_skinning_probe_submit(
+        &mut self,
+        samples: [XrGpuF32SkinningProbeSample; XR_GPU_F32_SKINNING_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32SkinningProbeTicket> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_f32_skinning_probe_async(samples, sample_count, tolerance) {
+                Ok(ticket) => Some(ticket),
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan f32 skinning probe submit failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (samples, sample_count, tolerance);
+            None
+        }
+    }
+
+    fn xr_gpu_f32_skinning_probe_poll(
+        &mut self,
+        request_id: u64,
+    ) -> Option<XrGpuF32SkinningProbeResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.poll_xr_f32_skinning_probe(request_id) {
+                Ok(result) => result,
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan f32 skinning probe poll failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = request_id;
             None
         }
     }
