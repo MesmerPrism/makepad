@@ -1,5 +1,6 @@
 #![cfg(target_os = "android")]
 
+mod field_force_sample_probe;
 mod field_sample_probe;
 mod mesh_sdf_probe;
 mod skinning_mesh_probe;
@@ -590,6 +591,10 @@ pub struct CxVulkan {
         Option<field_sample_probe::VulkanXrF32FieldSampleProbeProgram>,
     xr_f32_field_sample_probe_resources:
         Vec<field_sample_probe::VulkanXrF32FieldSampleProbeResources>,
+    xr_f32_field_force_sample_probe_program:
+        Option<field_force_sample_probe::VulkanXrF32FieldForceSampleProbeProgram>,
+    xr_f32_field_force_sample_probe_resources:
+        Vec<field_force_sample_probe::VulkanXrF32FieldForceSampleProbeResources>,
     xr_storage_buffer_probe_resources: Vec<VulkanXrStorageBufferProbeResources>,
 }
 
@@ -936,6 +941,8 @@ impl CxVulkan {
             xr_f32_mesh_sdf_probe_resources: Vec::new(),
             xr_f32_field_sample_probe_program: None,
             xr_f32_field_sample_probe_resources: Vec::new(),
+            xr_f32_field_force_sample_probe_program: None,
+            xr_f32_field_force_sample_probe_resources: Vec::new(),
             xr_storage_buffer_probe_resources: Vec::new(),
         };
 
@@ -1354,6 +1361,8 @@ impl CxVulkan {
             xr_f32_mesh_sdf_probe_resources: Vec::new(),
             xr_f32_field_sample_probe_program: None,
             xr_f32_field_sample_probe_resources: Vec::new(),
+            xr_f32_field_force_sample_probe_program: None,
+            xr_f32_field_force_sample_probe_resources: Vec::new(),
             xr_storage_buffer_probe_resources: Vec::new(),
         };
 
@@ -9458,6 +9467,8 @@ impl Drop for CxVulkan {
         self.destroy_xr_f32_force_probe_resources();
         self.destroy_xr_f32_skinning_probe_resources();
         self.destroy_xr_f32_skinning_mesh_probe_resources();
+        self.destroy_xr_f32_field_force_sample_probe_resources();
+        self.destroy_xr_f32_field_force_sample_probe_program();
         self.destroy_xr_f32_field_sample_probe_resources();
         self.destroy_xr_f32_field_sample_probe_program();
         self.destroy_xr_f32_mesh_sdf_probe_resources();

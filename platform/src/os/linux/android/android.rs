@@ -32,16 +32,17 @@ use {
     crate::{
         cx::{AndroidParams, Cx, OsType},
         cx_api::{
-            CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown, XrGpuF32FieldSampleProbeResult,
+            CxOsApi, CxOsOp, OpenUrlInPlace, XrFrameCpuBreakdown,
+            XrGpuF32FieldForceSampleProbeResult, XrGpuF32FieldSampleProbeResult,
             XrGpuF32ForceProbeResult, XrGpuF32ForceProbeSample, XrGpuF32MeshSdfProbeGrid,
             XrGpuF32MeshSdfProbeResult, XrGpuF32MeshSdfProbeTicket,
             XrGpuF32SkinningMeshProbeResult, XrGpuF32SkinningMeshProbeTicket,
             XrGpuF32SkinningMeshVertex, XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample,
             XrGpuF32SkinningProbeTicket, XrGpuSkinningMeshTriangle, XrGpuStorageBufferProbeResult,
-            XrGpuU32ComputeProbeResult, XR_GPU_F32_FIELD_SAMPLE_PROBE_SAMPLES,
-            XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
-            XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES, XR_GPU_F32_SKINNING_PROBE_SAMPLES,
-            XR_GPU_U32_COMPUTE_PROBE_WORDS,
+            XrGpuU32ComputeProbeResult, XR_GPU_F32_FIELD_FORCE_SAMPLE_PROBE_SAMPLES,
+            XR_GPU_F32_FIELD_SAMPLE_PROBE_SAMPLES, XR_GPU_F32_FORCE_PROBE_SAMPLES,
+            XR_GPU_F32_MESH_SDF_PROBE_SAMPLES, XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES,
+            XR_GPU_F32_SKINNING_PROBE_SAMPLES, XR_GPU_U32_COMPUTE_PROBE_WORDS,
         },
         draw_pass::CxDrawPassParent,
         draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
@@ -4208,6 +4209,33 @@ impl CxOsApi for Cx {
                 sample_count,
                 tolerance,
             );
+            None
+        }
+    }
+
+    fn xr_gpu_f32_field_force_sample_probe(
+        &mut self,
+        samples: [XrGpuF32ForceProbeSample; XR_GPU_F32_FIELD_FORCE_SAMPLE_PROBE_SAMPLES],
+        sample_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32FieldForceSampleProbeResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_f32_field_force_sample_probe(samples, sample_count, tolerance) {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    crate::warning!("OpenXR Vulkan f32 field force sample probe failed: {err}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (samples, sample_count, tolerance);
             None
         }
     }

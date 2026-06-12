@@ -252,6 +252,7 @@ pub(super) struct VulkanXrF32MeshSdfProbeDerivedBuffers {
     generation: u64,
     skinned_position_byte_len: vk::DeviceSize,
     sdf_distance_byte_len: vk::DeviceSize,
+    grid: XrGpuF32MeshSdfProbeGrid,
     skinned_positions: VulkanBuffer,
     sdf_distances: VulkanBuffer,
 }
@@ -261,6 +262,7 @@ pub(super) struct VulkanXrF32MeshSdfResidentFieldUse {
     pub(super) generation: u64,
     pub(super) sdf_distance_byte_len: vk::DeviceSize,
     pub(super) sdf_distances: VulkanBuffer,
+    pub(super) grid: XrGpuF32MeshSdfProbeGrid,
 }
 
 struct VulkanXrF32MeshSdfProbeDerivedBufferUse {
@@ -323,6 +325,7 @@ impl CxVulkan {
             generation: buffers.generation,
             sdf_distance_byte_len: buffers.sdf_distance_byte_len,
             sdf_distances: buffers.sdf_distances,
+            grid: buffers.grid,
         })
     }
 
@@ -612,6 +615,7 @@ impl CxVulkan {
         &mut self,
         skinned_position_byte_len: vk::DeviceSize,
         sdf_distance_byte_len: vk::DeviceSize,
+        grid: XrGpuF32MeshSdfProbeGrid,
     ) -> Result<VulkanXrF32MeshSdfProbeDerivedBufferUse, String> {
         let has_pending_reader = self
             .xr_f32_mesh_sdf_probe_resources
@@ -659,9 +663,12 @@ impl CxVulkan {
                     generation,
                     skinned_position_byte_len,
                     sdf_distance_byte_len,
+                    grid,
                     skinned_positions,
                     sdf_distances,
                 });
+        } else if let Some(buffers) = self.xr_f32_mesh_sdf_probe_derived_buffers.as_mut() {
+            buffers.grid = grid;
         }
 
         let buffers = self
@@ -882,6 +889,7 @@ impl CxVulkan {
         let derived_buffers = match self.prepare_xr_f32_mesh_sdf_derived_buffers(
             skinned_position_byte_len,
             sdf_distance_byte_len,
+            grid,
         ) {
             Ok(buffers) => buffers,
             Err(err) => {
