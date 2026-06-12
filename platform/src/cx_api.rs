@@ -374,6 +374,37 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_volume_image_preview(
+        &mut self,
+        _pixels: [XrGpuF32VolumeImagePreviewPixel; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+        _eye_tile_width: usize,
+        _eye_tile_height: usize,
+        _eye_count: usize,
+        _pixel_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32VolumeImagePreviewResult> {
+        None
+    }
+
+    fn xr_gpu_f32_volume_image_preview_submit(
+        &mut self,
+        _pixels: [XrGpuF32VolumeImagePreviewPixel; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+        _eye_tile_width: usize,
+        _eye_tile_height: usize,
+        _eye_count: usize,
+        _pixel_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32VolumeImagePreviewTicket> {
+        None
+    }
+
+    fn xr_gpu_f32_volume_image_preview_poll(
+        &mut self,
+        _request_id: u64,
+    ) -> Option<XrGpuF32VolumeImagePreviewResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -782,6 +813,92 @@ impl Default for XrGpuF32VolumeRaymarchPreviewResult {
             pending_retire_count: 0,
             retained_resource_count: 0,
             retired_after_fence_count: 0,
+            queue_wait_idle_performed: false,
+            elapsed_ms: 0.0,
+        }
+    }
+}
+
+pub const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS: usize = 32;
+
+pub type XrGpuF32VolumeImagePreviewPixel = XrGpuF32VolumeRaymarchPreviewPixel;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32VolumeImagePreviewOutput {
+    pub rgba: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct XrGpuF32VolumeImagePreviewTicket {
+    pub request_id: u64,
+    pub queue_submit_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct XrGpuF32VolumeImagePreviewResult {
+    pub pixels: [XrGpuF32VolumeImagePreviewPixel; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+    pub outputs: [XrGpuF32VolumeImagePreviewOutput; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+    pub expected_outputs:
+        [XrGpuF32VolumeImagePreviewOutput; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+    pub image_width: usize,
+    pub image_height: usize,
+    pub image_layers: usize,
+    pub eye_tile_width: usize,
+    pub eye_tile_height: usize,
+    pub eye_count: usize,
+    pub pixel_count: usize,
+    pub component_count: usize,
+    pub mismatched_components: usize,
+    pub max_abs_error: f32,
+    pub tolerance: f32,
+    pub queue_submit_serial: u64,
+    pub fence_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+    pub retired_after_fence_count: usize,
+    pub storage_image_written: bool,
+    pub transfer_readback_performed: bool,
+    pub sampled_image_usage: bool,
+    pub sampled_texture_bound: bool,
+    pub queue_wait_idle_performed: bool,
+    pub elapsed_ms: f64,
+}
+
+impl Default for XrGpuF32VolumeImagePreviewResult {
+    fn default() -> Self {
+        Self {
+            pixels: [XrGpuF32VolumeImagePreviewPixel::default();
+                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+            outputs: [XrGpuF32VolumeImagePreviewOutput::default();
+                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+            expected_outputs: [XrGpuF32VolumeImagePreviewOutput::default();
+                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+            image_width: 0,
+            image_height: 0,
+            image_layers: 0,
+            eye_tile_width: 0,
+            eye_tile_height: 0,
+            eye_count: 0,
+            pixel_count: 0,
+            component_count: 0,
+            mismatched_components: 0,
+            max_abs_error: 0.0,
+            tolerance: 0.0,
+            queue_submit_serial: 0,
+            fence_serial: 0,
+            resource_generation: 0,
+            pending_retire_count: 0,
+            retained_resource_count: 0,
+            retired_after_fence_count: 0,
+            storage_image_written: false,
+            transfer_readback_performed: false,
+            sampled_image_usage: false,
+            sampled_texture_bound: false,
             queue_wait_idle_performed: false,
             elapsed_ms: 0.0,
         }
@@ -1383,6 +1500,53 @@ impl Cx {
         request_id: u64,
     ) -> Option<XrGpuF32VolumeRaymarchPreviewResult> {
         <Self as CxOsApi>::xr_gpu_f32_volume_raymarch_preview_poll(self, request_id)
+    }
+
+    pub fn xr_gpu_f32_volume_image_preview(
+        &mut self,
+        pixels: [XrGpuF32VolumeImagePreviewPixel; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+        eye_tile_width: usize,
+        eye_tile_height: usize,
+        eye_count: usize,
+        pixel_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32VolumeImagePreviewResult> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_image_preview(
+            self,
+            pixels,
+            eye_tile_width,
+            eye_tile_height,
+            eye_count,
+            pixel_count,
+            tolerance,
+        )
+    }
+
+    pub fn xr_gpu_f32_volume_image_preview_submit(
+        &mut self,
+        pixels: [XrGpuF32VolumeImagePreviewPixel; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+        eye_tile_width: usize,
+        eye_tile_height: usize,
+        eye_count: usize,
+        pixel_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32VolumeImagePreviewTicket> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_image_preview_submit(
+            self,
+            pixels,
+            eye_tile_width,
+            eye_tile_height,
+            eye_count,
+            pixel_count,
+            tolerance,
+        )
+    }
+
+    pub fn xr_gpu_f32_volume_image_preview_poll(
+        &mut self,
+        request_id: u64,
+    ) -> Option<XrGpuF32VolumeImagePreviewResult> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_image_preview_poll(self, request_id)
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {

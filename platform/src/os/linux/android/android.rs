@@ -37,14 +37,15 @@ use {
             XrGpuF32MeshSdfProbeTicket, XrGpuF32SkinningMeshProbeResult,
             XrGpuF32SkinningMeshProbeTicket, XrGpuF32SkinningMeshVertex,
             XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample, XrGpuF32SkinningProbeTicket,
-            XrGpuF32VolumeProbeResult, XrGpuF32VolumeProbeSample, XrGpuF32VolumeProbeTicket,
-            XrGpuF32VolumeRaymarchPreviewPixel, XrGpuF32VolumeRaymarchPreviewResult,
-            XrGpuF32VolumeRaymarchPreviewTicket, XrGpuSkinningMeshTriangle,
-            XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
+            XrGpuF32VolumeImagePreviewPixel, XrGpuF32VolumeImagePreviewResult,
+            XrGpuF32VolumeImagePreviewTicket, XrGpuF32VolumeProbeResult, XrGpuF32VolumeProbeSample,
+            XrGpuF32VolumeProbeTicket, XrGpuF32VolumeRaymarchPreviewPixel,
+            XrGpuF32VolumeRaymarchPreviewResult, XrGpuF32VolumeRaymarchPreviewTicket,
+            XrGpuSkinningMeshTriangle, XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
             XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
             XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES, XR_GPU_F32_SKINNING_PROBE_SAMPLES,
-            XR_GPU_F32_VOLUME_PROBE_SAMPLES, XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS,
-            XR_GPU_U32_COMPUTE_PROBE_WORDS,
+            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS, XR_GPU_F32_VOLUME_PROBE_SAMPLES,
+            XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS, XR_GPU_U32_COMPUTE_PROBE_WORDS,
         },
         draw_pass::CxDrawPassParent,
         draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
@@ -4363,6 +4364,125 @@ impl CxOsApi for Cx {
                 Err(err) => {
                     crate::warning!(
                         "OpenXR Vulkan f32 stimulus volume raymarch preview poll failed: {err}"
+                    );
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = request_id;
+            None
+        }
+    }
+
+    fn xr_gpu_f32_volume_image_preview(
+        &mut self,
+        pixels: [XrGpuF32VolumeImagePreviewPixel; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+        eye_tile_width: usize,
+        eye_tile_height: usize,
+        eye_count: usize,
+        pixel_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32VolumeImagePreviewResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_f32_volume_image_preview(
+                pixels,
+                eye_tile_width,
+                eye_tile_height,
+                eye_count,
+                pixel_count,
+                tolerance,
+            ) {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR Vulkan f32 stimulus volume image preview failed: {err}"
+                    );
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (
+                pixels,
+                eye_tile_width,
+                eye_tile_height,
+                eye_count,
+                pixel_count,
+                tolerance,
+            );
+            None
+        }
+    }
+
+    fn xr_gpu_f32_volume_image_preview_submit(
+        &mut self,
+        pixels: [XrGpuF32VolumeImagePreviewPixel; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
+        eye_tile_width: usize,
+        eye_tile_height: usize,
+        eye_count: usize,
+        pixel_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32VolumeImagePreviewTicket> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.submit_xr_f32_volume_image_preview_async(
+                pixels,
+                eye_tile_width,
+                eye_tile_height,
+                eye_count,
+                pixel_count,
+                tolerance,
+            ) {
+                Ok(ticket) => Some(ticket),
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR Vulkan f32 stimulus volume image preview submit failed: {err}"
+                    );
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (
+                pixels,
+                eye_tile_width,
+                eye_tile_height,
+                eye_count,
+                pixel_count,
+                tolerance,
+            );
+            None
+        }
+    }
+
+    fn xr_gpu_f32_volume_image_preview_poll(
+        &mut self,
+        request_id: u64,
+    ) -> Option<XrGpuF32VolumeImagePreviewResult> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.poll_xr_f32_volume_image_preview(request_id) {
+                Ok(result) => result,
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR Vulkan f32 stimulus volume image preview poll failed: {err}"
                     );
                     None
                 }
