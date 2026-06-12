@@ -343,6 +343,37 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_volume_raymarch_preview(
+        &mut self,
+        _pixels: [XrGpuF32VolumeRaymarchPreviewPixel; XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+        _preview_width: usize,
+        _preview_height: usize,
+        _eye_count: usize,
+        _pixel_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32VolumeRaymarchPreviewResult> {
+        None
+    }
+
+    fn xr_gpu_f32_volume_raymarch_preview_submit(
+        &mut self,
+        _pixels: [XrGpuF32VolumeRaymarchPreviewPixel; XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+        _preview_width: usize,
+        _preview_height: usize,
+        _eye_count: usize,
+        _pixel_count: usize,
+        _tolerance: f32,
+    ) -> Option<XrGpuF32VolumeRaymarchPreviewTicket> {
+        None
+    }
+
+    fn xr_gpu_f32_volume_raymarch_preview_poll(
+        &mut self,
+        _request_id: u64,
+    ) -> Option<XrGpuF32VolumeRaymarchPreviewResult> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -659,6 +690,88 @@ impl Default for XrGpuF32VolumeProbeResult {
             expected_outputs: [XrGpuF32VolumeProbeOutput::default();
                 XR_GPU_F32_VOLUME_PROBE_SAMPLES],
             sample_count: 0,
+            component_count: 0,
+            mismatched_components: 0,
+            max_abs_error: 0.0,
+            tolerance: 0.0,
+            queue_submit_serial: 0,
+            fence_serial: 0,
+            resource_generation: 0,
+            pending_retire_count: 0,
+            retained_resource_count: 0,
+            retired_after_fence_count: 0,
+            queue_wait_idle_performed: false,
+            elapsed_ms: 0.0,
+        }
+    }
+}
+
+pub const XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS: usize = 32;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32VolumeRaymarchPreviewPixel {
+    pub uv_eye_time: [f32; 4],
+    pub ray_origin: [f32; 4],
+    pub ray_direction_step: [f32; 4],
+    pub volume_params: [f32; 4],
+    pub expected_rgba: [f32; 4],
+    pub expected_density_depth_status: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32VolumeRaymarchPreviewOutput {
+    pub rgba: [f32; 4],
+    pub density_depth_status: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct XrGpuF32VolumeRaymarchPreviewTicket {
+    pub request_id: u64,
+    pub queue_submit_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct XrGpuF32VolumeRaymarchPreviewResult {
+    pub pixels: [XrGpuF32VolumeRaymarchPreviewPixel; XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+    pub outputs: [XrGpuF32VolumeRaymarchPreviewOutput; XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+    pub expected_outputs:
+        [XrGpuF32VolumeRaymarchPreviewOutput; XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+    pub preview_width: usize,
+    pub preview_height: usize,
+    pub eye_count: usize,
+    pub pixel_count: usize,
+    pub component_count: usize,
+    pub mismatched_components: usize,
+    pub max_abs_error: f32,
+    pub tolerance: f32,
+    pub queue_submit_serial: u64,
+    pub fence_serial: u64,
+    pub resource_generation: u64,
+    pub pending_retire_count: usize,
+    pub retained_resource_count: usize,
+    pub retired_after_fence_count: usize,
+    pub queue_wait_idle_performed: bool,
+    pub elapsed_ms: f64,
+}
+
+impl Default for XrGpuF32VolumeRaymarchPreviewResult {
+    fn default() -> Self {
+        Self {
+            pixels: [XrGpuF32VolumeRaymarchPreviewPixel::default();
+                XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+            outputs: [XrGpuF32VolumeRaymarchPreviewOutput::default();
+                XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+            expected_outputs: [XrGpuF32VolumeRaymarchPreviewOutput::default();
+                XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+            preview_width: 0,
+            preview_height: 0,
+            eye_count: 0,
+            pixel_count: 0,
             component_count: 0,
             mismatched_components: 0,
             max_abs_error: 0.0,
@@ -1223,6 +1336,53 @@ impl Cx {
         request_id: u64,
     ) -> Option<XrGpuF32VolumeProbeResult> {
         <Self as CxOsApi>::xr_gpu_f32_volume_probe_poll(self, request_id)
+    }
+
+    pub fn xr_gpu_f32_volume_raymarch_preview(
+        &mut self,
+        pixels: [XrGpuF32VolumeRaymarchPreviewPixel; XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+        preview_width: usize,
+        preview_height: usize,
+        eye_count: usize,
+        pixel_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32VolumeRaymarchPreviewResult> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_raymarch_preview(
+            self,
+            pixels,
+            preview_width,
+            preview_height,
+            eye_count,
+            pixel_count,
+            tolerance,
+        )
+    }
+
+    pub fn xr_gpu_f32_volume_raymarch_preview_submit(
+        &mut self,
+        pixels: [XrGpuF32VolumeRaymarchPreviewPixel; XR_GPU_F32_VOLUME_RAYMARCH_PREVIEW_PIXELS],
+        preview_width: usize,
+        preview_height: usize,
+        eye_count: usize,
+        pixel_count: usize,
+        tolerance: f32,
+    ) -> Option<XrGpuF32VolumeRaymarchPreviewTicket> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_raymarch_preview_submit(
+            self,
+            pixels,
+            preview_width,
+            preview_height,
+            eye_count,
+            pixel_count,
+            tolerance,
+        )
+    }
+
+    pub fn xr_gpu_f32_volume_raymarch_preview_poll(
+        &mut self,
+        request_id: u64,
+    ) -> Option<XrGpuF32VolumeRaymarchPreviewResult> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_raymarch_preview_poll(self, request_id)
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
