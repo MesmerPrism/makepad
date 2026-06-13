@@ -12,6 +12,7 @@ use std::time::Instant;
 use super::{CxVulkan, VulkanBuffer};
 
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_ENTRY: &str = "compute_main";
+const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_ENTRY: &str = "sample_main";
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WORKGROUP: u32 = 8;
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH: usize = 4;
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_HEIGHT: usize = 4;
@@ -105,6 +106,31 @@ fn compute_main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 }
 "#;
+const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_WGSL: &str = r#"
+struct VolumeTextureSampleOutput {
+    rgba: vec4<f32>,
+};
+
+@group(0) @binding(0) var sampled_image: texture_2d<f32>;
+@group(0) @binding(1) var sampled_image_sampler: sampler;
+@group(0) @binding(2) var<storage, read_write> sampled_outputs: array<VolumeTextureSampleOutput, 32>;
+
+@compute @workgroup_size(8)
+fn sample_main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let index = id.x;
+    if (index < 32u) {
+        let eye_index = index / 16u;
+        let local_index = index % 16u;
+        let atlas_x = (local_index % 4u) + eye_index * 4u;
+        let atlas_y = local_index / 4u;
+        let uv = (vec2<f32>(f32(atlas_x), f32(atlas_y)) + vec2<f32>(0.5, 0.5))
+            / vec2<f32>(8.0, 4.0);
+        sampled_outputs[index] = VolumeTextureSampleOutput(
+            textureSampleLevel(sampled_image, sampled_image_sampler, uv, 0.0)
+        );
+    }
+}
+"#;
 
 #[derive(Clone, Copy)]
 struct VulkanXrF32VolumeImagePreviewImage {
@@ -135,10 +161,16 @@ pub(super) struct VulkanXrF32VolumeImagePreviewResources {
     input: VulkanBuffer,
     image: VulkanXrF32VolumeImagePreviewImage,
     readback: VulkanBuffer,
+    sampled_readback: VulkanBuffer,
+    sampler: vk::Sampler,
     shader_module: vk::ShaderModule,
+    sample_shader_module: vk::ShaderModule,
     descriptor_set_layout: vk::DescriptorSetLayout,
+    sample_descriptor_set_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
+    sample_pipeline_layout: vk::PipelineLayout,
     compute_pipeline: vk::Pipeline,
+    sample_compute_pipeline: vk::Pipeline,
     descriptor_pool: vk::DescriptorPool,
     command_buffer: vk::CommandBuffer,
     fence: vk::Fence,
@@ -155,15 +187,6 @@ fn expected_xr_gpu_f32_volume_image_preview_outputs(
         };
     }
     expected
-}
-
-fn atlas_index_for_pixel(index: usize) -> usize {
-    let eye_index = index / 16;
-    let local_index = index % 16;
-    let x = (local_index % XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH)
-        + eye_index * XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH;
-    let y = local_index / XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH;
-    y * XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_WIDTH + x
 }
 
 impl CxVulkan {
@@ -227,6 +250,10 @@ impl CxVulkan {
             XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WGSL,
             XR_GPU_F32_VOLUME_IMAGE_PREVIEW_ENTRY,
         )?;
+        let sample_shader_spv = compile_compute_wgsl_to_spirv(
+            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_WGSL,
+            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_ENTRY,
+        )?;
         let input =
             self.create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, &pixels)?;
         let image = match self.create_xr_f32_volume_image_preview_image(
@@ -248,12 +275,48 @@ impl CxVulkan {
                     return Err(err);
                 }
             };
+        let sampled_readback = match self
+            .create_host_buffer(vk::BufferUsageFlags::STORAGE_BUFFER, readback_byte_len)
+        {
+            Ok(buffer) => buffer,
+            Err(err) => {
+                self.destroy_buffer(readback);
+                self.destroy_xr_f32_volume_image_preview_image(image);
+                self.destroy_buffer(input);
+                return Err(err);
+            }
+        };
+        let sampler_info = vk::SamplerCreateInfo::default()
+            .mag_filter(vk::Filter::NEAREST)
+            .min_filter(vk::Filter::NEAREST)
+            .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .min_lod(0.0)
+            .max_lod(0.0);
+        let sampler = match unsafe { self.device.create_sampler(&sampler_info, None) } {
+            Ok(sampler) => sampler,
+            Err(err) => {
+                self.destroy_buffer(sampled_readback);
+                self.destroy_buffer(readback);
+                self.destroy_xr_f32_volume_image_preview_image(image);
+                self.destroy_buffer(input);
+                return Err(format!(
+                    "create_sampler(f32 volume image preview sample pass) failed: {err:?}"
+                ));
+            }
+        };
 
         let shader_module_info = vk::ShaderModuleCreateInfo::default().code(&shader_spv);
         let shader_module =
             match unsafe { self.device.create_shader_module(&shader_module_info, None) } {
                 Ok(shader_module) => shader_module,
                 Err(err) => {
+                    unsafe {
+                        self.device.destroy_sampler(sampler, None);
+                    }
+                    self.destroy_buffer(sampled_readback);
                     self.destroy_buffer(readback);
                     self.destroy_xr_f32_volume_image_preview_image(image);
                     self.destroy_buffer(input);
@@ -262,6 +325,27 @@ impl CxVulkan {
                     ));
                 }
             };
+        let sample_shader_module_info =
+            vk::ShaderModuleCreateInfo::default().code(&sample_shader_spv);
+        let sample_shader_module = match unsafe {
+            self.device
+                .create_shader_module(&sample_shader_module_info, None)
+        } {
+            Ok(shader_module) => shader_module,
+            Err(err) => {
+                unsafe {
+                    self.device.destroy_shader_module(shader_module, None);
+                    self.device.destroy_sampler(sampler, None);
+                }
+                self.destroy_buffer(sampled_readback);
+                self.destroy_buffer(readback);
+                self.destroy_xr_f32_volume_image_preview_image(image);
+                self.destroy_buffer(input);
+                return Err(format!(
+                    "create_shader_module(f32 volume image preview sample pass) failed: {err:?}"
+                ));
+            }
+        };
 
         let descriptor_bindings = [
             vk::DescriptorSetLayoutBinding::default()
@@ -284,13 +368,59 @@ impl CxVulkan {
             Ok(layout) => layout,
             Err(err) => {
                 unsafe {
+                    self.device
+                        .destroy_shader_module(sample_shader_module, None);
                     self.device.destroy_shader_module(shader_module, None);
+                    self.device.destroy_sampler(sampler, None);
                 }
+                self.destroy_buffer(sampled_readback);
                 self.destroy_buffer(readback);
                 self.destroy_xr_f32_volume_image_preview_image(image);
                 self.destroy_buffer(input);
                 return Err(format!(
                     "create_descriptor_set_layout(f32 volume image preview) failed: {err:?}"
+                ));
+            }
+        };
+        let sample_descriptor_bindings = [
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::COMPUTE),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(1)
+                .descriptor_type(vk::DescriptorType::SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::COMPUTE),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(2)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::COMPUTE),
+        ];
+        let sample_descriptor_set_layout_info =
+            vk::DescriptorSetLayoutCreateInfo::default().bindings(&sample_descriptor_bindings);
+        let sample_descriptor_set_layout = match unsafe {
+            self.device
+                .create_descriptor_set_layout(&sample_descriptor_set_layout_info, None)
+        } {
+            Ok(layout) => layout,
+            Err(err) => {
+                unsafe {
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    self.device
+                        .destroy_shader_module(sample_shader_module, None);
+                    self.device.destroy_shader_module(shader_module, None);
+                    self.device.destroy_sampler(sampler, None);
+                }
+                self.destroy_buffer(sampled_readback);
+                self.destroy_buffer(readback);
+                self.destroy_xr_f32_volume_image_preview_image(image);
+                self.destroy_buffer(input);
+                return Err(format!(
+                    "create_descriptor_set_layout(f32 volume image preview sample pass) failed: {err:?}"
                 ));
             }
         };
@@ -306,14 +436,49 @@ impl CxVulkan {
             Err(err) => {
                 unsafe {
                     self.device
+                        .destroy_descriptor_set_layout(sample_descriptor_set_layout, None);
+                    self.device
                         .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    self.device
+                        .destroy_shader_module(sample_shader_module, None);
                     self.device.destroy_shader_module(shader_module, None);
+                    self.device.destroy_sampler(sampler, None);
                 }
+                self.destroy_buffer(sampled_readback);
                 self.destroy_buffer(readback);
                 self.destroy_xr_f32_volume_image_preview_image(image);
                 self.destroy_buffer(input);
                 return Err(format!(
                     "create_pipeline_layout(f32 volume image preview) failed: {err:?}"
+                ));
+            }
+        };
+        let sample_set_layouts = [sample_descriptor_set_layout];
+        let sample_pipeline_layout_info =
+            vk::PipelineLayoutCreateInfo::default().set_layouts(&sample_set_layouts);
+        let sample_pipeline_layout = match unsafe {
+            self.device
+                .create_pipeline_layout(&sample_pipeline_layout_info, None)
+        } {
+            Ok(layout) => layout,
+            Err(err) => {
+                unsafe {
+                    self.device.destroy_pipeline_layout(pipeline_layout, None);
+                    self.device
+                        .destroy_descriptor_set_layout(sample_descriptor_set_layout, None);
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    self.device
+                        .destroy_shader_module(sample_shader_module, None);
+                    self.device.destroy_shader_module(shader_module, None);
+                    self.device.destroy_sampler(sampler, None);
+                }
+                self.destroy_buffer(sampled_readback);
+                self.destroy_buffer(readback);
+                self.destroy_xr_f32_volume_image_preview_image(image);
+                self.destroy_buffer(input);
+                return Err(format!(
+                    "create_pipeline_layout(f32 volume image preview sample pass) failed: {err:?}"
                 ));
             }
         };
@@ -341,11 +506,19 @@ impl CxVulkan {
                             self.device.destroy_pipeline(pipeline, None);
                         }
                     }
+                    self.device
+                        .destroy_pipeline_layout(sample_pipeline_layout, None);
                     self.device.destroy_pipeline_layout(pipeline_layout, None);
                     self.device
+                        .destroy_descriptor_set_layout(sample_descriptor_set_layout, None);
+                    self.device
                         .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    self.device
+                        .destroy_shader_module(sample_shader_module, None);
                     self.device.destroy_shader_module(shader_module, None);
+                    self.device.destroy_sampler(sampler, None);
                 }
+                self.destroy_buffer(sampled_readback);
                 self.destroy_buffer(readback);
                 self.destroy_xr_f32_volume_image_preview_image(image);
                 self.destroy_buffer(input);
@@ -354,19 +527,73 @@ impl CxVulkan {
                 ));
             }
         };
+        let sample_entry =
+            std::ffi::CString::new(XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_ENTRY).unwrap();
+        let sample_stage = vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .module(sample_shader_module)
+            .name(&sample_entry);
+        let sample_compute_pipeline_info = vk::ComputePipelineCreateInfo::default()
+            .stage(sample_stage)
+            .layout(sample_pipeline_layout);
+        let sample_compute_pipeline = match unsafe {
+            self.device.create_compute_pipelines(
+                vk::PipelineCache::null(),
+                &[sample_compute_pipeline_info],
+                None,
+            )
+        } {
+            Ok(mut pipelines) => pipelines.remove(0),
+            Err((pipelines, err)) => {
+                unsafe {
+                    for pipeline in pipelines {
+                        if pipeline != vk::Pipeline::null() {
+                            self.device.destroy_pipeline(pipeline, None);
+                        }
+                    }
+                    self.device.destroy_pipeline(compute_pipeline, None);
+                    self.device
+                        .destroy_pipeline_layout(sample_pipeline_layout, None);
+                    self.device.destroy_pipeline_layout(pipeline_layout, None);
+                    self.device
+                        .destroy_descriptor_set_layout(sample_descriptor_set_layout, None);
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    self.device
+                        .destroy_shader_module(sample_shader_module, None);
+                    self.device.destroy_shader_module(shader_module, None);
+                    self.device.destroy_sampler(sampler, None);
+                }
+                self.destroy_buffer(sampled_readback);
+                self.destroy_buffer(readback);
+                self.destroy_xr_f32_volume_image_preview_image(image);
+                self.destroy_buffer(input);
+                return Err(format!(
+                    "create_compute_pipelines(f32 volume image preview sample pass) failed: {err:?}"
+                ));
+            }
+        };
 
         let descriptor_pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 1,
+                descriptor_count: 2,
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::STORAGE_IMAGE,
                 descriptor_count: 1,
             },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::SAMPLED_IMAGE,
+                descriptor_count: 1,
+            },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::SAMPLER,
+                descriptor_count: 1,
+            },
         ];
         let descriptor_pool_info = vk::DescriptorPoolCreateInfo::default()
-            .max_sets(1)
+            .max_sets(2)
             .pool_sizes(&descriptor_pool_sizes);
         let descriptor_pool = match unsafe {
             self.device
@@ -382,7 +609,13 @@ impl CxVulkan {
                     pipeline_layout,
                     descriptor_set_layout,
                     shader_module,
+                    sample_compute_pipeline,
+                    sample_pipeline_layout,
+                    sample_descriptor_set_layout,
+                    sample_shader_module,
+                    sampler,
                 );
+                self.destroy_buffer(sampled_readback);
                 self.destroy_buffer(readback);
                 self.destroy_xr_f32_volume_image_preview_image(image);
                 self.destroy_buffer(input);
@@ -391,12 +624,13 @@ impl CxVulkan {
                 ));
             }
         };
-        let descriptor_set = {
+        let (descriptor_set, sample_descriptor_set) = {
+            let allocation_set_layouts = [descriptor_set_layout, sample_descriptor_set_layout];
             let alloc_info = vk::DescriptorSetAllocateInfo::default()
                 .descriptor_pool(descriptor_pool)
-                .set_layouts(&set_layouts);
+                .set_layouts(&allocation_set_layouts);
             match unsafe { self.device.allocate_descriptor_sets(&alloc_info) } {
-                Ok(sets) => sets[0],
+                Ok(sets) => (sets[0], sets[1]),
                 Err(err) => {
                     self.destroy_xr_f32_volume_image_preview_gpu_handles(
                         vk::Fence::null(),
@@ -406,7 +640,13 @@ impl CxVulkan {
                         pipeline_layout,
                         descriptor_set_layout,
                         shader_module,
+                        sample_compute_pipeline,
+                        sample_pipeline_layout,
+                        sample_descriptor_set_layout,
+                        sample_shader_module,
+                        sampler,
                     );
+                    self.destroy_buffer(sampled_readback);
                     self.destroy_buffer(readback);
                     self.destroy_xr_f32_volume_image_preview_image(image);
                     self.destroy_buffer(input);
@@ -421,11 +661,22 @@ impl CxVulkan {
             .buffer(input.buffer)
             .offset(0)
             .range(input_byte_len);
+        let sampled_output_buffer_info = vk::DescriptorBufferInfo::default()
+            .buffer(sampled_readback.buffer)
+            .offset(0)
+            .range(readback_byte_len);
         let image_info = vk::DescriptorImageInfo::default()
             .image_view(image.view)
             .image_layout(vk::ImageLayout::GENERAL);
+        let sampled_image_info = vk::DescriptorImageInfo::default()
+            .image_view(image.view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        let sampler_info = vk::DescriptorImageInfo::default().sampler(sampler);
         let input_buffer_infos = [input_buffer_info];
+        let sampled_output_buffer_infos = [sampled_output_buffer_info];
         let image_infos = [image_info];
+        let sampled_image_infos = [sampled_image_info];
+        let sampler_infos = [sampler_info];
         let descriptor_writes = [
             vk::WriteDescriptorSet::default()
                 .dst_set(descriptor_set)
@@ -437,6 +688,21 @@ impl CxVulkan {
                 .dst_binding(1)
                 .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                 .image_info(&image_infos),
+            vk::WriteDescriptorSet::default()
+                .dst_set(sample_descriptor_set)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                .image_info(&sampled_image_infos),
+            vk::WriteDescriptorSet::default()
+                .dst_set(sample_descriptor_set)
+                .dst_binding(1)
+                .descriptor_type(vk::DescriptorType::SAMPLER)
+                .image_info(&sampler_infos),
+            vk::WriteDescriptorSet::default()
+                .dst_set(sample_descriptor_set)
+                .dst_binding(2)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&sampled_output_buffer_infos),
         ];
         unsafe {
             self.device.update_descriptor_sets(&descriptor_writes, &[]);
@@ -458,7 +724,13 @@ impl CxVulkan {
                         pipeline_layout,
                         descriptor_set_layout,
                         shader_module,
+                        sample_compute_pipeline,
+                        sample_pipeline_layout,
+                        sample_descriptor_set_layout,
+                        sample_shader_module,
+                        sampler,
                     );
+                    self.destroy_buffer(sampled_readback);
                     self.destroy_buffer(readback);
                     self.destroy_xr_f32_volume_image_preview_image(image);
                     self.destroy_buffer(input);
@@ -481,7 +753,13 @@ impl CxVulkan {
                         pipeline_layout,
                         descriptor_set_layout,
                         shader_module,
+                        sample_compute_pipeline,
+                        sample_pipeline_layout,
+                        sample_descriptor_set_layout,
+                        sample_shader_module,
+                        sampler,
                     );
+                    self.destroy_buffer(sampled_readback);
                     self.destroy_buffer(readback);
                     self.destroy_xr_f32_volume_image_preview_image(image);
                     self.destroy_buffer(input);
@@ -655,6 +933,39 @@ impl CxVulkan {
                     &[image_to_shader],
                 );
 
+                self.device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    sample_compute_pipeline,
+                );
+                self.device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    sample_pipeline_layout,
+                    0,
+                    &[sample_descriptor_set],
+                    &[],
+                );
+                self.device.cmd_dispatch(command_buffer, dispatch_x, 1, 1);
+
+                let sampled_readback_barrier = vk::BufferMemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::HOST_READ)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .buffer(sampled_readback.buffer)
+                    .offset(0)
+                    .size(readback_byte_len);
+                self.device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::PipelineStageFlags::HOST,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[sampled_readback_barrier],
+                    &[],
+                );
+
                 self.device
                     .end_command_buffer(command_buffer)
                     .map_err(|e| {
@@ -681,7 +992,13 @@ impl CxVulkan {
                 pipeline_layout,
                 descriptor_set_layout,
                 shader_module,
+                sample_compute_pipeline,
+                sample_pipeline_layout,
+                sample_descriptor_set_layout,
+                sample_shader_module,
+                sampler,
             );
+            self.destroy_buffer(sampled_readback);
             self.destroy_buffer(readback);
             self.destroy_xr_f32_volume_image_preview_image(image);
             self.destroy_buffer(input);
@@ -710,10 +1027,16 @@ impl CxVulkan {
                 input,
                 image,
                 readback,
+                sampled_readback,
+                sampler,
                 shader_module,
+                sample_shader_module,
                 descriptor_set_layout,
+                sample_descriptor_set_layout,
                 pipeline_layout,
+                sample_pipeline_layout,
                 compute_pipeline,
+                sample_compute_pipeline,
                 descriptor_pool,
                 command_buffer,
                 fence,
@@ -814,7 +1137,7 @@ impl CxVulkan {
             tolerance,
             queue_submit_serial,
             resource_generation,
-            readback_buffer,
+            sampled_readback_buffer,
         ) = {
             let resource = self
                 .xr_f32_volume_image_preview_resources
@@ -840,17 +1163,17 @@ impl CxVulkan {
                 resource.tolerance,
                 resource.queue_submit_serial,
                 resource.resource_generation,
-                resource.readback,
+                resource.sampled_readback,
             )
         };
         let readback_byte_len = std::mem::size_of::<
             [XrGpuF32VolumeImagePreviewOutput; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
         >() as vk::DeviceSize;
-        let atlas_outputs = unsafe {
+        let outputs = unsafe {
             let mapped = self
                 .device
                 .map_memory(
-                    readback_buffer.memory,
+                    sampled_readback_buffer.memory,
                     0,
                     readback_byte_len,
                     vk::MemoryMapFlags::empty(),
@@ -862,18 +1185,12 @@ impl CxVulkan {
                 mapped as *const XrGpuF32VolumeImagePreviewOutput,
                 XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS,
             );
-            let mut atlas_outputs = [XrGpuF32VolumeImagePreviewOutput::default();
+            let mut outputs = [XrGpuF32VolumeImagePreviewOutput::default();
                 XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS];
-            atlas_outputs.copy_from_slice(rows);
-            self.device.unmap_memory(readback_buffer.memory);
-            atlas_outputs
+            outputs.copy_from_slice(rows);
+            self.device.unmap_memory(sampled_readback_buffer.memory);
+            outputs
         };
-
-        let mut outputs =
-            [XrGpuF32VolumeImagePreviewOutput::default(); XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS];
-        for index in 0..pixel_count {
-            outputs[index] = atlas_outputs[atlas_index_for_pixel(index)];
-        }
 
         let mut mismatched_components = 0;
         let mut max_abs_error = 0.0_f32;
@@ -931,7 +1248,7 @@ impl CxVulkan {
             storage_image_written: true,
             transfer_readback_performed: true,
             sampled_image_usage: true,
-            sampled_texture_bound: false,
+            sampled_texture_bound: true,
             queue_wait_idle_performed,
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         })
@@ -1056,6 +1373,11 @@ impl CxVulkan {
         pipeline_layout: vk::PipelineLayout,
         descriptor_set_layout: vk::DescriptorSetLayout,
         shader_module: vk::ShaderModule,
+        sample_compute_pipeline: vk::Pipeline,
+        sample_pipeline_layout: vk::PipelineLayout,
+        sample_descriptor_set_layout: vk::DescriptorSetLayout,
+        sample_shader_module: vk::ShaderModule,
+        sampler: vk::Sampler,
     ) {
         unsafe {
             if fence != vk::Fence::null() {
@@ -1070,18 +1392,36 @@ impl CxVulkan {
             if descriptor_pool != vk::DescriptorPool::null() {
                 self.device.destroy_descriptor_pool(descriptor_pool, None);
             }
+            if sample_compute_pipeline != vk::Pipeline::null() {
+                self.device.destroy_pipeline(sample_compute_pipeline, None);
+            }
             if compute_pipeline != vk::Pipeline::null() {
                 self.device.destroy_pipeline(compute_pipeline, None);
             }
+            if sample_pipeline_layout != vk::PipelineLayout::null() {
+                self.device
+                    .destroy_pipeline_layout(sample_pipeline_layout, None);
+            }
             if pipeline_layout != vk::PipelineLayout::null() {
                 self.device.destroy_pipeline_layout(pipeline_layout, None);
+            }
+            if sample_descriptor_set_layout != vk::DescriptorSetLayout::null() {
+                self.device
+                    .destroy_descriptor_set_layout(sample_descriptor_set_layout, None);
             }
             if descriptor_set_layout != vk::DescriptorSetLayout::null() {
                 self.device
                     .destroy_descriptor_set_layout(descriptor_set_layout, None);
             }
+            if sample_shader_module != vk::ShaderModule::null() {
+                self.device
+                    .destroy_shader_module(sample_shader_module, None);
+            }
             if shader_module != vk::ShaderModule::null() {
                 self.device.destroy_shader_module(shader_module, None);
+            }
+            if sampler != vk::Sampler::null() {
+                self.device.destroy_sampler(sampler, None);
             }
         }
     }
@@ -1097,10 +1437,35 @@ impl CxVulkan {
                 resource.pipeline_layout,
                 resource.descriptor_set_layout,
                 resource.shader_module,
+                resource.sample_compute_pipeline,
+                resource.sample_pipeline_layout,
+                resource.sample_descriptor_set_layout,
+                resource.sample_shader_module,
+                resource.sampler,
             );
+            self.destroy_buffer(resource.sampled_readback);
             self.destroy_buffer(resource.readback);
             self.destroy_xr_f32_volume_image_preview_image(resource.image);
             self.destroy_buffer(resource.input);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compiles_volume_image_preview_compute_shaders() {
+        compile_compute_wgsl_to_spirv(
+            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WGSL,
+            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_ENTRY,
+        )
+        .expect("storage-image write shader compiles");
+        compile_compute_wgsl_to_spirv(
+            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_WGSL,
+            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_ENTRY,
+        )
+        .expect("sampled-image read shader compiles");
     }
 }
