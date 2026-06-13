@@ -1,10 +1,10 @@
 # From https://github.com/gitattributes/gitattributes/blob/master/Rust.gitattributes
 # Auto detect text files and perform normalization
-*          text=auto
+*          text=auto eol=lf
 
-*.rs       text diff=rust
-*.toml     text diff=toml
-Cargo.lock text
+*.rs       text eol=lf diff=rust
+*.toml     text eol=lf diff=toml
+Cargo.lock text eol=lf
 # Taken from https://github.com/gitattributes/gitattributes/blob/master/Common.gitattributes
 # Common settings that generally should always be used with your language specific settings
 
@@ -25,17 +25,17 @@ Cargo.lock text
 *.PDF      diff=astextplain
 *.rtf      diff=astextplain
 *.RTF      diff=astextplain
-*.md       text diff=markdown
-*.mdx      text diff=markdown
-*.tex      text diff=tex
-*.adoc     text
-*.textile  text
-*.mustache text
-*.csv      text eol=crlf
-*.tab      text
-*.tsv      text
-*.txt      text
-*.sql      text
+*.md       text eol=lf diff=markdown
+*.mdx      text eol=lf diff=markdown
+*.tex      text eol=lf diff=tex
+*.adoc     text eol=lf
+*.textile  text eol=lf
+*.mustache text eol=lf
+*.csv      text eol=lf
+*.tab      text eol=lf
+*.tsv      text eol=lf
+*.txt      text eol=lf
+*.sql      text eol=lf
 *.epub     diff=astextplain
 
 # Graphics
@@ -62,14 +62,14 @@ Cargo.lock text
 # These are explicitly windows files and should use crlf
 *.bat      text eol=crlf
 *.cmd      text eol=crlf
-*.ps1      text eol=crlf
+*.ps1      text eol=lf
 
 # Serialisation
-*.json     text
-*.toml     text
-*.xml      text
-*.yaml     text
-*.yml      text
+*.json     text eol=lf
+*.toml     text eol=lf
+*.xml      text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
 
 # Archives
 *.7z       binary
@@ -99,6 +99,6 @@ Cargo.lock text
 # Exclude files from exporting
 #
 
-.gitattributes export-ignore
-.gitignore     export-ignore
+.gitattributes text eol=lf export-ignore
+.gitignore     text eol=lf export-ignore
 .gitkeep       export-ignore
