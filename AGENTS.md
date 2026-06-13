@@ -81,10 +81,13 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
   Quest-Makepad marker contract, and this fork must not define Matter
   field/particle semantics or GPU compute readiness.
 - XR/Vulkan compute probes must not turn `platform/src/os/linux/vulkan.rs` into
-  a monolithic probe file. Keep the root file to Vulkan lifecycle/draw
-  orchestration, keep texture/image resources in `texture_resources.rs`, keep
+  a monolithic probe file. Keep the root file to Vulkan instance/device,
+  window-swapchain, render-pass, draw-list, pipeline, and geometry
+  orchestration. Keep reusable per-frame buffer/descriptors in
+  `frame_resources.rs`, OpenXR multiview targets/session/readback/draw in
+  `openxr_targets.rs`, texture/image resources in `texture_resources.rs`,
   video hardware-buffer import and texture retirement in
-  `video_hardware_buffer.rs` / `texture_lifetime.rs`, and put probe-specific
+  `video_hardware_buffer.rs` / `texture_lifetime.rs`, and probe-specific
   shader/dispatch/readback code in child modules under
   `platform/src/os/linux/vulkan/` such as `basic_compute_probe.rs` and
   `skinning_mesh_probe.rs`. Future mesh-to-SDF, dense-SDF, ADF, or particle
