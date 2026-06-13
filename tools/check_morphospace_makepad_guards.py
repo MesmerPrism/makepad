@@ -139,6 +139,7 @@ def check_split_maps(checks):
         "tools/cargo_makepad/src/android/java/dev/makepad/android/ManifoldVideoStreamReader.java",
         "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceActivitySupport.java",
         "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceMediaProjectionHelper.java",
+        "platform/src/os/linux/android/android_java_messages.rs",
         "platform/src/os/linux/vulkan/basic_compute_probe.rs",
         "platform/src/os/linux/vulkan/texture_lifetime.rs",
         "platform/src/os/linux/vulkan/video_hardware_buffer.rs",
@@ -160,6 +161,22 @@ def check_split_maps(checks):
     checks.line_count_at_most(
         "tools/cargo_makepad/src/android/java/dev/makepad/android/MakepadActivity.java",
         3200,
+    )
+    checks.line_count_at_most("platform/src/os/linux/android/android.rs", 4200)
+    checks.contains(
+        "platform/src/os/linux/android/android_java_messages.rs",
+        "fn handle_android_surface_message",
+        "Android Java surface/window dispatch helper",
+    )
+    checks.contains(
+        "platform/src/os/linux/android/android_java_messages.rs",
+        "fn handle_android_input_message",
+        "Android Java input/IME dispatch helper",
+    )
+    checks.contains(
+        "platform/src/os/linux/android/android_java_messages.rs",
+        "fn handle_android_video_message",
+        "Android Java video/camera dispatch helper",
     )
     checks.contains(
         "tools/cargo_makepad/src/android/compile/wrapper_manifest.rs",

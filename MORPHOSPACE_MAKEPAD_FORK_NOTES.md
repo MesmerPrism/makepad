@@ -120,6 +120,11 @@ This branch currently carries:
   sequence/timestamp, acquire/upload/import timing, texture resource path,
   descriptor shape, Vulkan format facts, and fallback state without forcing app
   adapters to reconstruct those facts from marker text.
+- Android Java-message coalescing and dispatch now lives in
+  `platform/src/os/linux/android/android_java_messages.rs`. The child module
+  keeps high-rate touch/stereo hardware-buffer coalescing plus grouped
+  surface/window, input/IME, network/MIDI/permission, video/camera, and
+  lifecycle handlers; `android.rs` remains the platform-loop/backend owner.
 - A small shader builtin, `xr_view_id()`, that exposes Makepad's existing
   backend multiview index to application shader code for XR per-eye texture
   selection without requiring app shaders to reference backend-specific

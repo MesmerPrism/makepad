@@ -66,6 +66,12 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
   explicit legacy `RXYRVID1` compatibility, MediaCodec decode, stream-header
   metadata events, and a CPU-YUV decoded handoff for Vulkan/XR paths without a
   GL external texture handle.
+- Android Java-message coalescing and dispatch now lives in
+  `platform/src/os/linux/android/android_java_messages.rs`. Keep
+  `platform/src/os/linux/android/android.rs` focused on Android platform loop,
+  backend, surface, camera, and media ownership glue; future message-dispatch
+  changes should stay in the child module unless they are backend lifecycle
+  helpers with a clearer owner.
 - Generic OpenXR hand-mesh bind-data access for runtimes that expose
   `XR_FB_hand_tracking_mesh`, kept as mesh counts/status plus an on-demand API
   rather than app-specific recording behavior.
