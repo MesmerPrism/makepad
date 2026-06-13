@@ -300,7 +300,13 @@ pub trait Proxy: Clone + std::fmt::Debug + Sized {
         &self,
         conn: &Connection,
         req: Self::Request<'a>,
-    ) -> Result<(Message<ObjectId, BorrowedFd<'a>>, Option<(&'static Interface, u32)>), InvalidId>;
+    ) -> Result<
+        (
+            Message<ObjectId, BorrowedFd<'a>>,
+            Option<(&'static Interface, u32)>,
+        ),
+        InvalidId,
+    >;
 
     /// Creates a weak handle to this object
     ///
@@ -310,7 +316,11 @@ pub trait Proxy: Clone + std::fmt::Debug + Sized {
     /// This can be of use if you need to store proxies in the used data of other objects and want
     /// to be sure to avoid reference cycles that would cause memory leaks.
     fn downgrade(&self) -> Weak<Self> {
-        Weak { backend: self.backend().clone(), id: self.id(), _iface: std::marker::PhantomData }
+        Weak {
+            backend: self.backend().clone(),
+            id: self.id(),
+            _iface: std::marker::PhantomData,
+        }
     }
 }
 
@@ -342,8 +352,15 @@ impl std::error::Error for DispatchError {
 impl fmt::Display for DispatchError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            DispatchError::BadMessage { sender_id, interface, opcode } => {
-                write!(f, "Bad message for object {interface}@{sender_id} on opcode {opcode}")
+            DispatchError::BadMessage {
+                sender_id,
+                interface,
+                opcode,
+            } => {
+                write!(
+                    f,
+                    "Bad message for object {interface}@{sender_id} on opcode {opcode}"
+                )
             }
             DispatchError::Backend(source) => {
                 write!(f, "Backend error: {source}")

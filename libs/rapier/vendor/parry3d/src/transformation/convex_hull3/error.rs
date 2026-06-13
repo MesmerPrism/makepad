@@ -253,7 +253,10 @@ impl fmt::Display for ConvexHullError {
             Self::Unreachable => f.write_str("Internal error: unreachable code path"),
             Self::UnfinishedTriangle => f.write_str("Detected unfinished triangle"),
             Self::TJunction(triangle, v1, v2) => {
-                write!(f, "Detected t-junction for triangle {triangle}, edge: ({v1}, {v2})")
+                write!(
+                    f,
+                    "Detected t-junction for triangle {triangle}, edge: ({v1}, {v2})"
+                )
             }
             Self::DuplicatePoints(i, j) => write!(f, "Detected duplicate points {i} and {j}"),
         }

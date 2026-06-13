@@ -344,8 +344,14 @@ fn ai_manager_persists_chats_per_mount_and_loads_them_on_restart() {
     });
     let restored = wait_for_ai_state(&connection, "repo", Duration::from_secs(2), |state| {
         state.agents.len() == 2
-            && state.agents.iter().any(|agent| agent.title == "persist this chat")
-            && state.agents.iter().any(|agent| agent.title == "Second chat")
+            && state
+                .agents
+                .iter()
+                .any(|agent| agent.title == "persist this chat")
+            && state
+                .agents
+                .iter()
+                .any(|agent| agent.title == "Second chat")
             && state
                 .active_agent
                 .as_ref()

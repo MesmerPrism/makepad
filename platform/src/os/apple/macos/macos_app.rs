@@ -169,8 +169,8 @@ impl MacosApp {
         // submenu and the "Quit X" item label match. NSBundle returns nil
         // when the binary isn't bundled at all; fall back to a generic
         // label in that case.
-        let app_name = unsafe { current_bundle_name() }
-            .unwrap_or_else(|| "Application".to_string());
+        let app_name =
+            unsafe { current_bundle_name() }.unwrap_or_else(|| "Application".to_string());
         self.update_macos_menu(&MacosMenu::Main {
             items: vec![MacosMenu::Sub {
                 name: app_name.clone(),

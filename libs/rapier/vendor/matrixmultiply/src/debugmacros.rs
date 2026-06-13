@@ -22,7 +22,5 @@ macro_rules! debug {
 */
 
 macro_rules! debug {
-    ($e:expr) => {
-    }
+    ($e:expr) => {};
 }
-

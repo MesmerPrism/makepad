@@ -49,11 +49,13 @@ impl<T> PointerExt for *mut T {
 /// A Send + Sync raw pointer wrapper
 #[derive(Copy, Clone)]
 #[repr(transparent)]
-pub(crate) struct Ptr<T> { ptr: T }
-unsafe impl<T> Sync for Ptr<*const T> { }
-unsafe impl<T> Sync for Ptr<*mut T> { }
-unsafe impl<T> Send for Ptr<*const T> { }
-unsafe impl<T> Send for Ptr<*mut T> { }
+pub(crate) struct Ptr<T> {
+    ptr: T,
+}
+unsafe impl<T> Sync for Ptr<*const T> {}
+unsafe impl<T> Sync for Ptr<*mut T> {}
+unsafe impl<T> Send for Ptr<*const T> {}
+unsafe impl<T> Send for Ptr<*mut T> {}
 
 /// Create a Ptr
 ///
@@ -61,12 +63,15 @@ unsafe impl<T> Send for Ptr<*mut T> { }
 ///
 /// Unsafe since it is thread safety critical to use the raw pointer correctly.
 #[allow(non_snake_case)]
-pub(crate) unsafe fn Ptr<T>(ptr: T) -> Ptr<T> { Ptr { ptr } }
+pub(crate) unsafe fn Ptr<T>(ptr: T) -> Ptr<T> {
+    Ptr { ptr }
+}
 
 impl<T> Ptr<T> {
     /// Get the pointer
     pub(crate) fn ptr(self) -> T
-        where T: Copy
+    where
+        T: Copy,
     {
         self.ptr
     }

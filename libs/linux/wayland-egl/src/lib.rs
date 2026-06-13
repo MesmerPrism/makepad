@@ -71,7 +71,13 @@ impl WlEglSurface {
         if width <= 0 || height <= 0 {
             return Err(Error::InvalidSize);
         }
-        let ptr = ffi_dispatch!(wayland_egl_handle(), wl_egl_window_create, surface, width, height);
+        let ptr = ffi_dispatch!(
+            wayland_egl_handle(),
+            wl_egl_window_create,
+            surface,
+            width,
+            height
+        );
         if ptr.is_null() {
             panic!("egl window allocation failed");
         }

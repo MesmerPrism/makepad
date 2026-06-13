@@ -136,7 +136,7 @@ impl Multibody {
                 delta_lin.z,
                 delta_ang.x,
                 delta_ang.y,
-                delta_ang.z
+                delta_ang.z,
             );
 
             if !options.constrained_axes.contains(JointAxesMask::LIN_X) {

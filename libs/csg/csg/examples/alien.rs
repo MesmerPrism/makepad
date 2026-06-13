@@ -189,11 +189,19 @@ fn build_alien(t: &Instant) -> Solid {
 
     let arm_l_start = dvec3(2.6, torso_pos.y + 1.0, 0.1);
     let elbow_l = dvec3(2.95, torso_pos.y + 0.55, 2.1);
-    let hand_l_pos = dvec3(chip_center.x + 2.05, chip_center.y + 0.02, chip_center.z + 0.0);
+    let hand_l_pos = dvec3(
+        chip_center.x + 2.05,
+        chip_center.y + 0.02,
+        chip_center.z + 0.0,
+    );
 
     let arm_r_start = dvec3(-2.6, torso_pos.y + 1.0, 0.1);
     let elbow_r = dvec3(-2.95, torso_pos.y + 0.55, 2.1);
-    let hand_r_pos = dvec3(chip_center.x - 2.05, chip_center.y + 0.02, chip_center.z + 0.0);
+    let hand_r_pos = dvec3(
+        chip_center.x - 2.05,
+        chip_center.y + 0.02,
+        chip_center.z + 0.0,
+    );
 
     let finger_len = 1.2;
     let finger_r = 0.12;
@@ -392,20 +400,23 @@ fn build_alien(t: &Instant) -> Solid {
     // QUANTUM CHIP DETAIL (mesh primitives)
     // A handheld module inspired by superconducting quantum hardware.
     // ================================================================
-    let chip_base = Solid::cube(3.8, 0.42, 2.7, true).translate(
+    let chip_base =
+        Solid::cube(3.8, 0.42, 2.7, true).translate(chip_center.x, chip_center.y, chip_center.z);
+    let resonator_ring = Solid::torus(0.62, 0.11, 28, 14).rotate_x(90.0).translate(
         chip_center.x,
-        chip_center.y,
-        chip_center.z,
+        chip_center.y + 0.05,
+        chip_center.z + 0.08,
     );
-    let resonator_ring = Solid::torus(0.62, 0.11, 28, 14)
-        .rotate_x(90.0)
-        .translate(chip_center.x, chip_center.y + 0.05, chip_center.z + 0.08);
-    let resonator_ring_l = Solid::torus(0.32, 0.08, 22, 12)
-        .rotate_x(90.0)
-        .translate(chip_center.x - 1.0, chip_center.y + 0.03, chip_center.z + 0.12);
-    let resonator_ring_r = Solid::torus(0.32, 0.08, 22, 12)
-        .rotate_x(90.0)
-        .translate(chip_center.x + 1.0, chip_center.y + 0.03, chip_center.z + 0.12);
+    let resonator_ring_l = Solid::torus(0.32, 0.08, 22, 12).rotate_x(90.0).translate(
+        chip_center.x - 1.0,
+        chip_center.y + 0.03,
+        chip_center.z + 0.12,
+    );
+    let resonator_ring_r = Solid::torus(0.32, 0.08, 22, 12).rotate_x(90.0).translate(
+        chip_center.x + 1.0,
+        chip_center.y + 0.03,
+        chip_center.z + 0.12,
+    );
 
     let mut quantum_chip = chip_base
         .merge(&resonator_ring)
@@ -427,7 +438,13 @@ fn build_alien(t: &Instant) -> Solid {
         quantum_chip = quantum_chip.merge(&pin_l).merge(&pin_r);
     }
 
-    for (x, z) in [(-1.0, -0.55), (0.0, -0.45), (1.0, -0.55), (-0.5, 0.58), (0.5, 0.58)] {
+    for (x, z) in [
+        (-1.0, -0.55),
+        (0.0, -0.45),
+        (1.0, -0.55),
+        (-0.5, 0.58),
+        (0.5, 0.58),
+    ] {
         let qubit_node = Solid::sphere(0.14, 16, 10).translate(
             chip_center.x + x,
             chip_center.y + 0.11,

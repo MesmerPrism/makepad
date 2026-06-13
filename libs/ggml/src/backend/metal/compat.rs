@@ -1651,13 +1651,15 @@ mod imp {
 
     fn matmul_batch_tag(bt_ggml_type: u32, index: usize) -> Result<u8, String> {
         let base = matmul_cache_tag(bt_ggml_type);
-        let slot = u8::try_from(index).map_err(|_| format!("matmul batch index too large: {}", index))?;
+        let slot =
+            u8::try_from(index).map_err(|_| format!("matmul batch index too large: {}", index))?;
         if slot >= 8 {
-            return Err(format!("matmul batch supports at most 8 outputs, got {}", index + 1));
+            return Err(format!(
+                "matmul batch supports at most 8 outputs, got {}",
+                index + 1
+            ));
         }
-        Ok(128u8
-            .wrapping_add(base.wrapping_mul(8))
-            .wrapping_add(slot))
+        Ok(128u8.wrapping_add(base.wrapping_mul(8)).wrapping_add(slot))
     }
 
     fn flash_attn_ext_extra_pad_bytes(

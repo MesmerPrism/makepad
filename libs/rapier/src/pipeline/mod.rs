@@ -5,8 +5,8 @@ pub use event_handler::{ActiveEvents, ChannelEventCollector, EventHandler};
 pub use physics_hooks::{ActiveHooks, ContactModificationContext, PairFilterContext, PhysicsHooks};
 pub use physics_pipeline::PhysicsPipeline;
 pub use query_pipeline::{
-    sync_query_pipeline_after_collider_user_changes, QueryFilter, QueryFilterFlags,
-    QueryPipeline, QueryPipelineMut,
+    QueryFilter, QueryFilterFlags, QueryPipeline, QueryPipelineMut,
+    sync_query_pipeline_after_collider_user_changes,
 };
 
 #[cfg(feature = "debug-render")]

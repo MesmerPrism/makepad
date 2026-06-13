@@ -60,36 +60,37 @@ fn run_capture(args: &[String]) -> Result<(), ProfilerError> {
     while index < args.len() {
         match args[index].as_str() {
             "--pid" => {
-                process_id = Some(parse_value(args, &mut index, "--pid")?.parse::<u32>().map_err(
-                    |err| ProfilerError::new(format!("invalid --pid value: {}", err)),
-                )?);
+                process_id = Some(
+                    parse_value(args, &mut index, "--pid")?
+                        .parse::<u32>()
+                        .map_err(|err| {
+                            ProfilerError::new(format!("invalid --pid value: {}", err))
+                        })?,
+                );
             }
             "--output" => {
                 output = Some(PathBuf::from(parse_value(args, &mut index, "--output")?));
             }
             "--duration-ms" => {
-                duration_ms =
-                    parse_value(args, &mut index, "--duration-ms")?
-                        .parse::<u64>()
-                        .map_err(|err| {
-                            ProfilerError::new(format!("invalid --duration-ms value: {}", err))
-                        })?;
+                duration_ms = parse_value(args, &mut index, "--duration-ms")?
+                    .parse::<u64>()
+                    .map_err(|err| {
+                        ProfilerError::new(format!("invalid --duration-ms value: {}", err))
+                    })?;
             }
             "--interval-us" => {
-                interval_us =
-                    parse_value(args, &mut index, "--interval-us")?
-                        .parse::<u64>()
-                        .map_err(|err| {
-                            ProfilerError::new(format!("invalid --interval-us value: {}", err))
-                        })?;
+                interval_us = parse_value(args, &mut index, "--interval-us")?
+                    .parse::<u64>()
+                    .map_err(|err| {
+                        ProfilerError::new(format!("invalid --interval-us value: {}", err))
+                    })?;
             }
             "--max-frames" => {
-                max_frames =
-                    parse_value(args, &mut index, "--max-frames")?
-                        .parse::<usize>()
-                        .map_err(|err| {
-                            ProfilerError::new(format!("invalid --max-frames value: {}", err))
-                        })?;
+                max_frames = parse_value(args, &mut index, "--max-frames")?
+                    .parse::<usize>()
+                    .map_err(|err| {
+                        ProfilerError::new(format!("invalid --max-frames value: {}", err))
+                    })?;
             }
             "--no-images" => {
                 include_images = false;
@@ -216,9 +217,9 @@ fn run_record(args: &[String]) -> Result<(), ProfilerError> {
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    let mut child = command.spawn().map_err(|err| {
-        ProfilerError::new(format!("failed to launch `{}`: {}", program, err))
-    })?;
+    let mut child = command
+        .spawn()
+        .map_err(|err| ProfilerError::new(format!("failed to launch `{}`: {}", program, err)))?;
 
     // Let the child exec and settle before we resolve its task port and
     // capture the first loaded-image snapshot.
@@ -398,7 +399,9 @@ fn run_demo_target(args: &[String]) -> Result<(), ProfilerError> {
             "--threads" => {
                 threads = parse_value(args, &mut index, "--threads")?
                     .parse::<usize>()
-                    .map_err(|err| ProfilerError::new(format!("invalid --threads value: {}", err)))?;
+                    .map_err(|err| {
+                        ProfilerError::new(format!("invalid --threads value: {}", err))
+                    })?;
             }
             "--depth" => {
                 depth = parse_value(args, &mut index, "--depth")?
@@ -429,7 +432,9 @@ fn run_demo_target(args: &[String]) -> Result<(), ProfilerError> {
     let mut workers = Vec::new();
     for worker_index in 0..threads {
         let stop = Arc::clone(&stop);
-        workers.push(std::thread::spawn(move || busy_worker(worker_index as u64 + 1, depth, stop)));
+        workers.push(std::thread::spawn(move || {
+            busy_worker(worker_index as u64 + 1, depth, stop)
+        }));
     }
 
     if let Some(seconds) = seconds {

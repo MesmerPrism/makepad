@@ -1,4 +1,7 @@
-#[cfg(all(any(target_os = "linux", target_os = "windows"), makepad_ggml_cuda_kernels))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "windows"),
+    makepad_ggml_cuda_kernels
+))]
 mod imp {
     use crate::backend::{AffineQuantizedMatmulRowsSpec, AffineQuantizedMatmulSpec};
     use crate::quant::{
@@ -3367,7 +3370,12 @@ mod imp {
             self.prepare_device()?;
             let status = unsafe {
                 makepad_ggml_cuda_copy_f32(
-                    input.inner.ptr.as_ptr().cast::<f32>().add(input_offset_elems),
+                    input
+                        .inner
+                        .ptr
+                        .as_ptr()
+                        .cast::<f32>()
+                        .add(input_offset_elems),
                     output
                         .inner
                         .ptr
@@ -3658,15 +3666,7 @@ mod imp {
             z_width: usize,
             beta_width: usize,
         ) -> Result<(), String> {
-            self.qwen_split_recurrent_aux_f32_offsets(
-                input,
-                0,
-                z,
-                beta,
-                alpha,
-                z_width,
-                beta_width,
-            )
+            self.qwen_split_recurrent_aux_f32_offsets(input, 0, z, beta, alpha, z_width, beta_width)
         }
 
         pub fn qwen_split_recurrent_aux_f32_offsets(
@@ -3717,7 +3717,12 @@ mod imp {
             self.prepare_device()?;
             let status = unsafe {
                 makepad_ggml_cuda_qwen_split_recurrent_aux_rows_f32(
-                    input.inner.ptr.as_ptr().cast::<f32>().add(input_offset_elems),
+                    input
+                        .inner
+                        .ptr
+                        .as_ptr()
+                        .cast::<f32>()
+                        .add(input_offset_elems),
                     z.inner.ptr.as_ptr().cast::<f32>(),
                     beta.inner.ptr.as_ptr().cast::<f32>(),
                     alpha.inner.ptr.as_ptr().cast::<f32>(),
@@ -6916,7 +6921,10 @@ mod imp {
     use std::mem::size_of;
 }
 
-#[cfg(not(all(any(target_os = "linux", target_os = "windows"), makepad_ggml_cuda_kernels)))]
+#[cfg(not(all(
+    any(target_os = "linux", target_os = "windows"),
+    makepad_ggml_cuda_kernels
+)))]
 mod imp {
     use crate::backend::{AffineQuantizedMatmulRowsSpec, AffineQuantizedMatmulSpec};
 

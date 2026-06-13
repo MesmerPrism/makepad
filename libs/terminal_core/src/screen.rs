@@ -680,7 +680,10 @@ impl Screen {
                 }
 
                 self.cursor.y = self.cursor.y.saturating_sub(copy_start).min(new_rows - 1);
-                self.high_water_row = self.high_water_row.saturating_sub(copy_start).min(new_rows - 1);
+                self.high_water_row = self
+                    .high_water_row
+                    .saturating_sub(copy_start)
+                    .min(new_rows - 1);
                 if let Some(saved) = &mut self.saved_cursor {
                     saved.y = saved.y.saturating_sub(copy_start).min(new_rows - 1);
                 }

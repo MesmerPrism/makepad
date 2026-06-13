@@ -656,7 +656,8 @@ preview(final_case)
 
     #[test]
     fn chained_cylinder_transform_renders() {
-        let source = "render(cylinder(0.24, 1.4, 56, true).rotate_x(90.0).translate(-0.7, 2.3, 0.0))";
+        let source =
+            "render(cylinder(0.24, 1.4, 56, true).rotate_x(90.0).translate(-0.7, 2.3, 0.0))";
         let solid = eval_cad_script(source, false).unwrap();
 
         assert_eq!(solid.triangle_count(), 64);

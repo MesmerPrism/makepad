@@ -34,15 +34,18 @@ pub(crate) const POW10: [usize; 20] = {
         index -= 1;
         array[index] = pow10;
 
-        if index == 0 { break }
+        if index == 0 {
+            break;
+        }
 
         let (new_power, overflow) = pow10.overflowing_mul(10);
         pow10 = new_power;
-        if overflow { break; }
+        if overflow {
+            break;
+        }
     }
 
     array
-
 };
 
 /// Parse the input to integer; or otherwise cause
@@ -51,7 +54,9 @@ pub(crate) const fn parse_unwarp(b: &str) -> usize {
     match parse(b) {
         Ok(t) => t,
         res @ Err(_) => {
-            [0, /* const error: failed to parse environment variable */][res.is_err() as usize]
+            [
+                0, /* const error: failed to parse environment variable */
+            ][res.is_err() as usize]
         }
     }
 }

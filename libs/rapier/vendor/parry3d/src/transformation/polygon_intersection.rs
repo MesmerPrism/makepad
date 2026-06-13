@@ -1,6 +1,6 @@
 use crate::math::Vector2;
-use alloc::{vec, vec::Vec};
 use alloc::format;
+use alloc::{vec, vec::Vec};
 
 use crate::math::Real;
 use crate::shape::{SegmentPointLocation, Triangle, TriangleOrientation};

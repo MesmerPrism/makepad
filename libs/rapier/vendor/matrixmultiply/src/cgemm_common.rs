@@ -11,33 +11,26 @@ use core::ptr::copy_nonoverlapping;
 
 use crate::ptr::PointerExt;
 
-use crate::kernel::Element;
 use crate::kernel::ConstNum;
+use crate::kernel::Element;
 
 #[cfg(feature = "std")]
 macro_rules! fmuladd {
     // conceptually $dst += $a * $b, optionally use fused multiply-add
-    (fma_yes, $dst:expr, $a:expr, $b:expr) => {
-        {
-            $dst = $a.mul_add($b, $dst);
-        }
-    };
-    (fma_no, $dst:expr, $a:expr, $b:expr) => {
-        {
-            $dst += $a * $b;
-        }
-    };
+    (fma_yes, $dst:expr, $a:expr, $b:expr) => {{
+        $dst = $a.mul_add($b, $dst);
+    }};
+    (fma_no, $dst:expr, $a:expr, $b:expr) => {{
+        $dst += $a * $b;
+    }};
 }
 
 #[cfg(not(feature = "std"))]
 macro_rules! fmuladd {
-    ($any:tt, $dst:expr, $a:expr, $b:expr) => {
-        {
-            $dst += $a * $b;
-        }
-    };
+    ($any:tt, $dst:expr, $a:expr, $b:expr) => {{
+        $dst += $a * $b;
+    }};
 }
-
 
 // kernel fallback impl macro
 // Depends on a couple of macro and function defitions to be in scope - loop_m/_n, at, etc.
@@ -108,21 +101,30 @@ macro_rules! kernel_fallback_impl_complex {
 macro_rules! pack_methods {
     () => {
         #[inline]
-        unsafe fn pack_mr(kc: usize, mc: usize, pack: &mut [Self::Elem],
-                          a: *const Self::Elem, rsa: isize, csa: isize)
-        {
+        unsafe fn pack_mr(
+            kc: usize,
+            mc: usize,
+            pack: &mut [Self::Elem],
+            a: *const Self::Elem,
+            rsa: isize,
+            csa: isize,
+        ) {
             pack_complex::<Self::MRTy, T, TReal>(kc, mc, pack, a, rsa, csa)
         }
 
         #[inline]
-        unsafe fn pack_nr(kc: usize, mc: usize, pack: &mut [Self::Elem],
-                        a: *const Self::Elem, rsa: isize, csa: isize)
-        {
+        unsafe fn pack_nr(
+            kc: usize,
+            mc: usize,
+            pack: &mut [Self::Elem],
+            a: *const Self::Elem,
+            rsa: isize,
+            csa: isize,
+        ) {
             pack_complex::<Self::NRTy, T, TReal>(kc, mc, pack, a, rsa, csa)
         }
-    }
+    };
 }
-
 
 /// Pack complex: similar to general packing but separate rows for real and imag parts.
 ///
@@ -137,11 +139,17 @@ macro_rules! pack_methods {
 ///   qy q_ q_ q_ .. (y = 2 * MR)
 ///   ...
 /// ]
-pub(crate) unsafe fn pack_complex<MR, T, TReal>(kc: usize, mc: usize, pack: &mut [T],
-                                                a: *const T, rsa: isize, csa: isize)
-    where MR: ConstNum,
-          T: Element,
-          TReal: Element,
+pub(crate) unsafe fn pack_complex<MR, T, TReal>(
+    kc: usize,
+    mc: usize,
+    pack: &mut [T],
+    a: *const T,
+    rsa: isize,
+    csa: isize,
+) where
+    MR: ConstNum,
+    T: Element,
+    TReal: Element,
 {
     // use pointers as pointer to TReal
     let pack = pack.as_mut_ptr() as *mut TReal;
@@ -154,20 +162,22 @@ pub(crate) unsafe fn pack_complex<MR, T, TReal>(kc: usize, mc: usize, pack: &mut
     let mut p = 0; // offset into pack
 
     // general layout case (no contig case when stride != 1)
-    for ir in 0..mc/mr {
+    for ir in 0..mc / mr {
         let row_offset = ir * mr;
         for j in 0..kc {
             // real row
             for i in 0..mr {
-                let a_elt = areal.stride_offset(2 * rsa, i + row_offset)
-                                 .stride_offset(2 * csa, j);
+                let a_elt = areal
+                    .stride_offset(2 * rsa, i + row_offset)
+                    .stride_offset(2 * csa, j);
                 copy_nonoverlapping(a_elt, pack.add(p), 1);
                 p += 1;
             }
             // imag row
             for i in 0..mr {
-                let a_elt = aimag.stride_offset(2 * rsa, i + row_offset)
-                                 .stride_offset(2 * csa, j);
+                let a_elt = aimag
+                    .stride_offset(2 * rsa, i + row_offset)
+                    .stride_offset(2 * csa, j);
                 copy_nonoverlapping(a_elt, pack.add(p), 1);
                 p += 1;
             }
@@ -179,13 +189,14 @@ pub(crate) unsafe fn pack_complex<MR, T, TReal>(kc: usize, mc: usize, pack: &mut
     // Pad with zeros to multiple of kernel size (uneven mc)
     let rest = mc % mr;
     if rest > 0 {
-        let row_offset = (mc/mr) * mr;
+        let row_offset = (mc / mr) * mr;
         for j in 0..kc {
             // real row
             for i in 0..mr {
                 if i < rest {
-                    let a_elt = areal.stride_offset(2 * rsa, i + row_offset)
-                                     .stride_offset(2 * csa, j);
+                    let a_elt = areal
+                        .stride_offset(2 * rsa, i + row_offset)
+                        .stride_offset(2 * csa, j);
                     copy_nonoverlapping(a_elt, pack.add(p), 1);
                 } else {
                     *pack.add(p) = zero;
@@ -195,8 +206,9 @@ pub(crate) unsafe fn pack_complex<MR, T, TReal>(kc: usize, mc: usize, pack: &mut
             // imag row
             for i in 0..mr {
                 if i < rest {
-                    let a_elt = aimag.stride_offset(2 * rsa, i + row_offset)
-                                     .stride_offset(2 * csa, j);
+                    let a_elt = aimag
+                        .stride_offset(2 * rsa, i + row_offset)
+                        .stride_offset(2 * csa, j);
                     copy_nonoverlapping(a_elt, pack.add(p), 1);
                 } else {
                     *pack.add(p) = zero;

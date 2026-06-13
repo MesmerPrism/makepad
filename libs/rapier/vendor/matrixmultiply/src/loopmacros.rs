@@ -10,67 +10,131 @@
 
 #[cfg(not(debug_assertions))]
 macro_rules! repeat {
-    (1 $e:expr) => { $e; };
-    (2 $e:expr) => { $e;$e; };
-    (3 $e:expr) => { $e;$e; $e; };
-    (4 $e:expr) => { $e;$e; $e;$e; };
-    (5 $e:expr) => { $e;$e; $e;$e; $e; };
-    (6 $e:expr) => { $e;$e; $e;$e; $e;$e; };
-    (7 $e:expr) => { $e;$e; $e;$e; $e;$e; $e; };
-    (8 $e:expr) => { $e;$e; $e;$e; $e;$e; $e;$e; };
+    (1 $e:expr) => {
+        $e;
+    };
+    (2 $e:expr) => {
+        $e;
+        $e;
+    };
+    (3 $e:expr) => {
+        $e;
+        $e;
+        $e;
+    };
+    (4 $e:expr) => {
+        $e;
+        $e;
+        $e;
+        $e;
+    };
+    (5 $e:expr) => {
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+    };
+    (6 $e:expr) => {
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+    };
+    (7 $e:expr) => {
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+    };
+    (8 $e:expr) => {
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+        $e;
+    };
 }
 
 #[cfg(debug_assertions)]
 macro_rules! loop4 {
     ($i:ident, $e:expr) => {
-        for $i in 0..4 { $e }
-    }
+        for $i in 0..4 {
+            $e
+        }
+    };
 }
 
 #[cfg(feature = "cgemm")]
 macro_rules! loop2 {
     ($i:ident, $e:expr) => {{
-        let $i = 0; $e;
-        let $i = 1; $e;
-    }}
+        let $i = 0;
+        $e;
+        let $i = 1;
+        $e;
+    }};
 }
 
 #[cfg(not(debug_assertions))]
 macro_rules! loop4 {
     ($i:ident, $e:expr) => {{
-        let $i = 0; $e;
-        let $i = 1; $e;
-        let $i = 2; $e;
-        let $i = 3; $e;
-    }}
+        let $i = 0;
+        $e;
+        let $i = 1;
+        $e;
+        let $i = 2;
+        $e;
+        let $i = 3;
+        $e;
+    }};
 }
 
 #[cfg(debug_assertions)]
 macro_rules! loop8 {
     ($i:ident, $e:expr) => {
-        for $i in 0..8 { $e }
-    }
+        for $i in 0..8 {
+            $e
+        }
+    };
 }
 
 #[cfg(not(debug_assertions))]
 macro_rules! loop8 {
     ($i:ident, $e:expr) => {{
-        let $i = 0; $e;
-        let $i = 1; $e;
-        let $i = 2; $e;
-        let $i = 3; $e;
-        let $i = 4; $e;
-        let $i = 5; $e;
-        let $i = 6; $e;
-        let $i = 7; $e;
-    }}
+        let $i = 0;
+        $e;
+        let $i = 1;
+        $e;
+        let $i = 2;
+        $e;
+        let $i = 3;
+        $e;
+        let $i = 4;
+        $e;
+        let $i = 5;
+        $e;
+        let $i = 6;
+        $e;
+        let $i = 7;
+        $e;
+    }};
 }
 
 #[cfg(debug_assertions)]
 macro_rules! unroll_by {
     ($by:tt => $ntimes:expr, $e:expr) => {
-        for _ in 0..$ntimes { $e }
-    }
+        for _ in 0..$ntimes {
+            $e
+        }
+    };
 }
 
 #[cfg(not(debug_assertions))]
@@ -107,7 +171,7 @@ macro_rules! unroll_by_with_last {
         let $is_last = true;
         #[allow(unused_assignments)]
         $e;
-    }}
+    }};
 }
 
 #[allow(unused)]

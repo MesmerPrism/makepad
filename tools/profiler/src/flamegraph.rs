@@ -95,8 +95,7 @@ fn render_flamegraph(stacks: &[FoldedStack], options: &FlamegraphOptions) -> Str
     let _ = writeln!(
         svg,
         "<rect x=\"0\" y=\"0\" width=\"{:.0}\" height=\"{:.0}\" fill=\"#fff7ef\" />",
-        canvas_width,
-        canvas_height
+        canvas_width, canvas_height
     );
     let _ = writeln!(
         svg,

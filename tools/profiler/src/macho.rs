@@ -365,7 +365,10 @@ fn read_string_table_entry(string_table: &[u8], offset: usize) -> Result<String,
 }
 
 fn c_string_16(bytes: &[u8; 16]) -> &str {
-    let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
     std::str::from_utf8(&bytes[..end]).unwrap_or("")
 }
 
@@ -425,7 +428,10 @@ fn demangle_legacy_rust_symbol(name: &str) -> Option<String> {
 
 fn decode_legacy_rust_component(component: &str) -> String {
     let mut decoded = String::new();
-    let mut cursor = component.strip_prefix("_$").map(|rest| &component[1..]).unwrap_or(component);
+    let mut cursor = component
+        .strip_prefix("_$")
+        .map(|rest| &component[1..])
+        .unwrap_or(component);
 
     while let Some(start) = cursor.find('$') {
         decoded.push_str(&cursor[..start]);

@@ -159,7 +159,10 @@ fn build_speech_bridge(target_os: &str) -> bool {
     let status = match Command::new("swiftc").args(swift_args).status() {
         Ok(status) => status,
         Err(err) => {
-            println!("cargo:warning=failed to run swiftc for speech bridge: {}", err);
+            println!(
+                "cargo:warning=failed to run swiftc for speech bridge: {}",
+                err
+            );
             return false;
         }
     };

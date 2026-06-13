@@ -134,7 +134,11 @@ impl TraceFile {
 
     pub fn read_from_path(path: &Path) -> Result<Self, ProfilerError> {
         let json = std::fs::read_to_string(path).map_err(|err| {
-            ProfilerError::new(format!("failed to read trace file {}: {}", path.display(), err))
+            ProfilerError::new(format!(
+                "failed to read trace file {}: {}",
+                path.display(),
+                err
+            ))
         })?;
         TraceFile::deserialize_json(&json)
             .map_err(|err| ProfilerError::new(format!("failed to parse trace file: {:?}", err)))
@@ -142,7 +146,11 @@ impl TraceFile {
 
     pub fn write_to_path(&self, path: &Path) -> Result<(), ProfilerError> {
         std::fs::write(path, self.serialize_json()).map_err(|err| {
-            ProfilerError::new(format!("failed to write trace file {}: {}", path.display(), err))
+            ProfilerError::new(format!(
+                "failed to write trace file {}: {}",
+                path.display(),
+                err
+            ))
         })
     }
 
@@ -159,17 +167,17 @@ impl TraceFile {
                 let unique_frames: HashSet<u32> = thread.frames.iter().copied().collect();
                 match classify_thread(thread, &self.symbols) {
                     Some(ThreadDisposition::Running) => {
-                    total_running_samples += 1;
-                    if let Some(top) = thread.frames.first() {
-                        if let Some(entry) = counts.get_mut(*top as usize) {
-                            entry.exclusive_samples += 1;
+                        total_running_samples += 1;
+                        if let Some(top) = thread.frames.first() {
+                            if let Some(entry) = counts.get_mut(*top as usize) {
+                                entry.exclusive_samples += 1;
+                            }
                         }
-                    }
-                    for symbol_id in unique_frames {
-                        if let Some(entry) = counts.get_mut(symbol_id as usize) {
-                            entry.inclusive_samples += 1;
+                        for symbol_id in unique_frames {
+                            if let Some(entry) = counts.get_mut(symbol_id as usize) {
+                                entry.inclusive_samples += 1;
+                            }
                         }
-                    }
                     }
                     Some(ThreadDisposition::Blocked) => {
                         for symbol_id in unique_frames {
@@ -191,7 +199,10 @@ impl TraceFile {
             let Some(count) = counts.get(symbol.id as usize) else {
                 continue;
             };
-            if count.exclusive_samples == 0 && count.inclusive_samples == 0 && count.blocked_samples == 0 {
+            if count.exclusive_samples == 0
+                && count.inclusive_samples == 0
+                && count.blocked_samples == 0
+            {
                 continue;
             }
 
@@ -318,7 +329,9 @@ fn looks_blocked_symbol(name: &str) -> bool {
         "accept",
     ];
 
-    BLOCKED_PATTERNS.iter().any(|pattern| name.contains(pattern))
+    BLOCKED_PATTERNS
+        .iter()
+        .any(|pattern| name.contains(pattern))
 }
 
 #[cfg(test)]

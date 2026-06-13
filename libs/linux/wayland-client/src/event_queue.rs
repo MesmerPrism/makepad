@@ -195,12 +195,18 @@ type QueueCallback<State> = fn(
     &QueueHandle<State>,
 ) -> Result<(), DispatchError>;
 
-struct QueueEvent<State>(QueueCallback<State>, Message<ObjectId, OwnedFd>, Arc<dyn ObjectData>);
+struct QueueEvent<State>(
+    QueueCallback<State>,
+    Message<ObjectId, OwnedFd>,
+    Arc<dyn ObjectData>,
+);
 
 impl<State> std::fmt::Debug for QueueEvent<State> {
     #[cfg_attr(unstable_coverage, coverage(off))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QueueEvent").field("msg", &self.1).finish_non_exhaustive()
+        f.debug_struct("QueueEvent")
+            .field("msg", &self.1)
+            .finish_non_exhaustive()
     }
 }
 
@@ -350,7 +356,9 @@ impl<State> EventQueueInner<State> {
 impl<State> std::fmt::Debug for EventQueue<State> {
     #[cfg_attr(unstable_coverage, coverage(off))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EventQueue").field("handle", &self.handle).finish_non_exhaustive()
+        f.debug_struct("EventQueue")
+            .field("handle", &self.handle)
+            .finish_non_exhaustive()
     }
 }
 
@@ -368,7 +376,10 @@ impl<State> EventQueue<State> {
             freeze_count: 0,
             waker: None,
         }));
-        Self { handle: QueueHandle { inner }, conn }
+        Self {
+            handle: QueueHandle { inner },
+            conn,
+        }
     }
 
     /// Get a [`QueueHandle`] for this event queue
@@ -488,7 +499,9 @@ impl<State> EventQueue<State> {
     fn try_next(inner: &Mutex<EventQueueInner<State>>) -> Option<QueueEvent<State>> {
         let mut lock = inner.lock().unwrap();
         if lock.freeze_count != 0 && !lock.queue.is_empty() {
-            let waker = Arc::new(DispatchWaker { cond: Condvar::new() });
+            let waker = Arc::new(DispatchWaker {
+                cond: Condvar::new(),
+            });
             while lock.freeze_count != 0 {
                 lock.waker = Some(waker.clone().into());
                 lock = waker.cond.wait(lock).unwrap();
@@ -592,13 +605,17 @@ pub struct QueueFreezeGuard<'a, State> {
 impl<State> std::fmt::Debug for QueueHandle<State> {
     #[cfg_attr(unstable_coverage, coverage(off))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QueueHandle").field("inner", &Arc::as_ptr(&self.inner)).finish()
+        f.debug_struct("QueueHandle")
+            .field("inner", &Arc::as_ptr(&self.inner))
+            .finish()
     }
 }
 
 impl<State> Clone for QueueHandle<State> {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -656,7 +673,10 @@ fn queue_callback<
     qhandle: &QueueHandle<State>,
 ) -> Result<(), DispatchError> {
     let (proxy, event) = I::parse_event(handle, msg)?;
-    let udata = odata.data_as_any().downcast_ref().expect("Wrong user_data value for object");
+    let udata = odata
+        .data_as_any()
+        .downcast_ref()
+        .expect("Wrong user_data value for object");
     <State as Dispatch<I, U, State>>::event(data, &proxy, event, udata, handle, qhandle);
     Ok(())
 }
@@ -684,7 +704,11 @@ where
             .any(|arg| matches!(arg, Argument::NewId(id) if !id.is_null()))
             .then(|| State::event_created_child(msg.opcode, &self.handle));
 
-        self.handle.inner.lock().unwrap().enqueue_event::<I, U>(msg, self.clone());
+        self.handle
+            .inner
+            .lock()
+            .unwrap()
+            .enqueue_event::<I, U>(msg, self.clone());
 
         new_data
     }
@@ -699,7 +723,9 @@ where
 impl<I: Proxy, U: std::fmt::Debug, State> std::fmt::Debug for QueueProxyData<I, U, State> {
     #[cfg_attr(unstable_coverage, coverage(off))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QueueProxyData").field("udata", &self.udata).finish()
+        f.debug_struct("QueueProxyData")
+            .field("udata", &self.udata)
+            .finish()
     }
 }
 

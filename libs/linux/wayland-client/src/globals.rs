@@ -84,7 +84,9 @@ where
     let event_queue = conn.new_event_queue();
     let display = conn.display();
     let data = Arc::new(RegistryState {
-        globals: GlobalListContents { contents: Default::default() },
+        globals: GlobalListContents {
+            contents: Default::default(),
+        },
         handle: event_queue.handle(),
         initial_roundtrip_done: AtomicBool::new(false),
     });
@@ -155,14 +157,20 @@ impl GlobalList {
         let (name, version) = guard
             .iter()
             // Find the with the correct interface
-            .filter_map(|Global { name, interface: interface_name, version }| {
-                // TODO: then_some
-                if interface.name == &interface_name[..] {
-                    Some((*name, *version))
-                } else {
-                    None
-                }
-            })
+            .filter_map(
+                |Global {
+                     name,
+                     interface: interface_name,
+                     version,
+                 }| {
+                    // TODO: then_some
+                    if interface.name == &interface_name[..] {
+                        Some((*name, *version))
+                    } else {
+                        None
+                    }
+                },
+            )
             .next()
             .ok_or(BindError::NotPresent)?;
 
@@ -326,9 +334,17 @@ where
         // Can't do much if the server sends a malformed message
         if let Ok((_, event)) = wl_registry::WlRegistry::parse_event(&conn, msg) {
             match event {
-                wl_registry::Event::Global { name, interface, version } => {
+                wl_registry::Event::Global {
+                    name,
+                    interface,
+                    version,
+                } => {
                     let mut guard = self.globals.contents.lock().unwrap();
-                    guard.push(Global { name, interface, version });
+                    guard.push(Global {
+                        name,
+                        interface,
+                        version,
+                    });
                 }
 
                 wl_registry::Event::GlobalRemove { name: remove } => {

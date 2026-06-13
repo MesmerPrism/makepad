@@ -487,8 +487,8 @@ fn sample_thread(task: &TaskPort, thread: thread_act_t, max_frames: usize) -> Th
 
 fn read_thread_basic_info(thread: thread_act_t) -> Result<thread_basic_info_data_t, ProfilerError> {
     let mut info = MaybeUninit::<thread_basic_info_data_t>::zeroed();
-    let mut count = (size_of::<thread_basic_info_data_t>() / size_of::<natural_t>())
-        as mach_msg_type_number_t;
+    let mut count =
+        (size_of::<thread_basic_info_data_t>() / size_of::<natural_t>()) as mach_msg_type_number_t;
     let status = unsafe {
         thread_info(
             thread,
@@ -500,7 +500,10 @@ fn read_thread_basic_info(thread: thread_act_t) -> Result<thread_basic_info_data
     if status != KERN_SUCCESS {
         return Err(mach_error(
             status,
-            format!("thread_info(THREAD_BASIC_INFO) failed for thread {}", thread),
+            format!(
+                "thread_info(THREAD_BASIC_INFO) failed for thread {}",
+                thread
+            ),
         ));
     }
     Ok(unsafe { info.assume_init() })
@@ -521,7 +524,10 @@ fn read_thread_identifier(thread: thread_act_t) -> Result<u64, ProfilerError> {
     if status != KERN_SUCCESS {
         return Err(mach_error(
             status,
-            format!("thread_info(THREAD_IDENTIFIER_INFO) failed for thread {}", thread),
+            format!(
+                "thread_info(THREAD_IDENTIFIER_INFO) failed for thread {}",
+                thread
+            ),
         ));
     }
     Ok(unsafe { info.assume_init() }.thread_id)

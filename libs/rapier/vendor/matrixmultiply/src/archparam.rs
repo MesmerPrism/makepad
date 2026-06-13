@@ -20,7 +20,7 @@ macro_rules! conf_env_or_default {
             Some(x) => parse_unwarp(x),
             None => $default,
         }
-    }
+    };
 }
 
 pub(crate) const S_NC: usize = conf_env_or_default!("MATMUL_SGEMM_NC", archparam_defaults::S_NC);

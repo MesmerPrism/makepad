@@ -54,8 +54,12 @@ fn main() {
             .ok()
             .or_else(|| detect_app_name(Path::new(&out_dir)))
             .unwrap_or_else(|| "Makepad App".to_string());
-        let bundle_id = env::var("MAKEPAD_BUNDLE_IDENTIFIER")
-            .unwrap_or_else(|_| format!("dev.makepad.{}", bundle_name.to_lowercase().replace(' ', "-")));
+        let bundle_id = env::var("MAKEPAD_BUNDLE_IDENTIFIER").unwrap_or_else(|_| {
+            format!(
+                "dev.makepad.{}",
+                bundle_name.to_lowercase().replace(' ', "-")
+            )
+        });
         let command_line_plist = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -926,11 +926,7 @@ pub trait WriteBytesExt: io::Write {
     /// assert_eq!(wtr, b"\x48\xc5\x74\x62\xe9\x00\x00\x00\x00\x2b");
     /// ```
     #[inline]
-    fn write_uint<T: ByteOrder>(
-        &mut self,
-        n: u64,
-        nbytes: usize,
-    ) -> Result<()> {
+    fn write_uint<T: ByteOrder>(&mut self, n: u64, nbytes: usize) -> Result<()> {
         let mut buf = [0; 8];
         T::write_uint(&mut buf, n, nbytes);
         self.write_all(&buf[0..nbytes])
@@ -962,11 +958,7 @@ pub trait WriteBytesExt: io::Write {
     /// assert_eq!(wtr, b"\xf3\x64\xf4\xd1\xfd\xb0\x81\x00\x00\x00\x00\x00\x00\x2b");
     /// ```
     #[inline]
-    fn write_int<T: ByteOrder>(
-        &mut self,
-        n: i64,
-        nbytes: usize,
-    ) -> Result<()> {
+    fn write_int<T: ByteOrder>(&mut self, n: i64, nbytes: usize) -> Result<()> {
         let mut buf = [0; 8];
         T::write_int(&mut buf, n, nbytes);
         self.write_all(&buf[0..nbytes])
@@ -977,11 +969,7 @@ pub trait WriteBytesExt: io::Write {
     /// If the given integer is not representable in the given number of bytes,
     /// this method panics. If `nbytes > 16`, this method panics.
     #[inline]
-    fn write_uint128<T: ByteOrder>(
-        &mut self,
-        n: u128,
-        nbytes: usize,
-    ) -> Result<()> {
+    fn write_uint128<T: ByteOrder>(&mut self, n: u128, nbytes: usize) -> Result<()> {
         let mut buf = [0; 16];
         T::write_uint128(&mut buf, n, nbytes);
         self.write_all(&buf[0..nbytes])
@@ -992,11 +980,7 @@ pub trait WriteBytesExt: io::Write {
     /// If the given integer is not representable in the given number of bytes,
     /// this method panics. If `nbytes > 16`, this method panics.
     #[inline]
-    fn write_int128<T: ByteOrder>(
-        &mut self,
-        n: i128,
-        nbytes: usize,
-    ) -> Result<()> {
+    fn write_int128<T: ByteOrder>(&mut self, n: i128, nbytes: usize) -> Result<()> {
         let mut buf = [0; 16];
         T::write_int128(&mut buf, n, nbytes);
         self.write_all(&buf[0..nbytes])

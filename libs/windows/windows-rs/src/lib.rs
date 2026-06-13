@@ -17,5 +17,4 @@ extern crate self as windows;
 
 pub use windows_core as core;
 
-
 include!("Windows/mod.rs");

@@ -6,7 +6,7 @@ use core::arch::x86::{__cpuid, __cpuid_count, _xgetbv, CpuidResult};
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::{__cpuid, __cpuid_count, _xgetbv, CpuidResult};
 
-use crate::support::feature_detect::{Flags, get_or_init_flags_cache, unique_masks};
+use crate::support::feature_detect::{get_or_init_flags_cache, unique_masks, Flags};
 
 /// CPU features that get cached (doesn't correlate to anything on the CPU).
 pub mod cpu_flags {

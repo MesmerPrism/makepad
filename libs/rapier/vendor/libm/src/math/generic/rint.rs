@@ -35,7 +35,11 @@ pub fn rint_round<F: Float>(x: F, _round: Round) -> FpResult<F> {
 
         if y == F::ZERO {
             // A zero result takes the sign of the input.
-            if positive { F::ZERO } else { F::NEG_ZERO }
+            if positive {
+                F::ZERO
+            } else {
+                F::NEG_ZERO
+            }
         } else {
             y
         }
