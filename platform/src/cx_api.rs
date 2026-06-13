@@ -627,7 +627,7 @@ pub struct XrGpuF32FieldSampleProbeResult {
     pub elapsed_ms: f64,
 }
 
-pub const XR_GPU_F32_FIELD_FORCE_SAMPLE_PROBE_SAMPLES: usize = 4;
+pub const XR_GPU_F32_FIELD_FORCE_SAMPLE_PROBE_SAMPLES: usize = 16;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct XrGpuF32FieldForceSampleProbeResult {

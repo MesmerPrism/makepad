@@ -20,8 +20,8 @@ struct ForceProbeSample {
 };
 
 @group(0) @binding(0) var<storage, read> sdf_distances: array<f32>;
-@group(0) @binding(1) var<storage, read> input_samples: array<ForceProbeSample, 4>;
-@group(0) @binding(2) var<storage, read_write> output_accelerations: array<vec4<f32>, 4>;
+@group(0) @binding(1) var<storage, read> input_samples: array<ForceProbeSample, 16>;
+@group(0) @binding(2) var<storage, read_write> output_accelerations: array<vec4<f32>, 16>;
 @group(0) @binding(3) var<storage, read> params: array<vec4<u32>, 1>;
 @group(0) @binding(4) var<storage, read> grid: array<vec4<f32>, 1>;
 
@@ -67,7 +67,7 @@ fn normalize_or(vector: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
     return vector / length_value;
 }
 
-@compute @workgroup_size(4)
+@compute @workgroup_size(16)
 fn force_sample_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
     let sample_count = params[0].x;
