@@ -1,15 +1,16 @@
 use crate::{
     cx_api::{
         XrGpuF32VolumeImagePreviewOutput, XrGpuF32VolumeImagePreviewPixel,
-        XrGpuF32VolumeImagePreviewResult, XrGpuF32VolumeImagePreviewTicket,
-        XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS,
+        XrGpuF32VolumeImagePreviewResult, XrGpuF32VolumeImagePreviewTextureAdoption,
+        XrGpuF32VolumeImagePreviewTicket, XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS,
     },
     os::linux::vulkan_naga::compile_compute_wgsl_to_spirv,
+    texture::TextureId,
 };
 use ash::vk;
 use std::time::Instant;
 
-use super::{CxVulkan, VulkanBuffer};
+use super::{CxVulkan, VulkanBuffer, VulkanTextureResource};
 
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_ENTRY: &str = "compute_main";
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_ENTRY: &str = "sample_main";
@@ -1084,6 +1085,104 @@ impl CxVulkan {
                 "get_fence_status(f32 volume image preview {request_id}) failed: {err:?}"
             )),
         }
+    }
+
+    pub(crate) fn adopt_xr_f32_volume_image_preview_texture(
+        &mut self,
+        request_id: u64,
+        texture_id: TextureId,
+    ) -> Result<XrGpuF32VolumeImagePreviewTextureAdoption, String> {
+        let resource_index = self
+            .xr_f32_volume_image_preview_resources
+            .iter()
+            .position(|resource| resource.request_id == request_id)
+            .ok_or_else(|| format!("f32 volume image preview {request_id} was not found"))?;
+        let texture_key = Self::texture_key(texture_id);
+        let (
+            image_width,
+            image_height,
+            image_layers,
+            queue_submit_serial,
+            resource_generation,
+            image,
+        ) = {
+            let resource = self
+                .xr_f32_volume_image_preview_resources
+                .get_mut(resource_index)
+                .ok_or_else(|| "f32 volume image preview resource index is stale".to_string())?;
+            if !resource.completed {
+                return Err(format!(
+                    "f32 volume image preview {request_id} is not complete"
+                ));
+            }
+            if resource.image.image == vk::Image::null() {
+                return Err(format!(
+                    "f32 volume image preview {request_id} image was already adopted"
+                ));
+            }
+            let empty_image = VulkanXrF32VolumeImagePreviewImage {
+                image: vk::Image::null(),
+                memory: vk::DeviceMemory::null(),
+                view: vk::ImageView::null(),
+                width: resource.image.width,
+                height: resource.image.height,
+                layers: resource.image.layers,
+            };
+            (
+                resource.image_width,
+                resource.image_height,
+                resource.image_layers,
+                resource.queue_submit_serial,
+                resource.resource_generation,
+                std::mem::replace(&mut resource.image, empty_image),
+            )
+        };
+
+        let texture_resource_generation = self.textures.len() as u64 + 1;
+        let replaced_existing_texture_resource =
+            if let Some(old_resource) = self.textures.remove(&texture_key) {
+                self.retire_texture_resource(old_resource);
+                true
+            } else {
+                false
+            };
+        self.textures.insert(
+            texture_key,
+            VulkanTextureResource {
+                image: image.image,
+                memory: image.memory,
+                view: image.view,
+                face_views: [vk::ImageView::null(); 6],
+                width: image.width,
+                height: image.height,
+                layers: image.layers,
+                is_cube: false,
+                format: XR_GPU_F32_VOLUME_IMAGE_PREVIEW_FORMAT,
+                layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                hardware_buffer: None,
+                sampler: None,
+                ycbcr_conversion: None,
+                ycbcr_conversion_metadata: None,
+                owns_sampler_ycbcr_conversion: false,
+                owns_image: true,
+            },
+        );
+
+        Ok(XrGpuF32VolumeImagePreviewTextureAdoption {
+            request_id,
+            texture_id,
+            image_width,
+            image_height,
+            image_layers,
+            queue_submit_serial,
+            resource_generation,
+            texture_resource_generation,
+            replaced_existing_texture_resource,
+            runtime_texture_bound: true,
+            cpu_texture_upload_performed: false,
+            zero_copy_vulkan_image: true,
+            image_ownership_transferred: true,
+        })
     }
 
     fn wait_xr_f32_volume_image_preview(

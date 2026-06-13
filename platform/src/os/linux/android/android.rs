@@ -38,10 +38,11 @@ use {
             XrGpuF32SkinningMeshProbeTicket, XrGpuF32SkinningMeshVertex,
             XrGpuF32SkinningProbeResult, XrGpuF32SkinningProbeSample, XrGpuF32SkinningProbeTicket,
             XrGpuF32VolumeImagePreviewPixel, XrGpuF32VolumeImagePreviewResult,
-            XrGpuF32VolumeImagePreviewTicket, XrGpuF32VolumeProbeResult, XrGpuF32VolumeProbeSample,
-            XrGpuF32VolumeProbeTicket, XrGpuF32VolumeRaymarchPreviewPixel,
-            XrGpuF32VolumeRaymarchPreviewResult, XrGpuF32VolumeRaymarchPreviewTicket,
-            XrGpuSkinningMeshTriangle, XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
+            XrGpuF32VolumeImagePreviewTextureAdoption, XrGpuF32VolumeImagePreviewTicket,
+            XrGpuF32VolumeProbeResult, XrGpuF32VolumeProbeSample, XrGpuF32VolumeProbeTicket,
+            XrGpuF32VolumeRaymarchPreviewPixel, XrGpuF32VolumeRaymarchPreviewResult,
+            XrGpuF32VolumeRaymarchPreviewTicket, XrGpuSkinningMeshTriangle,
+            XrGpuStorageBufferProbeResult, XrGpuU32ComputeProbeResult,
             XR_GPU_F32_FORCE_PROBE_SAMPLES, XR_GPU_F32_MESH_SDF_PROBE_SAMPLES,
             XR_GPU_F32_SKINNING_MESH_PROBE_SAMPLES, XR_GPU_F32_SKINNING_PROBE_SAMPLES,
             XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS, XR_GPU_F32_VOLUME_PROBE_SAMPLES,
@@ -4491,6 +4492,44 @@ impl CxOsApi for Cx {
         #[cfg(not(use_vulkan))]
         {
             let _ = request_id;
+            None
+        }
+    }
+
+    fn xr_gpu_f32_volume_image_preview_adopt_texture(
+        &mut self,
+        request_id: u64,
+        texture_id: TextureId,
+    ) -> Option<XrGpuF32VolumeImagePreviewTextureAdoption> {
+        if !self.os.in_xr_mode {
+            return None;
+        }
+        let platform_texture_ready = matches!(
+            self.textures[texture_id].format,
+            TextureFormat::PlatformRGBAf32 { .. }
+        );
+        if !platform_texture_ready {
+            crate::warning!(
+                "OpenXR Vulkan f32 stimulus volume image preview texture adoption requires TextureFormat::PlatformRGBAf32"
+            );
+            return None;
+        }
+        #[cfg(use_vulkan)]
+        {
+            let vulkan = self.os.vulkan.as_mut()?;
+            match vulkan.adopt_xr_f32_volume_image_preview_texture(request_id, texture_id) {
+                Ok(adoption) => Some(adoption),
+                Err(err) => {
+                    crate::warning!(
+                        "OpenXR Vulkan f32 stimulus volume image preview texture adoption failed: {err}"
+                    );
+                    None
+                }
+            }
+        }
+        #[cfg(not(use_vulkan))]
+        {
+            let _ = (request_id, texture_id);
             None
         }
     }

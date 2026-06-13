@@ -205,6 +205,12 @@ pub enum TextureFormat {
     /// Android/Vulkan camera texture backed by an imported RGBA
     /// `AHardwareBuffer`.
     VideoRgbaHardwareBuffer,
+    /// Platform-managed RGBA32F texture. The app owns the `TextureId`, while
+    /// the active renderer installs the backing GPU image directly.
+    PlatformRGBAf32 {
+        width: usize,
+        height: usize,
+    },
 }
 
 impl std::fmt::Debug for TextureFormat {
@@ -264,6 +270,10 @@ impl std::fmt::Debug for TextureFormat {
             TextureFormat::VideoRgbaHardwareBuffer => {
                 write!(f, "TextureFormat::VideoRgbaHardwareBuffer")
             }
+            TextureFormat::PlatformRGBAf32 { width, height } => write!(
+                f,
+                "TextureFormat::PlatformRGBAf32(width:{width},height:{height})"
+            ),
         }
     }
 }

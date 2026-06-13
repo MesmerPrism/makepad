@@ -405,6 +405,14 @@ pub trait CxOsApi {
         None
     }
 
+    fn xr_gpu_f32_volume_image_preview_adopt_texture(
+        &mut self,
+        _request_id: u64,
+        _texture_id: TextureId,
+    ) -> Option<XrGpuF32VolumeImagePreviewTextureAdoption> {
+        None
+    }
+
     fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
         None
     }
@@ -867,6 +875,23 @@ pub struct XrGpuF32VolumeImagePreviewResult {
     pub sampled_texture_bound: bool,
     pub queue_wait_idle_performed: bool,
     pub elapsed_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrGpuF32VolumeImagePreviewTextureAdoption {
+    pub request_id: u64,
+    pub texture_id: TextureId,
+    pub image_width: usize,
+    pub image_height: usize,
+    pub image_layers: usize,
+    pub queue_submit_serial: u64,
+    pub resource_generation: u64,
+    pub texture_resource_generation: u64,
+    pub replaced_existing_texture_resource: bool,
+    pub runtime_texture_bound: bool,
+    pub cpu_texture_upload_performed: bool,
+    pub zero_copy_vulkan_image: bool,
+    pub image_ownership_transferred: bool,
 }
 
 impl Default for XrGpuF32VolumeImagePreviewResult {
@@ -1547,6 +1572,16 @@ impl Cx {
         request_id: u64,
     ) -> Option<XrGpuF32VolumeImagePreviewResult> {
         <Self as CxOsApi>::xr_gpu_f32_volume_image_preview_poll(self, request_id)
+    }
+
+    pub fn xr_gpu_f32_volume_image_preview_adopt_texture(
+        &mut self,
+        request_id: u64,
+        texture_id: TextureId,
+    ) -> Option<XrGpuF32VolumeImagePreviewTextureAdoption> {
+        <Self as CxOsApi>::xr_gpu_f32_volume_image_preview_adopt_texture(
+            self, request_id, texture_id,
+        )
     }
 
     pub fn xr_frame_cpu_breakdown(&self) -> Option<XrFrameCpuBreakdown> {
