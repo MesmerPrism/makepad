@@ -138,6 +138,11 @@ This branch currently carries:
   `XR_FB_hand_tracking_mesh`. The fork keeps this generic: compact mesh
   status/counts in XR hand state, and full bind poses, joint parents, vertices,
   normals, UVs, blend indices/weights, and indices behind an on-demand Cx API.
+- Generic XR/Vulkan basic probe plumbing now lives in
+  `platform/src/os/linux/vulkan/basic_compute_probe.rs`: storage-buffer
+  fill/copy/readback, bounded u32 compute, and bounded f32 force sampling
+  proofs. Keep these probes generic Makepad adapter evidence; downstream
+  crates own field, particle, force-mode, and readiness semantics.
 - Generic XR/Vulkan f32 mesh-to-SDF proof plumbing that caches shader modules,
   descriptor-set layout, pipeline layout, compute pipelines, source mesh
   buffers, and capacity-rounded derived skinned-position/dense-SDF buffers for

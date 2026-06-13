@@ -139,6 +139,17 @@ def check_split_maps(checks):
         "tools/cargo_makepad/src/android/java/dev/makepad/android/ManifoldVideoStreamReader.java",
         "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceActivitySupport.java",
         "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceMediaProjectionHelper.java",
+        "platform/src/os/linux/vulkan/basic_compute_probe.rs",
+        "platform/src/os/linux/vulkan/texture_lifetime.rs",
+        "platform/src/os/linux/vulkan/video_hardware_buffer.rs",
+        "platform/src/os/linux/vulkan/skinning_probe.rs",
+        "platform/src/os/linux/vulkan/skinning_mesh_probe.rs",
+        "platform/src/os/linux/vulkan/mesh_sdf_probe.rs",
+        "platform/src/os/linux/vulkan/field_sample_probe.rs",
+        "platform/src/os/linux/vulkan/field_force_sample_probe.rs",
+        "platform/src/os/linux/vulkan/volume_probe.rs",
+        "platform/src/os/linux/vulkan/volume_raymarch_preview.rs",
+        "platform/src/os/linux/vulkan/volume_image_preview.rs",
     ]
     for rel in required_modules:
         if checks.path(rel) is not None:
@@ -184,6 +195,27 @@ def check_split_maps(checks):
         compile_rs,
         "MAKEPAD_ANDROID_TIMING phase=",
         "Android timing marker",
+    )
+    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 7600)
+    checks.contains(
+        "platform/src/os/linux/vulkan/basic_compute_probe.rs",
+        "submit_xr_storage_buffer_probe",
+        "basic storage-buffer probe owner",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/basic_compute_probe.rs",
+        "submit_xr_u32_compute_probe",
+        "basic u32 compute probe owner",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/basic_compute_probe.rs",
+        "submit_xr_f32_force_probe",
+        "basic f32 force probe owner",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "XR_GPU_U32_COMPUTE_PROBE_WGSL",
+        "root-owned basic compute probe shader",
     )
 
 
@@ -293,6 +325,11 @@ def check_docs(checks):
         "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "Platform/video watchlist",
         "platform video watchlist",
+    )
+    checks.contains(
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
+        "basic_compute_probe.rs",
+        "basic Vulkan probe module map",
     )
 
 
