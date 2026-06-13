@@ -48,9 +48,8 @@ fn volume_probe_output(sample: VolumeProbeSample) -> VolumeProbeOutput {
         triangle_wave((p.y - p.z * 0.35 + uv.y * 0.25) * frequency * 0.75 - uv.w * 0.11 + phase * 0.5);
     let interference = clamp(1.0 - abs(wave_a - wave_b), 0.0, 1.0);
     let density = clamp(interference * opacity, 0.0, 1.0);
-    let eye_gain = 0.65 + 0.35 * clamp(uv.z, 0.0, 1.0);
     return VolumeProbeOutput(
-        vec4<f32>(density, density * eye_gain, 1.0 - density, density),
+        vec4<f32>(density, density, density, density),
         vec4<f32>(density, depth, 1.0, 0.0)
     );
 }

@@ -15,14 +15,10 @@ use super::{CxVulkan, VulkanBuffer, VulkanTextureResource};
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_ENTRY: &str = "compute_main";
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_ENTRY: &str = "sample_main";
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WORKGROUP: u32 = 8;
-const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH: usize = 4;
-const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_HEIGHT: usize = 4;
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_COUNT: usize = 2;
-const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_WIDTH: usize =
-    XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH * XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_COUNT;
-const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_HEIGHT: usize =
-    XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_HEIGHT;
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_LAYERS: usize = 1;
+const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_MIN: usize = 4;
+const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_MAX: usize = 256;
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_FORMAT: vk::Format = vk::Format::R32G32B32A32_SFLOAT;
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WGSL: &str = r#"
 struct VolumeImagePreviewPixel {
@@ -64,7 +60,6 @@ fn volume_image_preview_output(pixel: VolumeImagePreviewPixel) -> VolumeImagePre
     let direction = pixel.ray_direction_step.xyz;
     let step_count = clamp(pixel.ray_direction_step.w, 1.0, 32.0);
     let step_alpha_scale = clamp(pixel.volume_params.w, 0.001, 4.0);
-    let eye_gain = 0.65 + 0.35 * clamp(uv.z, 0.0, 1.0);
     var accum_rgb = vec3<f32>(0.0, 0.0, 0.0);
     var accum_alpha = 0.0;
     var first_depth = 0.0;
@@ -77,7 +72,7 @@ fn volume_image_preview_output(pixel: VolumeImagePreviewPixel) -> VolumeImagePre
             let p = origin + direction * unit_depth;
             let density = volume_density(p, uv, pixel.volume_params);
             let sample_alpha = clamp(density * step_alpha_scale / step_count, 0.0, 1.0);
-            let sample_rgb = vec3<f32>(density, density * eye_gain, 1.0 - density);
+            let sample_rgb = vec3<f32>(density, density, density);
             let contribution = (1.0 - accum_alpha) * sample_alpha;
             accum_rgb = accum_rgb + sample_rgb * contribution;
             if (hit < 0.5 && density > 0.05) {
@@ -94,17 +89,45 @@ fn volume_image_preview_output(pixel: VolumeImagePreviewPixel) -> VolumeImagePre
     );
 }
 
-@compute @workgroup_size(8)
+fn volume_image_preview_pixel_from_uv(
+    surface_uv: vec2<f32>,
+    eye_index: f32,
+    source_pixel: VolumeImagePreviewPixel
+) -> VolumeImagePreviewOutput {
+    let eye_offset = (eye_index - 0.5) * 0.08;
+    let origin = vec3<f32>(surface_uv.x - 0.5 + eye_offset, surface_uv.y - 0.5, -0.72);
+    let direction = vec3<f32>(
+        (surface_uv.x - 0.5) * 0.42 + eye_offset * 0.25,
+        (surface_uv.y - 0.5) * 0.32,
+        1.0
+    );
+    let pixel = VolumeImagePreviewPixel(
+        vec4<f32>(surface_uv.x, surface_uv.y, eye_index, source_pixel.uv_eye_time.w),
+        vec4<f32>(origin, 0.0),
+        vec4<f32>(direction, source_pixel.ray_direction_step.w),
+        source_pixel.volume_params,
+        vec4<f32>(0.0, 0.0, 0.0, 0.0),
+        vec4<f32>(0.0, 0.0, 0.0, 0.0)
+    );
+    return volume_image_preview_output(pixel);
+}
+
+@compute @workgroup_size(8, 8, 1)
 fn compute_main(@builtin(global_invocation_id) id: vec3<u32>) {
-    let index = id.x;
-    if (index < 32u) {
-        let output = volume_image_preview_output(input_pixels[index]);
-        let eye_index = index / 16u;
-        let local_index = index % 16u;
-        let x = i32((local_index % 4u) + eye_index * 4u);
-        let y = i32(local_index / 4u);
-        textureStore(output_image, vec2<i32>(x, y), output.rgba);
+    let dims = textureDimensions(output_image);
+    if (id.x >= dims.x || id.y >= dims.y) {
+        return;
     }
+    let eye_count = 2u;
+    let tile_width = max(dims.x / eye_count, 1u);
+    let eye_index = min(id.x / tile_width, eye_count - 1u);
+    let local_x = id.x - eye_index * tile_width;
+    let surface_uv = vec2<f32>(
+        (f32(local_x) + 0.5) / f32(tile_width),
+        (f32(id.y) + 0.5) / f32(max(dims.y, 1u))
+    );
+    let output = volume_image_preview_pixel_from_uv(surface_uv, f32(eye_index), input_pixels[0]);
+    textureStore(output_image, vec2<i32>(i32(id.x), i32(id.y)), output.rgba);
 }
 "#;
 const XR_GPU_F32_VOLUME_IMAGE_PREVIEW_SAMPLE_WGSL: &str = r#"
@@ -120,12 +143,22 @@ struct VolumeTextureSampleOutput {
 fn sample_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
     if (index < 32u) {
-        let eye_index = index / 16u;
-        let local_index = index % 16u;
-        let atlas_x = (local_index % 4u) + eye_index * 4u;
-        let atlas_y = local_index / 4u;
-        let uv = (vec2<f32>(f32(atlas_x), f32(atlas_y)) + vec2<f32>(0.5, 0.5))
-            / vec2<f32>(8.0, 4.0);
+        let dims = textureDimensions(sampled_image);
+        let eye_count = 2u;
+        let sample_grid_width = 4u;
+        let sample_grid_height = 4u;
+        let tile_width = max(dims.x / eye_count, 1u);
+        let tile_height = max(dims.y, 1u);
+        let samples_per_eye = sample_grid_width * sample_grid_height;
+        let eye_index = min(index / samples_per_eye, eye_count - 1u);
+        let local_index = index % samples_per_eye;
+        let sample_x = local_index % sample_grid_width;
+        let sample_y = local_index / sample_grid_width;
+        let pixel_x = min((sample_x * tile_width) / sample_grid_width + tile_width / (sample_grid_width * 2u), tile_width - 1u);
+        let pixel_y = min((sample_y * tile_height) / sample_grid_height + tile_height / (sample_grid_height * 2u), tile_height - 1u);
+        let atlas_x = eye_index * tile_width + pixel_x;
+        let uv = (vec2<f32>(f32(atlas_x), f32(pixel_y)) + vec2<f32>(0.5, 0.5))
+            / vec2<f32>(f32(max(dims.x, 1u)), f32(max(dims.y, 1u)));
         sampled_outputs[index] = VolumeTextureSampleOutput(
             textureSampleLevel(sampled_image, sampled_image_sampler, uv, 0.0)
         );
@@ -220,20 +253,35 @@ impl CxVulkan {
         pixel_count: usize,
         tolerance: f32,
     ) -> Result<XrGpuF32VolumeImagePreviewTicket, String> {
-        if eye_tile_width != XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH
-            || eye_tile_height != XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_HEIGHT
-            || eye_count != XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_COUNT
+        if eye_count != XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_COUNT {
+            return Err(format!(
+                "f32 volume image preview currently requires {} stereo eyes",
+                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_COUNT
+            ));
+        }
+        if !(XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_MIN
+            ..=XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_MAX)
+            .contains(&eye_tile_width)
+            || !(XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_MIN
+                ..=XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_MAX)
+                .contains(&eye_tile_height)
         {
             return Err(format!(
-                "f32 volume image preview currently requires {}x{}x{} stereo tiles",
-                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH,
-                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_HEIGHT,
-                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_COUNT
+                "f32 volume image preview eye tiles must be within {}..={} pixels",
+                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_MIN,
+                XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_MAX
             ));
         }
 
         let started = Instant::now();
         let pixel_count = pixel_count.min(XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS);
+        if pixel_count == 0 {
+            return Err("f32 volume image preview requires at least one sample pixel".to_string());
+        }
+        let image_width = eye_tile_width
+            .checked_mul(eye_count)
+            .ok_or_else(|| "f32 volume image preview width overflow".to_string())?;
+        let image_height = eye_tile_height;
         let tolerance = if tolerance.is_finite() && tolerance >= 0.0 {
             tolerance
         } else {
@@ -246,6 +294,11 @@ impl CxVulkan {
         let readback_byte_len = std::mem::size_of::<
             [XrGpuF32VolumeImagePreviewOutput; XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS],
         >() as vk::DeviceSize;
+        let image_readback_byte_len = (image_width as vk::DeviceSize)
+            .saturating_mul(image_height as vk::DeviceSize)
+            .saturating_mul(
+                std::mem::size_of::<XrGpuF32VolumeImagePreviewOutput>() as vk::DeviceSize
+            );
 
         let shader_spv = compile_compute_wgsl_to_spirv(
             XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WGSL,
@@ -257,25 +310,25 @@ impl CxVulkan {
         )?;
         let input =
             self.create_host_buffer_with_data(vk::BufferUsageFlags::STORAGE_BUFFER, &pixels)?;
-        let image = match self.create_xr_f32_volume_image_preview_image(
-            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_WIDTH as u32,
-            XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_HEIGHT as u32,
-        ) {
+        let image = match self
+            .create_xr_f32_volume_image_preview_image(image_width as u32, image_height as u32)
+        {
             Ok(image) => image,
             Err(err) => {
                 self.destroy_buffer(input);
                 return Err(err);
             }
         };
-        let readback =
-            match self.create_host_buffer(vk::BufferUsageFlags::TRANSFER_DST, readback_byte_len) {
-                Ok(buffer) => buffer,
-                Err(err) => {
-                    self.destroy_xr_f32_volume_image_preview_image(image);
-                    self.destroy_buffer(input);
-                    return Err(err);
-                }
-            };
+        let readback = match self
+            .create_host_buffer(vk::BufferUsageFlags::TRANSFER_DST, image_readback_byte_len)
+        {
+            Ok(buffer) => buffer,
+            Err(err) => {
+                self.destroy_xr_f32_volume_image_preview_image(image);
+                self.destroy_buffer(input);
+                return Err(err);
+            }
+        };
         let sampled_readback = match self
             .create_host_buffer(vk::BufferUsageFlags::STORAGE_BUFFER, readback_byte_len)
         {
@@ -841,11 +894,17 @@ impl CxVulkan {
                     &[descriptor_set],
                     &[],
                 );
-                let dispatch_x = ((XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS as u32)
+                let dispatch_x = (image.width + XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WORKGROUP - 1)
+                    / XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WORKGROUP;
+                let dispatch_y = (image.height + XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WORKGROUP - 1)
+                    / XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WORKGROUP;
+                self.device
+                    .cmd_dispatch(command_buffer, dispatch_x, dispatch_y, 1);
+
+                let sample_dispatch_x = ((XR_GPU_F32_VOLUME_IMAGE_PREVIEW_PIXELS as u32)
                     + XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WORKGROUP
                     - 1)
                     / XR_GPU_F32_VOLUME_IMAGE_PREVIEW_WORKGROUP;
-                self.device.cmd_dispatch(command_buffer, dispatch_x, 1, 1);
 
                 let image_to_transfer = vk::ImageMemoryBarrier::default()
                     .src_access_mask(vk::AccessFlags::SHADER_WRITE)
@@ -905,7 +964,7 @@ impl CxVulkan {
                     .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                     .buffer(readback.buffer)
                     .offset(0)
-                    .size(readback_byte_len);
+                    .size(image_readback_byte_len);
                 let image_to_shader = vk::ImageMemoryBarrier::default()
                     .src_access_mask(vk::AccessFlags::TRANSFER_READ)
                     .dst_access_mask(vk::AccessFlags::SHADER_READ)
@@ -947,7 +1006,8 @@ impl CxVulkan {
                     &[sample_descriptor_set],
                     &[],
                 );
-                self.device.cmd_dispatch(command_buffer, dispatch_x, 1, 1);
+                self.device
+                    .cmd_dispatch(command_buffer, sample_dispatch_x, 1, 1);
 
                 let sampled_readback_barrier = vk::BufferMemoryBarrier::default()
                     .src_access_mask(vk::AccessFlags::SHADER_WRITE)
@@ -1014,12 +1074,12 @@ impl CxVulkan {
                 started,
                 pixels,
                 expected_outputs,
-                image_width: XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_WIDTH,
-                image_height: XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_HEIGHT,
+                image_width,
+                image_height,
                 image_layers: XR_GPU_F32_VOLUME_IMAGE_PREVIEW_IMAGE_LAYERS,
-                eye_tile_width: XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_WIDTH,
-                eye_tile_height: XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_TILE_HEIGHT,
-                eye_count: XR_GPU_F32_VOLUME_IMAGE_PREVIEW_EYE_COUNT,
+                eye_tile_width,
+                eye_tile_height,
+                eye_count,
                 pixel_count,
                 tolerance,
                 queue_submit_serial,

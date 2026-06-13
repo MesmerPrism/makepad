@@ -53,7 +53,6 @@ fn volume_raymarch_preview_output(pixel: VolumeRaymarchPreviewPixel) -> VolumeRa
     let direction = pixel.ray_direction_step.xyz;
     let step_count = clamp(pixel.ray_direction_step.w, 1.0, 32.0);
     let step_alpha_scale = clamp(pixel.volume_params.w, 0.001, 4.0);
-    let eye_gain = 0.65 + 0.35 * clamp(uv.z, 0.0, 1.0);
     var accum_rgb = vec3<f32>(0.0, 0.0, 0.0);
     var accum_alpha = 0.0;
     var first_depth = 0.0;
@@ -66,7 +65,7 @@ fn volume_raymarch_preview_output(pixel: VolumeRaymarchPreviewPixel) -> VolumeRa
             let p = origin + direction * unit_depth;
             let density = volume_density(p, uv, pixel.volume_params);
             let sample_alpha = clamp(density * step_alpha_scale / step_count, 0.0, 1.0);
-            let sample_rgb = vec3<f32>(density, density * eye_gain, 1.0 - density);
+            let sample_rgb = vec3<f32>(density, density, density);
             let contribution = (1.0 - accum_alpha) * sample_alpha;
             accum_rgb = accum_rgb + sample_rgb * contribution;
             if (hit < 0.5 && density > 0.05) {
