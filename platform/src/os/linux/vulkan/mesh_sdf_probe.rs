@@ -265,6 +265,21 @@ pub(super) struct VulkanXrF32MeshSdfResidentFieldUse {
     pub(super) grid: XrGpuF32MeshSdfProbeGrid,
 }
 
+impl VulkanXrF32MeshSdfResidentFieldUse {
+    pub(super) fn logical_voxel_count(&self) -> Option<usize> {
+        let dimensions = self.grid.dimensions;
+        (dimensions[0] as usize)
+            .checked_mul(dimensions[1] as usize)
+            .and_then(|value| value.checked_mul(dimensions[2] as usize))
+    }
+
+    pub(super) fn logical_sdf_distance_byte_len(&self) -> Option<vk::DeviceSize> {
+        self.logical_voxel_count()?
+            .checked_mul(std::mem::size_of::<f32>())
+            .map(|value| value as vk::DeviceSize)
+    }
+}
+
 struct VulkanXrF32MeshSdfProbeDerivedBufferUse {
     generation: u64,
     resident: bool,

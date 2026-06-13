@@ -145,7 +145,9 @@ This branch currently carries:
   output. It keeps descriptor pools, command buffers, fences, params, grids,
   and compact readback resources scoped to each bounded proof submission. It
   reports program, source-buffer, and derived-buffer generation/reuse without
-  defining Matter field, particle, or SDF authority in Makepad.
+  defining Matter field, particle, or SDF authority in Makepad. Resident
+  capacity bytes are kept as resource evidence; field sampling and field-force
+  sampling use the logical grid dimensions for voxel-count validation.
 - An XR environment camera guard so `XrEnv` does not acquire a passthrough
   camera stream unless the environment cube is enabled. This keeps custom
   raw-camera projection examples from competing with Makepad's environment

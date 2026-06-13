@@ -273,17 +273,18 @@ impl CxVulkan {
                 "f32 field force sample probe requires finite positive voxel size".to_string(),
             );
         }
-        let voxel_count = (dimensions[0] as usize)
-            .checked_mul(dimensions[1] as usize)
-            .and_then(|value| value.checked_mul(dimensions[2] as usize))
+        let voxel_count = source_field
+            .logical_voxel_count()
             .ok_or_else(|| "f32 field force sample probe voxel count overflow".to_string())?;
-        let source_voxel_count = (source_field.sdf_distance_byte_len as usize)
-            .checked_div(std::mem::size_of::<f32>())
+        let logical_sdf_distance_byte_len = source_field
+            .logical_sdf_distance_byte_len()
             .ok_or_else(|| "f32 field force sample probe field byte count overflow".to_string())?;
-        if voxel_count == 0 || voxel_count != source_voxel_count || voxel_count > u32::MAX as usize
+        if voxel_count == 0
+            || source_field.sdf_distance_byte_len < logical_sdf_distance_byte_len
+            || voxel_count > u32::MAX as usize
         {
             return Err(
-                "f32 field force sample probe grid shape does not match resident field".to_string(),
+                "f32 field force sample probe grid shape does not fit resident field".to_string(),
             );
         }
         let sample_count = sample_count

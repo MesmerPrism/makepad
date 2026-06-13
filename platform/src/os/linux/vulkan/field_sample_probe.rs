@@ -185,11 +185,17 @@ impl CxVulkan {
             .ok_or_else(|| {
                 "f32 field sample probe requires a resident mesh SDF field".to_string()
             })?;
-        let voxel_count = (source_field.sdf_distance_byte_len as usize)
-            .checked_div(std::mem::size_of::<f32>())
+        let voxel_count = source_field
+            .logical_voxel_count()
             .ok_or_else(|| "f32 field sample probe voxel count overflow".to_string())?;
+        let logical_sdf_distance_byte_len = source_field
+            .logical_sdf_distance_byte_len()
+            .ok_or_else(|| "f32 field sample probe byte count overflow".to_string())?;
         if voxel_count == 0 || voxel_count > u32::MAX as usize {
             return Err("f32 field sample probe requires a nonzero u32 voxel count".to_string());
+        }
+        if source_field.sdf_distance_byte_len < logical_sdf_distance_byte_len {
+            return Err("f32 field sample probe resident field is smaller than grid".to_string());
         }
         let sample_count = sample_count
             .min(XR_GPU_F32_FIELD_SAMPLE_PROBE_SAMPLES)
