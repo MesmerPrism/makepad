@@ -148,6 +148,7 @@ This branch currently carries:
   defining Matter field, particle, or SDF authority in Makepad. Resident
   capacity bytes are kept as resource evidence; field sampling and field-force
   sampling use the logical grid dimensions for voxel-count validation.
+  defining Matter field, particle, or SDF authority in Makepad.
 - An XR environment camera guard so `XrEnv` does not acquire a passthrough
   camera stream unless the environment cube is enabled. This keeps custom
   raw-camera projection examples from competing with Makepad's environment

@@ -5,6 +5,9 @@ mod field_sample_probe;
 mod mesh_sdf_probe;
 mod skinning_mesh_probe;
 mod skinning_probe;
+mod volume_image_preview;
+mod volume_probe;
+mod volume_raymarch_preview;
 
 use crate::{
     cx::Cx,
@@ -595,6 +598,11 @@ pub struct CxVulkan {
         Option<field_force_sample_probe::VulkanXrF32FieldForceSampleProbeProgram>,
     xr_f32_field_force_sample_probe_resources:
         Vec<field_force_sample_probe::VulkanXrF32FieldForceSampleProbeResources>,
+    xr_f32_volume_probe_resources: Vec<volume_probe::VulkanXrF32VolumeProbeResources>,
+    xr_f32_volume_image_preview_resources:
+        Vec<volume_image_preview::VulkanXrF32VolumeImagePreviewResources>,
+    xr_f32_volume_raymarch_preview_resources:
+        Vec<volume_raymarch_preview::VulkanXrF32VolumeRaymarchPreviewResources>,
     xr_storage_buffer_probe_resources: Vec<VulkanXrStorageBufferProbeResources>,
 }
 
@@ -943,6 +951,9 @@ impl CxVulkan {
             xr_f32_field_sample_probe_resources: Vec::new(),
             xr_f32_field_force_sample_probe_program: None,
             xr_f32_field_force_sample_probe_resources: Vec::new(),
+            xr_f32_volume_probe_resources: Vec::new(),
+            xr_f32_volume_image_preview_resources: Vec::new(),
+            xr_f32_volume_raymarch_preview_resources: Vec::new(),
             xr_storage_buffer_probe_resources: Vec::new(),
         };
 
@@ -1363,6 +1374,9 @@ impl CxVulkan {
             xr_f32_field_sample_probe_resources: Vec::new(),
             xr_f32_field_force_sample_probe_program: None,
             xr_f32_field_force_sample_probe_resources: Vec::new(),
+            xr_f32_volume_probe_resources: Vec::new(),
+            xr_f32_volume_image_preview_resources: Vec::new(),
+            xr_f32_volume_raymarch_preview_resources: Vec::new(),
             xr_storage_buffer_probe_resources: Vec::new(),
         };
 
@@ -9475,6 +9489,9 @@ impl Drop for CxVulkan {
         self.destroy_xr_f32_mesh_sdf_probe_derived_buffers();
         self.destroy_xr_f32_mesh_sdf_probe_source_mesh_buffers();
         self.destroy_xr_f32_mesh_sdf_probe_program();
+        self.destroy_xr_f32_volume_probe_resources();
+        self.destroy_xr_f32_volume_image_preview_resources();
+        self.destroy_xr_f32_volume_raymarch_preview_resources();
         self.destroy_geometry_resources();
         self.destroy_texture_resources();
         self.destroy_external_ycbcr_samplers();
