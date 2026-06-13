@@ -76,11 +76,12 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
   field/particle semantics or GPU compute readiness.
 - XR/Vulkan compute probes must not turn `platform/src/os/linux/vulkan.rs` into
   a monolithic probe file. Keep the root file to Vulkan lifecycle/resource
-  ownership glue, and put probe-specific shader/dispatch/readback code in
-  child modules under `platform/src/os/linux/vulkan/` such as
-  `skinning_mesh_probe.rs`. Future mesh-to-SDF, dense-SDF, ADF, or particle
-  probes should be sibling modules unless they are small helpers shared by
-  multiple probes.
+  ownership glue, keep video hardware-buffer import and texture retirement in
+  `video_hardware_buffer.rs` / `texture_lifetime.rs`, and put probe-specific
+  shader/dispatch/readback code in child modules under
+  `platform/src/os/linux/vulkan/` such as `skinning_mesh_probe.rs`. Future
+  mesh-to-SDF, dense-SDF, ADF, or particle probes should be sibling modules
+  unless they are small helpers shared by multiple probes.
 - Workspace metadata excludes for standalone CSG leaf crates.
 - Public-safe fork and agent notes.
 

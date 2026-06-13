@@ -56,7 +56,9 @@ same slice.
 
 Use this queue when an affected behavior slice is already editing the owner:
 
-1. Vulkan hardware-buffer diagnostic schemas in `platform/src/os/linux/vulkan.rs`.
+1. Vulkan hardware-buffer diagnostic schemas in `platform/src/os/linux/vulkan.rs`
+   and its `platform/src/os/linux/vulkan/video_hardware_buffer.rs` /
+   `platform/src/os/linux/vulkan/texture_lifetime.rs` child modules.
 2. Android direct/stereo H.264 diagnostic schemas in `platform/src/os/linux/android/android.rs`.
 3. JNI latest-slot diagnostic schemas in `platform/src/os/linux/android/android_jni.rs`.
 4. Camera frame-flow schemas in `platform/src/os/linux/android/android_camera_player.rs`.
