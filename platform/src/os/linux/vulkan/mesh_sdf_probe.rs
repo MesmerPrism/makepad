@@ -268,6 +268,14 @@ struct VulkanXrF32MeshSdfProbeDerivedBufferUse {
     owned_sdf_distances: Option<VulkanBuffer>,
 }
 
+fn xr_f32_mesh_sdf_capacity_byte_len(required: vk::DeviceSize) -> vk::DeviceSize {
+    if required == 0 {
+        0
+    } else {
+        required.checked_next_power_of_two().unwrap_or(required)
+    }
+}
+
 pub(super) struct VulkanXrF32MeshSdfProbeResources {
     request_id: u64,
     started: Instant,
@@ -610,12 +618,16 @@ impl CxVulkan {
             .xr_f32_mesh_sdf_probe_derived_buffers
             .as_ref()
             .map_or(1, |buffers| buffers.generation);
+        let skinned_position_capacity_byte_len =
+            xr_f32_mesh_sdf_capacity_byte_len(skinned_position_byte_len);
+        let sdf_distance_capacity_byte_len =
+            xr_f32_mesh_sdf_capacity_byte_len(sdf_distance_byte_len);
         let reused = self
             .xr_f32_mesh_sdf_probe_derived_buffers
             .as_ref()
             .is_some_and(|buffers| {
-                buffers.skinned_position_byte_len == skinned_position_byte_len
-                    && buffers.sdf_distance_byte_len == sdf_distance_byte_len
+                buffers.skinned_position_byte_len >= skinned_position_byte_len
+                    && buffers.sdf_distance_byte_len >= sdf_distance_byte_len
             });
         if !reused {
             if let Some(old_buffers) = self.xr_f32_mesh_sdf_probe_derived_buffers.take() {
@@ -625,11 +637,12 @@ impl CxVulkan {
             }
             let skinned_positions = self.create_host_buffer(
                 vk::BufferUsageFlags::STORAGE_BUFFER,
-                skinned_position_byte_len,
+                skinned_position_capacity_byte_len,
             )?;
-            let sdf_distances = match self
-                .create_host_buffer(vk::BufferUsageFlags::STORAGE_BUFFER, sdf_distance_byte_len)
-            {
+            let sdf_distances = match self.create_host_buffer(
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                sdf_distance_capacity_byte_len,
+            ) {
                 Ok(buffer) => buffer,
                 Err(err) => {
                     self.destroy_buffer(skinned_positions);
@@ -639,8 +652,8 @@ impl CxVulkan {
             self.xr_f32_mesh_sdf_probe_derived_buffers =
                 Some(VulkanXrF32MeshSdfProbeDerivedBuffers {
                     generation,
-                    skinned_position_byte_len,
-                    sdf_distance_byte_len,
+                    skinned_position_byte_len: skinned_position_capacity_byte_len,
+                    sdf_distance_byte_len: sdf_distance_capacity_byte_len,
                     skinned_positions,
                     sdf_distances,
                 });
@@ -1573,5 +1586,23 @@ fn create_compute_pipeline(
                 "create_compute_pipelines(f32 mesh SDF probe {entry:?}) failed: {err:?}"
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mesh_sdf_derived_capacity_rounds_small_growth_to_same_buffer_size() {
+        assert_eq!(xr_f32_mesh_sdf_capacity_byte_len(5_808), 8_192);
+        assert_eq!(xr_f32_mesh_sdf_capacity_byte_len(6_292), 8_192);
+    }
+
+    #[test]
+    fn mesh_sdf_derived_capacity_handles_exact_powers_and_overflow() {
+        assert_eq!(xr_f32_mesh_sdf_capacity_byte_len(8_192), 8_192);
+        assert_eq!(xr_f32_mesh_sdf_capacity_byte_len(8_193), 16_384);
+        assert_eq!(xr_f32_mesh_sdf_capacity_byte_len(u64::MAX), u64::MAX);
     }
 }
