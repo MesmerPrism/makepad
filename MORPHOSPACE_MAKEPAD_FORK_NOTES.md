@@ -142,7 +142,11 @@ This branch currently carries:
   in `platform/src/os/linux/vulkan/draw_recording.rs`: packet assembly,
   descriptor writes, packet-buffer upload, texture/sampler binding decisions,
   and indexed draw command recording. The root Vulkan file keeps render-pass
-  orchestration, geometry, swapchain, offscreen target, and lifecycle glue.
+  orchestration, swapchain, offscreen target, and lifecycle glue.
+- Android Vulkan host-visible buffer and geometry-resource cache ownership now
+  lives in `platform/src/os/linux/vulkan/buffer_resources.rs`: memory-type
+  lookup, host-buffer allocation/destruction, data upload helpers, alignment,
+  stale geometry pruning, and geometry vertex/index buffer replacement.
 - A reflected Vulkan shader-resource interface from Naga/WGSL lowering, used
   to construct descriptor layouts from the shader-declared resource shape and
   to log the current video texture/sampler interface before changing it.

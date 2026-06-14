@@ -141,6 +141,7 @@ def check_split_maps(checks):
         "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceMediaProjectionHelper.java",
         "platform/src/os/linux/android/android_java_messages.rs",
         "platform/src/os/linux/vulkan/basic_compute_probe.rs",
+        "platform/src/os/linux/vulkan/buffer_resources.rs",
         "platform/src/os/linux/vulkan/draw_recording.rs",
         "platform/src/os/linux/vulkan/frame_resources.rs",
         "platform/src/os/linux/vulkan/openxr_targets.rs",
@@ -218,7 +219,37 @@ def check_split_maps(checks):
         "MAKEPAD_ANDROID_TIMING phase=",
         "Android timing marker",
     )
-    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 3400)
+    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 3100)
+    checks.contains(
+        "platform/src/os/linux/vulkan/buffer_resources.rs",
+        "pub(super) fn create_host_buffer",
+        "Vulkan host-buffer allocation owner",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/buffer_resources.rs",
+        "pub(super) fn ensure_geometry_resource",
+        "Vulkan geometry-resource cache owner",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/buffer_resources.rs",
+        "pub(super) fn find_memory_type",
+        "Vulkan memory-type lookup owner",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn create_host_buffer(",
+        "root-owned Vulkan host-buffer allocation",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn ensure_geometry_resource(",
+        "root-owned Vulkan geometry-resource cache",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn find_memory_type(",
+        "root-owned Vulkan memory-type lookup",
+    )
     checks.contains(
         "platform/src/os/linux/vulkan/draw_recording.rs",
         "pub(super) fn record_draw_list",
@@ -392,6 +423,11 @@ def check_docs(checks):
         "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "basic_compute_probe.rs",
         "basic Vulkan probe module map",
+    )
+    checks.contains(
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
+        "buffer_resources.rs",
+        "Vulkan buffer resource module map",
     )
     checks.contains(
         "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",

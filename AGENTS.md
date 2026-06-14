@@ -82,17 +82,18 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
   field/particle semantics or GPU compute readiness.
 - XR/Vulkan compute probes must not turn `platform/src/os/linux/vulkan.rs` into
   a monolithic probe file. Keep the root file to Vulkan instance/device,
-  window-swapchain, render-pass/offscreen target, geometry, and lifecycle
-  orchestration. Keep reusable per-frame buffer/descriptors in
-  `frame_resources.rs`, draw-list traversal, draw-packet assembly, descriptor
-  writes, packet-buffer upload, and draw command recording in
-  `draw_recording.rs`, OpenXR multiview targets/session/readback/draw in
-  `openxr_targets.rs`, graphics pipeline keys, shader descriptor layouts,
-  immutable video sampler keying, shader modules, and graphics pipeline
-  creation in `pipeline_resources.rs`, texture/image resources in
-  `texture_resources.rs`, video hardware-buffer import and texture retirement in
-  `video_hardware_buffer.rs` / `texture_lifetime.rs`, and probe-specific
-  shader/dispatch/readback code in child modules under
+  window-swapchain, render-pass/offscreen target, and lifecycle orchestration.
+  Keep host-visible buffer allocation, memory-type lookup, upload helpers, and
+  geometry-resource cache ownership in `buffer_resources.rs`, reusable
+  per-frame buffer/descriptors in `frame_resources.rs`, draw-list traversal,
+  draw-packet assembly, descriptor writes, packet-buffer upload, and draw
+  command recording in `draw_recording.rs`, OpenXR multiview
+  targets/session/readback/draw in `openxr_targets.rs`, graphics pipeline keys,
+  shader descriptor layouts, immutable video sampler keying, shader modules,
+  and graphics pipeline creation in `pipeline_resources.rs`, texture/image
+  resources in `texture_resources.rs`, video hardware-buffer import and texture
+  retirement in `video_hardware_buffer.rs` / `texture_lifetime.rs`, and
+  probe-specific shader/dispatch/readback code in child modules under
   `platform/src/os/linux/vulkan/` such as `basic_compute_probe.rs` and
   `skinning_mesh_probe.rs`. Future mesh-to-SDF, dense-SDF, ADF, or particle
   probes should be sibling modules unless they are small helpers shared by
