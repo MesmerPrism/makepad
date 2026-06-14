@@ -115,6 +115,23 @@ spatial input roles, frame-state binding, calibration, validity, confidence,
 and runtime capability snapshots. Keep Makepad `Xr*` names where they describe
 Makepad or OpenXR APIs.
 
+## Sustainable Design Guardrails
+
+- Treat monolithic file pressure as an ownership problem, not a line-count
+  problem. Split only by durable authority, schema, route, validation, adapter,
+  or test-family boundaries; preserve facades, schema IDs, serde fields,
+  fixture outputs, CLI behavior, validation outcomes, and dependency boundaries.
+- After a split, update the nearest distributed file map: this `AGENTS.md`,
+  `README.md`, `docs/ARCHITECTURE.md`, fixture docs, validation docs, or the
+  planning `agent-state\iteration-events.jsonl`.
+- Keep `AGENTS.md`, README, and skill files as concise routing indexes. Move
+  lane-specific recipes, device/build detail, compatibility ledgers, and long
+  validation flows into named docs or runbooks.
+- Keep legacy Rusty-XR names as explicit compatibility surfaces only. New
+  schemas, routes, and types use the owning lane (`rusty.manifold.*`,
+  `rusty.lattice.*`, `rusty.matter.*`, `rusty.optics.*`, `rusty.quest.*`, or
+  repo-local names); do not introduce `rusty.morphospace.*` schemas or
+  `Morphospace*` core types by default.
 ## Downstream Dependency Boundary
 
 The maintained fork is allowed as a dependency only in downstream app-shell or
