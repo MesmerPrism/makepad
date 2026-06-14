@@ -19,6 +19,17 @@ mod volume_image_preview;
 mod volume_probe;
 mod volume_raymarch_preview;
 
+// Root Vulkan ownership:
+// - instance/device/queue setup and teardown;
+// - Android window surface, swapchain, present, and readback orchestration;
+// - render-pass/offscreen target orchestration over texture and draw modules;
+// - CxVulkan's field layout and drop order.
+//
+// Keep shader/pipeline, draw recording, buffer/frame allocation, texture/video
+// import, OpenXR targets, and probe-specific shader/dispatch/readback behavior
+// in the sibling modules above. If this file grows again, split only a cohesive
+// behavior family such as window swapchain or render-pass/offscreen targets.
+
 use crate::{
     cx::Cx,
     draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
@@ -192,6 +203,7 @@ struct VulkanTextureUpload<'a> {
 type VulkanTextureKey = usize;
 
 pub struct CxVulkan {
+    // Vulkan instance, surface, physical device, logical device, and queue.
     instance: ash::Instance,
     surface_loader: ash::khr::surface::Instance,
     android_surface_loader: ash::khr::android_surface::Instance,
@@ -203,6 +215,7 @@ pub struct CxVulkan {
     external_memory_android_hardware_buffer:
         ash::android::external_memory_android_hardware_buffer::Device,
     queue: vk::Queue,
+    // Android window swapchain and swapchain-backed render targets.
     swapchain_loader: ash::khr::swapchain::Device,
     swapchain: vk::SwapchainKHR,
     swapchain_images: Vec<vk::Image>,
@@ -212,12 +225,14 @@ pub struct CxVulkan {
     swapchain_format: vk::Format,
     depth_format: vk::Format,
     swapchain_extent: vk::Extent2D,
+    // Render-pass, framebuffer, pipeline, and geometry registries.
     render_pass: vk::RenderPass,
     xr_render_pass: vk::RenderPass,
     framebuffers: Vec<vk::Framebuffer>,
     pipelines: HashMap<VulkanPipelineKey, VulkanPipeline>,
     offscreen_render_passes: HashMap<VulkanRenderPassKey, vk::RenderPass>,
     geometries: HashMap<GeometryId, VulkanGeometryResource>,
+    // Texture registries and external video import lifetime state.
     textures: HashMap<VulkanTextureKey, VulkanTextureResource>,
     video_hardware_buffer_texture_cache: Vec<VideoHardwareBufferTextureCacheEntry>,
     video_hardware_buffer_texture_cache_hit_count: u64,
@@ -226,6 +241,7 @@ pub struct CxVulkan {
     retired_texture_resources: Vec<RetiredTextureResource>,
     external_ycbcr_samplers: HashMap<VulkanExternalYcbcrSamplerKey, VulkanExternalYcbcrSampler>,
     reported_video_descriptor_shapes: HashSet<(usize, usize, usize, usize)>,
+    // Per-frame upload/descriptor pools plus command submission primitives.
     frame_resources: FrameResources,
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
@@ -244,9 +260,11 @@ pub struct CxVulkan {
     xr_packet_buffer_bytes_this_frame: u64,
     xr_geometry_upload_bytes_this_frame: u64,
     xr_descriptor_set_count_this_frame: u32,
+    // Optional validation/debug messenger state.
     debug_utils_enabled: bool,
     debug_utils_loader: Option<ash::ext::debug_utils::Instance>,
     debug_messenger: vk::DebugUtilsMessengerEXT,
+    // OpenXR multiview, foveation, GPU timing, and in-flight frame state.
     xr_multiview_enabled: bool,
     xr_fragment_density_map_enabled: bool,
     xr_render_pass_uses_fragment_density_map: bool,
@@ -257,6 +275,8 @@ pub struct CxVulkan {
     xr_last_gpu_frame_time_ms: Option<f64>,
     xr_in_flight_frames: Vec<VulkanXrInFlightFrame>,
     xr_in_flight_index: usize,
+    // Bounded XR/Vulkan probe state. Probe modules own shader source,
+    // descriptor setup, dispatch, readback, and result shaping.
     xr_u32_compute_probe_resources: Vec<basic_compute_probe::VulkanXrU32ComputeProbeResources>,
     xr_f32_force_probe_resources: Vec<basic_compute_probe::VulkanXrF32ForceProbeResources>,
     xr_f32_skinning_probe_resources: Vec<skinning_probe::VulkanXrF32SkinningProbeResources>,
@@ -292,6 +312,7 @@ impl CxVulkan {
             && self.swapchain != vk::SwapchainKHR::null()
     }
 
+    // Direct Android-window initialization path.
     pub fn new(
         window: *mut ndk_sys::ANativeWindow,
         width: u32,
@@ -623,6 +644,9 @@ impl CxVulkan {
         Ok(vulkan)
     }
 
+    // OpenXR-provided initialization path. It shares the steady-state field
+    // layout with `new`, but keeps runtime-created instance/device ownership
+    // and failure cleanup in one visible ladder.
     pub fn new_from_openxr(
         xr: &LibOpenXr,
         xr_instance: XrInstance,
@@ -1173,6 +1197,9 @@ impl CxVulkan {
         Ok(rgba)
     }
 
+    // Window-swapchain draw path. Acquire, render, optional readback, submit,
+    // present, and suboptimal/out-of-date recovery all depend on the same
+    // surface invariants, so this remains root orchestration.
     pub fn draw_pass_and_present(
         &mut self,
         cx: &mut Cx,
@@ -1745,6 +1772,9 @@ impl CxVulkan {
         Ok(render_pass)
     }
 
+    // Offscreen draw path for texture-backed passes. Texture modules own image
+    // allocation and layout helpers; this method owns the cross-cutting
+    // render-pass/framebuffer orchestration over draw and texture state.
     pub fn draw_pass_to_texture(
         &mut self,
         cx: &mut Cx,
