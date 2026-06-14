@@ -141,6 +141,10 @@ def check_split_maps(checks):
         "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceMediaProjectionHelper.java",
         "platform/src/os/linux/android/android_java_messages.rs",
         "platform/src/os/linux/vulkan/basic_compute_probe.rs",
+        "platform/src/os/linux/vulkan/frame_resources.rs",
+        "platform/src/os/linux/vulkan/openxr_targets.rs",
+        "platform/src/os/linux/vulkan/pipeline_resources.rs",
+        "platform/src/os/linux/vulkan/texture_resources.rs",
         "platform/src/os/linux/vulkan/texture_lifetime.rs",
         "platform/src/os/linux/vulkan/video_hardware_buffer.rs",
         "platform/src/os/linux/vulkan/skinning_probe.rs",
@@ -213,7 +217,27 @@ def check_split_maps(checks):
         "MAKEPAD_ANDROID_TIMING phase=",
         "Android timing marker",
     )
-    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 7600)
+    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 4300)
+    checks.contains(
+        "platform/src/os/linux/vulkan/pipeline_resources.rs",
+        "pub(super) fn ensure_pipeline",
+        "Vulkan graphics pipeline creation owner",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/pipeline_resources.rs",
+        "create_graphics_pipelines",
+        "Vulkan graphics pipeline create call owner",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/pipeline_resources.rs",
+        "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_SHADER_INTERFACE",
+        "Vulkan video shader interface marker owner",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn ensure_pipeline(",
+        "root-owned Vulkan graphics pipeline creation",
+    )
     checks.contains(
         "platform/src/os/linux/vulkan/basic_compute_probe.rs",
         "submit_xr_storage_buffer_probe",
@@ -347,6 +371,11 @@ def check_docs(checks):
         "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
         "basic_compute_probe.rs",
         "basic Vulkan probe module map",
+    )
+    checks.contains(
+        "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md",
+        "pipeline_resources.rs",
+        "Vulkan pipeline resource module map",
     )
 
 

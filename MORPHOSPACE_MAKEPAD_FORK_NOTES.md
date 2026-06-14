@@ -133,6 +133,12 @@ This branch currently carries:
   `AHardwareBuffer`/YCbCr resource shape and the current separate
   sampled-image plus sampler descriptor binding shape before any combined
   image-sampler shader/resource fix is attempted.
+- Android Vulkan graphics pipeline and shader-resource setup now lives in
+  `platform/src/os/linux/vulkan/pipeline_resources.rs`: pipeline keys, video
+  combined immutable sampler keying, descriptor layout creation, shader module
+  creation/destruction, graphics pipeline creation, and Makepad sampler
+  creation. The root Vulkan file keeps draw recording, render-pass
+  orchestration, geometry, swapchain, and lifecycle glue.
 - A reflected Vulkan shader-resource interface from Naga/WGSL lowering, used
   to construct descriptor layouts from the shader-declared resource shape and
   to log the current video texture/sampler interface before changing it.
