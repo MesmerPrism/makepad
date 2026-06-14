@@ -141,6 +141,7 @@ def check_split_maps(checks):
         "tools/cargo_makepad/src/android/java/dev/makepad/android/MorphospaceMediaProjectionHelper.java",
         "platform/src/os/linux/android/android_java_messages.rs",
         "platform/src/os/linux/vulkan/basic_compute_probe.rs",
+        "platform/src/os/linux/vulkan/draw_recording.rs",
         "platform/src/os/linux/vulkan/frame_resources.rs",
         "platform/src/os/linux/vulkan/openxr_targets.rs",
         "platform/src/os/linux/vulkan/pipeline_resources.rs",
@@ -217,7 +218,27 @@ def check_split_maps(checks):
         "MAKEPAD_ANDROID_TIMING phase=",
         "Android timing marker",
     )
-    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 4300)
+    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 3400)
+    checks.contains(
+        "platform/src/os/linux/vulkan/draw_recording.rs",
+        "pub(super) fn record_draw_list",
+        "Vulkan draw-list traversal owner",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/draw_recording.rs",
+        "pub(super) fn record_draw_packet",
+        "Vulkan draw-packet command recording owner",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn record_draw_packet(",
+        "root-owned Vulkan draw-packet recording",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn record_draw_list(",
+        "root-owned Vulkan draw-list traversal",
+    )
     checks.contains(
         "platform/src/os/linux/vulkan/pipeline_resources.rs",
         "pub(super) fn ensure_pipeline",

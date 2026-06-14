@@ -137,8 +137,12 @@ This branch currently carries:
   `platform/src/os/linux/vulkan/pipeline_resources.rs`: pipeline keys, video
   combined immutable sampler keying, descriptor layout creation, shader module
   creation/destruction, graphics pipeline creation, and Makepad sampler
-  creation. The root Vulkan file keeps draw recording, render-pass
-  orchestration, geometry, swapchain, and lifecycle glue.
+  creation.
+- Android Vulkan draw-list traversal and draw-packet command recording now live
+  in `platform/src/os/linux/vulkan/draw_recording.rs`: packet assembly,
+  descriptor writes, packet-buffer upload, texture/sampler binding decisions,
+  and indexed draw command recording. The root Vulkan file keeps render-pass
+  orchestration, geometry, swapchain, offscreen target, and lifecycle glue.
 - A reflected Vulkan shader-resource interface from Naga/WGSL lowering, used
   to construct descriptor layouts from the shader-declared resource shape and
   to log the current video texture/sampler interface before changing it.
