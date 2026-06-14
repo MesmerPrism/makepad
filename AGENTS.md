@@ -85,7 +85,8 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
   window-swapchain, render-pass/offscreen target, and lifecycle orchestration.
   Keep host-visible buffer allocation, memory-type lookup, upload helpers, and
   geometry-resource cache ownership in `buffer_resources.rs`, reusable
-  per-frame buffer/descriptors in `frame_resources.rs`, draw-list traversal,
+  per-frame buffers plus descriptor-pool allocation/reset/destruction in
+  `frame_resources.rs`, draw-list traversal,
   draw-packet assembly, descriptor writes, packet-buffer upload, and draw
   command recording in `draw_recording.rs`, OpenXR multiview
   targets/session/readback/draw in `openxr_targets.rs`, graphics pipeline keys,

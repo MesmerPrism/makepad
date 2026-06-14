@@ -219,7 +219,7 @@ def check_split_maps(checks):
         "MAKEPAD_ANDROID_TIMING phase=",
         "Android timing marker",
     )
-    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 3100)
+    checks.line_count_at_most("platform/src/os/linux/vulkan.rs", 3000)
     checks.contains(
         "platform/src/os/linux/vulkan/buffer_resources.rs",
         "pub(super) fn create_host_buffer",
@@ -249,6 +249,26 @@ def check_split_maps(checks):
         "platform/src/os/linux/vulkan.rs",
         "fn find_memory_type(",
         "root-owned Vulkan memory-type lookup",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/frame_resources.rs",
+        "pub(super) fn alloc_frame_descriptor_set",
+        "Vulkan frame descriptor allocation owner",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/frame_resources.rs",
+        "fn create_frame_descriptor_pool",
+        "Vulkan frame descriptor-pool creation owner",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn alloc_frame_descriptor_set(",
+        "root-owned Vulkan frame descriptor allocation",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn create_frame_descriptor_pool(",
+        "root-owned Vulkan frame descriptor-pool creation",
     )
     checks.contains(
         "platform/src/os/linux/vulkan/draw_recording.rs",

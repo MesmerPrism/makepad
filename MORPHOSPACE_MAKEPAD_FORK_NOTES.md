@@ -147,6 +147,9 @@ This branch currently carries:
   lives in `platform/src/os/linux/vulkan/buffer_resources.rs`: memory-type
   lookup, host-buffer allocation/destruction, data upload helpers, alignment,
   stale geometry pruning, and geometry vertex/index buffer replacement.
+- Android Vulkan per-frame buffer and descriptor ownership lives in
+  `platform/src/os/linux/vulkan/frame_resources.rs`: descriptor-pool
+  allocation/reset/destruction, packet-buffer slices, and texture-upload slices.
 - A reflected Vulkan shader-resource interface from Naga/WGSL lowering, used
   to construct descriptor layouts from the shader-declared resource shape and
   to log the current video texture/sampler interface before changing it.

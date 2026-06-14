@@ -2207,66 +2207,6 @@ impl CxVulkan {
         Ok(())
     }
 
-    fn create_frame_descriptor_pool(&self) -> Result<vk::DescriptorPool, String> {
-        let pool_sizes = [
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: 8192,
-            },
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::SAMPLED_IMAGE,
-                descriptor_count: 4096,
-            },
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: 1024,
-            },
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::SAMPLER,
-                descriptor_count: 4096,
-            },
-        ];
-        let info = vk::DescriptorPoolCreateInfo::default()
-            .max_sets(2048)
-            .pool_sizes(&pool_sizes);
-        unsafe { self.device.create_descriptor_pool(&info, None) }
-            .map_err(|e| format!("create_descriptor_pool failed: {e:?}"))
-    }
-
-    fn alloc_frame_descriptor_set(
-        &mut self,
-        descriptor_set_layout: vk::DescriptorSetLayout,
-    ) -> Result<vk::DescriptorSet, String> {
-        if self.frame_resources.descriptor_pools.is_empty() {
-            let pool = self.create_frame_descriptor_pool()?;
-            self.frame_resources.descriptor_pools.push(pool);
-        }
-        let try_alloc = |device: &ash::Device, pool: vk::DescriptorPool| {
-            let set_layouts = [descriptor_set_layout];
-            let alloc_info = vk::DescriptorSetAllocateInfo::default()
-                .descriptor_pool(pool)
-                .set_layouts(&set_layouts);
-            unsafe { device.allocate_descriptor_sets(&alloc_info) }.map(|sets| sets[0])
-        };
-
-        let pool = *self.frame_resources.descriptor_pools.last().unwrap();
-        match try_alloc(&self.device, pool) {
-            Ok(set) => {
-                self.xr_descriptor_set_count_this_frame += 1;
-                Ok(set)
-            }
-            Err(vk::Result::ERROR_OUT_OF_POOL_MEMORY) | Err(vk::Result::ERROR_FRAGMENTED_POOL) => {
-                let pool = self.create_frame_descriptor_pool()?;
-                self.frame_resources.descriptor_pools.push(pool);
-                let set = try_alloc(&self.device, pool)
-                    .map_err(|e| format!("allocate_descriptor_sets failed: {e:?}"))?;
-                self.xr_descriptor_set_count_this_frame += 1;
-                Ok(set)
-            }
-            Err(e) => Err(format!("allocate_descriptor_sets failed: {e:?}")),
-        }
-    }
-
     fn create_surface(
         android_surface_loader: &ash::khr::android_surface::Instance,
         window: *mut ndk_sys::ANativeWindow,
