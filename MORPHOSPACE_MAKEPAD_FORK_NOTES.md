@@ -138,6 +138,9 @@ This branch currently carries:
   combined immutable sampler keying, descriptor layout creation, shader module
   creation/destruction, graphics pipeline creation, and Makepad sampler
   creation.
+- Android Vulkan reflected shader descriptor-kind mapping shared by draw
+  recording and pipeline creation now lives in
+  `platform/src/os/linux/vulkan/shader_descriptors.rs`.
 - Android Vulkan draw-list traversal and draw-packet command recording now live
   in `platform/src/os/linux/vulkan/draw_recording.rs`: packet assembly,
   descriptor writes, packet-buffer upload, texture/sampler binding decisions,

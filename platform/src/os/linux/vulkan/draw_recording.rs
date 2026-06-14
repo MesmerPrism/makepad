@@ -5,11 +5,11 @@ use crate::{
 use ash::vk;
 use std::collections::HashSet;
 
-use super::{
+use super::shader_descriptors::{
     reflected_shader_descriptor_kind_name, reflected_vulkan_descriptor_type,
-    vulkan_descriptor_type_name, CxVulkan, VulkanGeometryResource, VulkanPipelineKey,
-    VulkanRenderPassKey,
+    vulkan_descriptor_type_name,
 };
+use super::{CxVulkan, VulkanGeometryResource, VulkanPipelineKey, VulkanRenderPassKey};
 
 pub(super) struct VulkanDrawPacket {
     pub(super) shader_index: usize,

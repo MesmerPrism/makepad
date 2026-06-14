@@ -91,9 +91,10 @@ Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
   command recording in `draw_recording.rs`, OpenXR multiview
   targets/session/readback/draw in `openxr_targets.rs`, graphics pipeline keys,
   shader descriptor layouts, immutable video sampler keying, shader modules,
-  and graphics pipeline creation in `pipeline_resources.rs`, texture/image
-  resources in `texture_resources.rs`, video hardware-buffer import and texture
-  retirement in `video_hardware_buffer.rs` / `texture_lifetime.rs`, and
+  and graphics pipeline creation in `pipeline_resources.rs`, reflected shader
+  descriptor-kind mapping shared by draw/pipeline code in `shader_descriptors.rs`,
+  texture/image resources in `texture_resources.rs`, video hardware-buffer import
+  and texture retirement in `video_hardware_buffer.rs` / `texture_lifetime.rs`, and
   probe-specific shader/dispatch/readback code in child modules under
   `platform/src/os/linux/vulkan/` such as `basic_compute_probe.rs` and
   `skinning_mesh_probe.rs`. Future mesh-to-SDF, dense-SDF, ADF, or particle

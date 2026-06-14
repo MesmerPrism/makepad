@@ -2,10 +2,11 @@ use crate::{cx::Cx, draw_shader::DrawShaderAttrFormat, makepad_script::shader::T
 use ash::vk::{self, Handle};
 use std::collections::{HashMap, HashSet};
 
-use super::{
+use super::shader_descriptors::{
     reflected_shader_descriptor_kind_name, reflected_vulkan_descriptor_type,
-    vulkan_descriptor_type_name, CxVulkan, VulkanDrawPacket, VulkanRenderPassKey,
+    vulkan_descriptor_type_name,
 };
+use super::{CxVulkan, VulkanDrawPacket, VulkanRenderPassKey};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct VulkanVideoCombinedImmutableSamplerKey {

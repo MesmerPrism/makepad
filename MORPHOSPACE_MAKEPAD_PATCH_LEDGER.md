@@ -160,7 +160,9 @@ validation behavior, and legacy compatibility.
      geometry-resource-cache ownership is split to
      `platform/src/os/linux/vulkan/buffer_resources.rs`, graphics pipeline and
      shader-resource ownership is split to
-     `platform/src/os/linux/vulkan/pipeline_resources.rs`, and texture/image
+     `platform/src/os/linux/vulkan/pipeline_resources.rs`, reflected shader
+     descriptor-kind mapping shared by draw/pipeline code is split to
+     `platform/src/os/linux/vulkan/shader_descriptors.rs`, and texture/image
      resource ownership is split to
      `platform/src/os/linux/vulkan/texture_resources.rs`. Leave the root file
      focused on instance/device lifecycle, window swapchain, render-pass, and
