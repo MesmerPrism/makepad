@@ -29,6 +29,9 @@ script_mod! {
     use mod.prelude.widgets_internal.*
     use mod.widgets.*
 
+    mod.widgets.TextInputTextPlacement = #(TextInputTextPlacement::script_api(vm))
+    mod.widgets.splat(mod.widgets.TextInputTextPlacement)
+
     mod.widgets.TextInputBase = #(TextInput::register_widget(vm))
 
     mod.widgets.TextInputFlat = set_type_default() do mod.widgets.TextInputBase{

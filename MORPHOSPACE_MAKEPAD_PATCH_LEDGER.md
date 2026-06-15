@@ -223,6 +223,9 @@ but it must not define Manifold command/session/stream authority.
 
 ## Recent Patch Notes
 
+- 2026-06-15: exported `TextInputTextPlacement` through `mod.widgets` so
+  script clients can opt in with `TextInputTextPlacement.InnerAlign` instead
+  of relying on an unregistered bare enum variant.
 - 2026-06-15: added a generic `TextInput` single-line text placement option.
   The default `Layout` mode preserves existing turtle layout behavior; opt-in
   `InnerAlign` positions the text line box inside the input's inner rectangle

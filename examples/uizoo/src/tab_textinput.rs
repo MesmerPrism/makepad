@@ -43,7 +43,7 @@ script_mod! {
                 height: 44.0
                 text: "Centered"
                 label_align: Align{x: 0.5 y: 0.5}
-                text_placement: InnerAlign
+                text_placement: TextInputTextPlacement.InnerAlign
             }
 
             Hr{}
