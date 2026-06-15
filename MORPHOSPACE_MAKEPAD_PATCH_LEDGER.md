@@ -223,6 +223,15 @@ but it must not define Manifold command/session/stream authority.
 
 ## Recent Patch Notes
 
+- 2026-06-16: completed a file-family review of upstream Makepad `#1091`
+  against the pushed fork baseline. The Android packaging/lifecycle/IME/system
+  bar/runtime-symbol families were already adapted into this fork's split
+  modules. Imported the missing TOML parser hardening from `#1091` as a direct
+  upstream behavior/test port, with local rustfmt normalization, so Cargo
+  metadata parsing survives quoted table headers, inline tables, and multiline
+  strings. Expanded guard signatures for the full reviewed `#1091` subset.
+  Apple stable-toolchain cleanup remains deferred because it is unrelated to
+  the Windows GUI and Quest questionnaire control path.
 - 2026-06-16: verified the current upstream P0 Makepad PR candidates against
   `upstream/dev` and this fork, then added executable guard signatures for the
   imported/adapted Android packaging, lifecycle, splash, OpenXR, Choreographer,

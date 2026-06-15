@@ -124,14 +124,24 @@ def check_upstream_p0_imports(checks):
     compile_rs = "tools/cargo_makepad/src/android/compile.rs"
     android_mod = "tools/cargo_makepad/src/android/mod.rs"
     android_sdk = "tools/cargo_makepad/src/android/sdk.rs"
+    aab_assembly = "tools/cargo_makepad/src/android/compile/aab_assembly.rs"
     apk_assembly = "tools/cargo_makepad/src/android/compile/apk_assembly.rs"
+    packaging_inputs = "tools/cargo_makepad/src/android/compile/packaging_inputs.rs"
     shared_libs = "tools/cargo_makepad/src/android/compile/shared_libs.rs"
     rust_build = "tools/cargo_makepad/src/android/compile/rust_build.rs"
     assets = "tools/cargo_makepad/src/android/compile/assets.rs"
+    action_rs = "platform/src/action.rs"
+    amidi_sys = "platform/src/os/linux/android/amidi_sys.rs"
     android_jni = "platform/src/os/linux/android/android_jni.rs"
     android_messages = "platform/src/os/linux/android/android_java_messages.rs"
     android_rs = "platform/src/os/linux/android/android.rs"
+    ndk_sys = "platform/src/os/linux/android/ndk_sys.rs"
     openxr_rs = "platform/src/os/linux/openxr.rs"
+    toml_parser = "libs/toml_parser/src/toml.rs"
+    utils_rs = "tools/cargo_makepad/src/utils.rs"
+    keyboard_view = "widgets/src/keyboard_view.rs"
+    modal_rs = "widgets/src/modal.rs"
+    window_rs = "widgets/src/window.rs"
     activity = (
         "tools/cargo_makepad/src/android/java/dev/makepad/android/"
         "MakepadActivity.java"
@@ -196,6 +206,136 @@ def check_upstream_p0_imports(checks):
         activity,
         "setSystemBarAppearance",
         "#1091 Android system bar appearance bridge",
+    )
+    checks.contains(
+        packaging_inputs,
+        'build_crate_dir.join("resources/android/AndroidManifest.xml.template")',
+        "#1091 custom Android manifest template path",
+    )
+    checks.contains(
+        packaging_inputs,
+        '.replace("{version_code}", &args.version_code.to_string())',
+        "#1091 manifest versionCode template variable",
+    )
+    checks.contains(
+        packaging_inputs,
+        "quest_camera_permissions: opts.config.quest_camera_permissions",
+        "Morphospace Quest camera-permission manifest guard",
+    )
+    checks.contains(
+        utils_rs,
+        "pub enum VersionCodeStrategy",
+        "#1091 Android version-code strategy",
+    )
+    checks.contains(
+        utils_rs,
+        "package.metadata.makepad.android.version_code",
+        "#1091 Cargo metadata Android version code",
+    )
+    checks.contains(
+        utils_rs,
+        "pub fn read_android_package_metadata",
+        "#1091 Cargo metadata Android reader",
+    )
+    checks.contains(
+        toml_parser,
+        "pub fn read_table_header",
+        "#1091 TOML quoted/dotted table header support",
+    )
+    checks.contains(
+        toml_parser,
+        "pub fn read_basic_string",
+        "#1091 TOML basic multiline string support",
+    )
+    checks.contains(
+        toml_parser,
+        "pub fn read_literal_string",
+        "#1091 TOML literal multiline string support",
+    )
+    checks.contains(
+        toml_parser,
+        "parses_quoted_section_headers",
+        "#1091 TOML quoted section regression test",
+    )
+    checks.contains(
+        rust_build,
+        "prefer_dynamic: bool",
+        "#1091 AAB static-std switch",
+    )
+    checks.contains(
+        rust_build,
+        "if prefer_dynamic",
+        "#1091 APK-only prefer-dynamic Rust flags",
+    )
+    checks.contains(
+        aab_assembly,
+        "jarsigner",
+        "#1091 AAB jarsigner route",
+    )
+    checks.contains(
+        action_rs,
+        "let Ok(mut sender_guard) = ACTION_SENDER_GLOBAL.lock() else",
+        "#1091 shutdown-safe post_action lock handling",
+    )
+    checks.contains(
+        action_rs,
+        "if sender.send(Box::new(action)).is_ok()",
+        "#1091 shutdown-safe post_action send handling",
+    )
+    checks.contains(
+        amidi_sys,
+        'b"libamidi.so\\0"',
+        "#1091-compatible API26-safe AMidi runtime loading",
+    )
+    checks.contains(
+        amidi_sys,
+        "AMEDIA_ERROR_UNKNOWN",
+        "#1091-compatible AMidi graceful unavailable fallback",
+    )
+    checks.contains(
+        ndk_sys,
+        "ANativeWindow_setFrameRate is API 30+",
+        "#1091 API26-safe ANativeWindow symbol avoidance",
+    )
+    checks.contains(
+        android_jni,
+        "AChoreographer_postVsyncCallback",
+        "#1091 runtime Choreographer vsync lookup",
+    )
+    checks.contains(
+        android_jni,
+        "AChoreographer_postFrameCallback64",
+        "#1091 runtime Choreographer frame lookup",
+    )
+    checks.contains(
+        activity,
+        "Build.VERSION.SDK_INT >= 30",
+        "#1091 guarded API30 Activity calls",
+    )
+    checks.contains(
+        activity,
+        "MakepadImeInsets.imeAnimationInProgress",
+        "#1091 IME animation authority flag",
+    )
+    checks.contains(
+        keyboard_view,
+        "last_reconciled_keyboard_height",
+        "#1091 KeyboardView settled-height reconciliation",
+    )
+    checks.contains(
+        keyboard_view,
+        "cx.get_ime_area_rect().size.y > 0.0",
+        "#1091 KeyboardView valid-IME-area gate",
+    )
+    checks.contains(
+        modal_rs,
+        "if !self.is_open",
+        "#1091 Modal close focus no-op guard",
+    )
+    checks.contains(
+        window_rs,
+        "fn sync_system_bar_appearance",
+        "#1091 Window system bar appearance sync",
     )
 
     # makepad/makepad#1030: surface destruction is acknowledged synchronously
