@@ -284,13 +284,23 @@ def check_upstream_p0_imports(checks):
     )
     checks.contains(
         amidi_sys,
-        'b"libamidi.so\\0"',
-        "#1091-compatible API26-safe AMidi runtime loading",
+        'ModuleLoader::load("libamidi.so")',
+        "#1091-compatible API26-safe AMidi ModuleLoader path",
     )
     checks.contains(
         amidi_sys,
         "AMEDIA_ERROR_UNKNOWN",
         "#1091-compatible AMidi graceful unavailable fallback",
+    )
+    checks.not_contains(
+        amidi_sys,
+        "fn dlopen",
+        "AMidi local dlopen declaration after ModuleLoader cleanup",
+    )
+    checks.not_contains(
+        amidi_sys,
+        "fn dlsym",
+        "AMidi local dlsym declaration after ModuleLoader cleanup",
     )
     checks.contains(
         ndk_sys,

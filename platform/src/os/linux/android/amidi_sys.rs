@@ -1,9 +1,10 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+use crate::module_loader::ModuleLoader;
 use jni_sys::*;
 use makepad_jni_sys as jni_sys;
 use std::{
-    os::raw::{c_char, c_int, c_long, c_ulong, c_void},
+    os::raw::{c_long, c_ulong},
     ptr,
     sync::OnceLock,
 };
@@ -29,8 +30,6 @@ pub struct AMidiOutputPort {
 pub type media_status_t = std::os::raw::c_int;
 
 const AMEDIA_ERROR_UNKNOWN: media_status_t = -10000;
-const RTLD_NOW: c_int = 2;
-const RTLD_LOCAL: c_int = 0;
 
 type AMidiDeviceFromJava =
     unsafe extern "C" fn(*mut JNIEnv, jobject, *mut *mut AMidiDevice) -> media_status_t;
@@ -52,14 +51,8 @@ type AMidiOutputPortReceive = unsafe extern "C" fn(
     *mut i64,
 ) -> c_long;
 
-#[link(name = "dl")]
-extern "C" {
-    fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-}
-
 struct AMidiSymbols {
-    _handle: *mut c_void,
+    _lib: ModuleLoader,
     device_from_java: AMidiDeviceFromJava,
     device_release: AMidiDeviceRelease,
     device_get_num_input_ports: AMidiDeviceGetNumPorts,
@@ -78,12 +71,8 @@ unsafe impl Sync for AMidiSymbols {}
 static AMIDI: OnceLock<Option<AMidiSymbols>> = OnceLock::new();
 
 macro_rules! load_symbol {
-    ($handle:expr, $name:literal, $ty:ty) => {{
-        let ptr = unsafe { dlsym($handle, concat!($name, "\0").as_ptr() as *const c_char) };
-        if ptr.is_null() {
-            return None;
-        }
-        unsafe { std::mem::transmute::<*mut c_void, $ty>(ptr) }
+    ($lib:expr, $name:literal, $ty:ty) => {{
+        $lib.get_symbol::<$ty>($name).ok()?
     }};
 }
 
@@ -92,39 +81,27 @@ fn amidi_symbols() -> Option<&'static AMidiSymbols> {
 }
 
 fn load_amidi_symbols() -> Option<AMidiSymbols> {
-    let handle = unsafe {
-        dlopen(
-            b"libamidi.so\0".as_ptr() as *const c_char,
-            RTLD_NOW | RTLD_LOCAL,
-        )
-    };
-    if handle.is_null() {
-        return None;
-    }
+    let lib = ModuleLoader::load("libamidi.so").ok()?;
     Some(AMidiSymbols {
-        _handle: handle,
-        device_from_java: load_symbol!(handle, "AMidiDevice_fromJava", AMidiDeviceFromJava),
-        device_release: load_symbol!(handle, "AMidiDevice_release", AMidiDeviceRelease),
+        device_from_java: load_symbol!(lib, "AMidiDevice_fromJava", AMidiDeviceFromJava),
+        device_release: load_symbol!(lib, "AMidiDevice_release", AMidiDeviceRelease),
         device_get_num_input_ports: load_symbol!(
-            handle,
+            lib,
             "AMidiDevice_getNumInputPorts",
             AMidiDeviceGetNumPorts
         ),
         device_get_num_output_ports: load_symbol!(
-            handle,
+            lib,
             "AMidiDevice_getNumOutputPorts",
             AMidiDeviceGetNumPorts
         ),
-        output_port_open: load_symbol!(handle, "AMidiOutputPort_open", AMidiOutputPortOpen),
-        output_port_close: load_symbol!(handle, "AMidiOutputPort_close", AMidiOutputPortClose),
-        input_port_open: load_symbol!(handle, "AMidiInputPort_open", AMidiInputPortOpen),
-        input_port_send: load_symbol!(handle, "AMidiInputPort_send", AMidiInputPortSend),
-        input_port_close: load_symbol!(handle, "AMidiInputPort_close", AMidiInputPortClose),
-        output_port_receive: load_symbol!(
-            handle,
-            "AMidiOutputPort_receive",
-            AMidiOutputPortReceive
-        ),
+        output_port_open: load_symbol!(lib, "AMidiOutputPort_open", AMidiOutputPortOpen),
+        output_port_close: load_symbol!(lib, "AMidiOutputPort_close", AMidiOutputPortClose),
+        input_port_open: load_symbol!(lib, "AMidiInputPort_open", AMidiInputPortOpen),
+        input_port_send: load_symbol!(lib, "AMidiInputPort_send", AMidiInputPortSend),
+        input_port_close: load_symbol!(lib, "AMidiInputPort_close", AMidiInputPortClose),
+        output_port_receive: load_symbol!(lib, "AMidiOutputPort_receive", AMidiOutputPortReceive),
+        _lib: lib,
     })
 }
 

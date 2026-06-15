@@ -223,6 +223,13 @@ but it must not define Manifold command/session/stream authority.
 
 ## Recent Patch Notes
 
+- 2026-06-16: switched Android AMidi dynamic symbol loading to the shared
+  Linux `ModuleLoader` path while preserving API-26-safe optional loading,
+  cached function pointers, and graceful fallback when `libamidi.so` is absent.
+  Repo audit found the next active Linux direct-loader candidate in Vulkan
+  hardware-buffer texture lifetime (`AHardwareBuffer_getId` lookup); keep that
+  as a separate GPU/HWB cleanup slice with Vulkan validation rather than mixing
+  it into the AMidi refactor.
 - 2026-06-16: completed a file-family review of upstream Makepad `#1091`
   against the pushed fork baseline. The Android packaging/lifecycle/IME/system
   bar/runtime-symbol families were already adapted into this fork's split
