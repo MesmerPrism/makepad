@@ -40,6 +40,7 @@ script_mod! {
         is_password: false
         is_read_only: false
         is_numeric_only: false
+        text_placement: Layout
         empty_text: "Your text here"
         scroll_bar: mod.widgets.ScrollBar {
             bar_size: 8.0
@@ -486,6 +487,17 @@ script_mod! {
     }
 }
 
+/// Controls how single-line text is positioned inside a `TextInput`.
+#[derive(Copy, Clone, Debug, PartialEq, Script, ScriptHook)]
+pub enum TextInputTextPlacement {
+    /// Preserve the existing Makepad turtle layout behavior.
+    #[pick]
+    Layout,
+    /// Align the single-line text box inside the input's inner rect using
+    /// `label_align`. Multiline inputs keep the scrollable layout path.
+    InnerAlign,
+}
+
 #[derive(Script, Widget, Animator)]
 pub struct TextInput {
     #[uid]
@@ -513,6 +525,8 @@ pub struct TextInput {
     walk: Walk,
     #[live]
     label_align: Align,
+    #[live]
+    text_placement: TextInputTextPlacement,
 
     #[live]
     is_password: bool,
@@ -851,6 +865,75 @@ impl TextInput {
         }
     }
 
+    fn align_offset(available: f64, content: f64, align: f64) -> f64 {
+        if !available.is_finite() || !content.is_finite() {
+            return 0.0;
+        }
+        (available - content).max(0.0) * align
+    }
+
+    fn aligned_origin_y(
+        inner_y: f64,
+        inner_height: f64,
+        line_top: f64,
+        line_height: f64,
+        align_y: f64,
+    ) -> f64 {
+        let aligned_line_top = inner_y + Self::align_offset(inner_height, line_height, align_y);
+        aligned_line_top - line_top
+    }
+
+    fn line_box_for_alignment(laidout_text: &LaidoutText, font_scale: f64) -> Option<(f64, f64)> {
+        let row = laidout_text.rows.first()?;
+        let line_top = ((row.origin_in_lpxs.y - row.ascender_in_lpxs) as f64) * font_scale;
+        let line_height = ((row.ascender_in_lpxs - row.descender_in_lpxs) as f64) * font_scale;
+        Some((line_top, line_height))
+    }
+
+    fn inner_aligned_text_origin(
+        &self,
+        inner_rect: Rect,
+        laidout_text: &LaidoutText,
+    ) -> Option<Vec2d> {
+        if self.is_multiline || self.text_placement != TextInputTextPlacement::InnerAlign {
+            return None;
+        }
+        if !inner_rect.size.y.is_finite() {
+            return None;
+        }
+
+        let font_scale = self.draw_text.font_scale as f64;
+        let content_width = (laidout_text.size_in_lpxs.width as f64) * font_scale;
+        let (line_top, line_height) = Self::line_box_for_alignment(laidout_text, font_scale)?;
+
+        Some(dvec2(
+            inner_rect.pos.x
+                + Self::align_offset(inner_rect.size.x, content_width, self.label_align.x),
+            Self::aligned_origin_y(
+                inner_rect.pos.y,
+                inner_rect.size.y,
+                line_top,
+                line_height,
+                self.label_align.y,
+            ),
+        ))
+    }
+
+    fn inner_aligned_text_walk(&self, origin: Vec2d, laidout_text: &LaidoutText) -> Walk {
+        let font_scale = self.draw_text.font_scale as f64;
+        Walk {
+            abs_pos: Some(origin),
+            margin: Inset::default(),
+            width: Size::Fixed((laidout_text.size_in_lpxs.width as f64) * font_scale),
+            height: Size::Fixed((laidout_text.size_in_lpxs.height as f64) * font_scale),
+            metrics: Metrics {
+                descender: -laidout_text.rows.last().unwrap().descender_in_lpxs as f64,
+                line_gap: 0.0,
+                line_scale: 1.0,
+            },
+        }
+    }
+
     fn layout_text(&mut self, cx: &mut Cx2d) {
         let turtle_rect = cx.turtle().inner_rect();
         // For single-line mode, don't constrain the max width so the text lays out
@@ -891,12 +974,40 @@ impl TextInput {
     fn draw_text(&mut self, cx: &mut Cx2d) -> Rect {
         let inner_walk = self.inner_walk();
         let text_rect = if self.text.is_empty() {
-            self.draw_text
-                .draw_walk(cx, inner_walk, self.label_align, &self.empty_text)
+            if self.text_placement == TextInputTextPlacement::InnerAlign {
+                let laidout_text = self.draw_text.layout(
+                    cx,
+                    0.0,
+                    0.0,
+                    None,
+                    false,
+                    self.label_align,
+                    &self.empty_text,
+                );
+                if let Some(origin) =
+                    self.inner_aligned_text_origin(cx.turtle().inner_rect(), &laidout_text)
+                {
+                    let walk = self.inner_aligned_text_walk(origin, &laidout_text);
+                    self.draw_text.draw_walk_laidout(cx, walk, &laidout_text)
+                } else {
+                    self.draw_text
+                        .draw_walk(cx, inner_walk, self.label_align, &self.empty_text)
+                }
+            } else {
+                self.draw_text
+                    .draw_walk(cx, inner_walk, self.label_align, &self.empty_text)
+            }
         } else {
             let laidout_text = self.laidout_text.as_ref().unwrap();
-            self.draw_text
-                .draw_walk_laidout(cx, inner_walk, laidout_text)
+            if let Some(origin) =
+                self.inner_aligned_text_origin(cx.turtle().inner_rect(), laidout_text)
+            {
+                let walk = self.inner_aligned_text_walk(origin, laidout_text);
+                self.draw_text.draw_walk_laidout(cx, walk, laidout_text)
+            } else {
+                self.draw_text
+                    .draw_walk_laidout(cx, inner_walk, laidout_text)
+            }
         };
         cx.add_aligned_rect_area(&mut self.text_area, text_rect);
         text_rect
@@ -1000,12 +1111,15 @@ impl TextInput {
             max_y = max_y.max(rect_in_lpxs.origin.y + rect_in_lpxs.size.height);
         }
 
-        // Convert to screen coordinates using widget position as base
-        let text_offset_x = widget_rect.pos.x + self.layout.padding.left as f64;
-        let text_offset_y = widget_rect.pos.y + self.layout.padding.top as f64;
+        let text_area_rect = self.text_area.rect(cx);
+        let text_offset = if text_area_rect.size.x > 0.0 || text_area_rect.size.y > 0.0 {
+            text_area_rect.pos
+        } else {
+            widget_rect.pos + dvec2(self.layout.padding.left, self.layout.padding.top)
+        };
 
-        let sel_x = text_offset_x + (min_x * self.draw_text.font_scale) as f64 - self.scroll_x;
-        let sel_y = text_offset_y + (min_y * self.draw_text.font_scale) as f64 - self.scroll_y;
+        let sel_x = text_offset.x + (min_x * self.draw_text.font_scale) as f64;
+        let sel_y = text_offset.y + (min_y * self.draw_text.font_scale) as f64;
         let sel_width = ((max_x - min_x) * self.draw_text.font_scale) as f64;
         let sel_height = ((max_y - min_y) * self.draw_text.font_scale) as f64;
 
@@ -2679,6 +2793,28 @@ impl History {
         self.current_edit_kind = None;
         self.undo_stack.clear();
         self.redo_stack.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TextInput;
+
+    #[test]
+    fn text_input_align_offset_centers_when_content_fits() {
+        assert_eq!(TextInput::align_offset(48.0, 20.0, 0.5), 14.0);
+        assert_eq!(TextInput::align_offset(48.0, 20.0, 1.0), 28.0);
+    }
+
+    #[test]
+    fn text_input_align_offset_does_not_shift_overflowing_content() {
+        assert_eq!(TextInput::align_offset(20.0, 48.0, 0.5), 0.0);
+    }
+
+    #[test]
+    fn text_input_aligned_origin_y_places_line_box_center() {
+        let origin_y = TextInput::aligned_origin_y(100.0, 48.0, 2.0, 20.0, 0.5);
+        assert!((origin_y - 112.0).abs() < f64::EPSILON);
     }
 }
 

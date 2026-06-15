@@ -37,6 +37,16 @@ script_mod! {
             TextInput{empty_text: "Some text"}
 
             Hr{}
+            H4{text: "TextInput centered content"}
+            TextInput{
+                width: Fill
+                height: 44.0
+                text: "Centered"
+                label_align: Align{x: 0.5 y: 0.5}
+                text_placement: InnerAlign
+            }
+
+            Hr{}
             H4{text: "TextInputFlat"}
             TextInputFlat{empty_text: "Inline Label"}
 

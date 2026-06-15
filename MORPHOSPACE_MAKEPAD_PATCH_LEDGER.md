@@ -221,6 +221,15 @@ schema/fixture workspaces Makepad-free. Makepad may prove app-shell,
 packaging, rendering, Android, OpenXR, Vulkan, and generated-shell behavior,
 but it must not define Manifold command/session/stream authority.
 
+## Recent Patch Notes
+
+- 2026-06-15: added a generic `TextInput` single-line text placement option.
+  The default `Layout` mode preserves existing turtle layout behavior; opt-in
+  `InnerAlign` positions the text line box inside the input's inner rectangle
+  using `label_align`, so fixed-height inputs can center content without
+  per-control padding tweaks. This stays in the widget patch family and does
+  not add downstream questionnaire, Quest, Manifold, or Morphospace authority.
+
 ## Update Policy
 
 Before adding behavior to this fork:
