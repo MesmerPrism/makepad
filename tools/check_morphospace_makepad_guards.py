@@ -118,6 +118,232 @@ def check_h264_defaults(checks):
     checks.line_count_at_most(facade, 1100)
 
 
+def check_upstream_p0_imports(checks):
+    """Guard imported/adapted upstream Android and packaging P0 fixes."""
+
+    compile_rs = "tools/cargo_makepad/src/android/compile.rs"
+    android_mod = "tools/cargo_makepad/src/android/mod.rs"
+    android_sdk = "tools/cargo_makepad/src/android/sdk.rs"
+    apk_assembly = "tools/cargo_makepad/src/android/compile/apk_assembly.rs"
+    shared_libs = "tools/cargo_makepad/src/android/compile/shared_libs.rs"
+    rust_build = "tools/cargo_makepad/src/android/compile/rust_build.rs"
+    assets = "tools/cargo_makepad/src/android/compile/assets.rs"
+    android_jni = "platform/src/os/linux/android/android_jni.rs"
+    android_messages = "platform/src/os/linux/android/android_java_messages.rs"
+    android_rs = "platform/src/os/linux/android/android.rs"
+    openxr_rs = "platform/src/os/linux/openxr.rs"
+    activity = (
+        "tools/cargo_makepad/src/android/java/dev/makepad/android/"
+        "MakepadActivity.java"
+    )
+
+    # makepad/makepad#893: use the crate name, not the binary/app label, for
+    # Android Rust shared-library lookup.
+    checks.contains(
+        compile_rs,
+        "let underscore_build_crate = build_crate.replace('-', \"_\");",
+        "#893 crate-name shared-library lookup input",
+    )
+    checks.contains(
+        apk_assembly,
+        "lib{underscore_target}.so",
+        "#893 APK Rust shared-library lookup path",
+    )
+    checks.contains(
+        shared_libs,
+        "lib{underscore_target}.so",
+        "#893 AAB Rust shared-library lookup path",
+    )
+
+    # makepad/makepad#1091 packaging subset: API floor/target split, AAB route,
+    # stable Android toolchain, manifest templates, and system bar appearance.
+    checks.contains(android_sdk, "sdk_version: 26,", "#1091 min SDK floor")
+    checks.contains(android_sdk, "target_sdk_version: 35,", "#1091 target SDK")
+    checks.contains(
+        android_sdk,
+        "ensure_rust_toolchain_installed(\"stable\")",
+        "#1091 stable Android Rust toolchain install",
+    )
+    checks.contains(android_sdk, "BUNDLETOOL_JAR_REL", "#1091 bundletool install")
+    checks.contains(android_mod, "build-aab", "#1091 Android App Bundle command")
+    checks.contains(android_mod, "keystore-create", "#1091 keystore command")
+    checks.contains(
+        android_mod,
+        "{min_sdk_version}",
+        "#1091 manifest minSdk template variable",
+    )
+    checks.contains(
+        android_mod,
+        "{target_sdk_version}",
+        "#1091 manifest targetSdk template variable",
+    )
+    checks.contains(
+        compile_rs,
+        "pub fn build_aab",
+        "#1091 AAB build entry point",
+    )
+    checks.contains(
+        rust_build,
+        "\"stable\"",
+        "#1091 stable Android cargo invocation",
+    )
+    checks.contains(
+        "platform/src/display_context.rs",
+        "pub enum SystemBarAppearance",
+        "#1091 system bar appearance API",
+    )
+    checks.contains(
+        activity,
+        "setSystemBarAppearance",
+        "#1091 Android system bar appearance bridge",
+    )
+
+    # makepad/makepad#1030: surface destruction is acknowledged synchronously
+    # and drawing is gated on surface validity.
+    checks.contains(android_jni, "pub type SurfaceAck", "#1030 surface ack type")
+    checks.contains(android_jni, "wait_surface_ack", "#1030 surface ack wait")
+    checks.contains(
+        android_messages,
+        "FromJavaMessage::SurfaceDestroyed { ack }",
+        "#1030 acknowledged SurfaceDestroyed message",
+    )
+    checks.contains(
+        android_messages,
+        "self.os.surface_alive = false",
+        "#1030 synchronous surface_alive clear",
+    )
+    checks.contains(
+        android_rs,
+        "pub(crate) fn has_drawable_surface",
+        "#1030 drawable-surface gate",
+    )
+    checks.contains(
+        android_rs,
+        "pub(crate) fn try_make_current",
+        "#1030 fallible EGL rebind",
+    )
+
+    # makepad/makepad#1043 and #895: launch/resume surface cover and Android
+    # splash theme support.
+    checks.contains(
+        android_rs,
+        "hide_surface_cover_after_first_present",
+        "#1043 hide launch cover after first present",
+    )
+    checks.contains(
+        android_jni,
+        "to_java_set_surface_cover_visible",
+        "#1043 surface cover JNI bridge",
+    )
+    checks.contains(
+        activity,
+        "mSurfaceRecoveryOverlayVisible",
+        "#1043 surface recovery overlay state",
+    )
+    checks.contains(
+        "tools/cargo_makepad/src/android/res/values/styles.xml",
+        "MakepadLaunchTheme",
+        "#895 pre-Android-12 launch theme",
+    )
+    checks.contains(
+        "tools/cargo_makepad/src/android/res/values-v31/styles.xml",
+        "windowSplashScreenBackground",
+        "#895 Android 12 splash theme",
+    )
+    checks.contains(
+        android_mod,
+        "android:theme=\"@style/MakepadLaunchTheme\"",
+        "#895 generated manifest launch theme",
+    )
+
+    # makepad/makepad#977: Linux NDK install extracts the whole zip before
+    # copying the needed subtree instead of relying on a fragile unzip glob.
+    checks.contains(
+        android_sdk,
+        "Extract the entire NDK zip, then copy the needed subtree(s).",
+        "#977 Linux NDK unzip strategy",
+    )
+    checks.contains(
+        android_sdk,
+        "android-ndk-r28b",
+        "#977 explicit NDK zip root",
+    )
+
+    # makepad/makepad#1073: mobile bundles do not duplicate font files that
+    # already ship in a sibling resources directory.
+    checks.contains(
+        assets,
+        "Skip files that already ship from the sibling `resources/` dir",
+        "#1073 mobile font deduplication",
+    )
+    checks.contains(
+        assets,
+        "resource_dir.join(path).is_file()",
+        "#1073 sibling-resource font deduplication check",
+    )
+
+    # makepad/makepad#989: OpenXR extension setup remains valid for Android
+    # builds without the Vulkan backend enabled.
+    checks.contains(
+        openxr_rs,
+        "#[cfg(not(use_vulkan))]\n        let mut exts_needed = vec![",
+        "#989 non-Vulkan OpenXR extension list",
+    )
+
+    # makepad/makepad#520 was merged to the old `rik` branch, not current
+    # upstream dev. Keep only the compatible runtime fallback shape.
+    checks.contains(
+        android_jni,
+        "CHOREOGRAPHER_POST_CALLBACK_FN",
+        "#520-compatible Choreographer callback lookup",
+    )
+    checks.contains(
+        android_jni,
+        "no_android_choreographer",
+        "#520-compatible Choreographer fallback cfg",
+    )
+
+
+def check_text_input_alignment(checks):
+    text_input = "widgets/src/text_input.rs"
+
+    checks.contains(
+        text_input,
+        "pub enum TextInputTextPlacement",
+        "TextInput placement enum",
+    )
+    checks.contains(
+        text_input,
+        "InnerAlign",
+        "TextInput inner alignment placement",
+    )
+    checks.contains(
+        text_input,
+        "mod.widgets.TextInputTextPlacement",
+        "script-visible TextInput placement enum",
+    )
+    checks.contains(
+        text_input,
+        "fn inner_aligned_text_origin",
+        "TextInput inner alignment origin helper",
+    )
+    checks.contains(
+        text_input,
+        "fn text_layout_align",
+        "TextInput neutral internal alignment helper",
+    )
+    checks.contains(
+        text_input,
+        "text_input_aligned_origin_y_places_line_box_center",
+        "TextInput alignment unit test",
+    )
+    checks.contains(
+        "examples/uizoo/src/tab_textinput.rs",
+        "TextInputTextPlacement.InnerAlign",
+        "UIZoo TextInput inner alignment example",
+    )
+
+
 def check_split_maps(checks):
     required_modules = [
         "tools/cargo_makepad/src/android/compile/aab_assembly.rs",
@@ -459,6 +685,8 @@ def check_docs(checks):
 def main():
     checks = Checks()
     check_h264_defaults(checks)
+    check_upstream_p0_imports(checks)
+    check_text_input_alignment(checks)
     check_split_maps(checks)
     check_docs(checks)
 

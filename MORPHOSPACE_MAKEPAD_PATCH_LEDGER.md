@@ -223,6 +223,13 @@ but it must not define Manifold command/session/stream authority.
 
 ## Recent Patch Notes
 
+- 2026-06-16: verified the current upstream P0 Makepad PR candidates against
+  `upstream/dev` and this fork, then added executable guard signatures for the
+  imported/adapted Android packaging, lifecycle, splash, OpenXR, Choreographer,
+  font-deduplication, and TextInput inner-alignment slices. The broad upstream
+  `#1091` Android overhaul remains an adapted subset in this fork rather than a
+  whole-merge import; exact `#520` import is rejected/deferred because it merged
+  to historical `rik`, while this fork keeps the current runtime fallback shape.
 - 2026-06-15: fixed `TextInputTextPlacement.InnerAlign` to measure/draw the
   text row with neutral internal horizontal layout while using `label_align` for
   the outer inner-rect placement. This prevents double horizontal alignment.
