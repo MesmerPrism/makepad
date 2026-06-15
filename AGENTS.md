@@ -108,6 +108,12 @@ projection policy, scorecard markers, runtime profile keys, and public example
 code out of this Makepad fork unless the change is a general Makepad adapter or
 an upstreamable Makepad fix.
 
+Downstream Android property namespaces, projection profile names, and product
+runtime knobs are not Makepad-fork authority. If a platform property is added
+here, it must be generic Makepad platform behavior with a matching consumer in
+this fork; downstream apps still own app-scoped settings, effective receipts,
+and runtime markers.
+
 When extracting generic tracked-space output from Makepad/OpenXR events, target
 Rusty Lattice naming outside this fork: `Lattice*` contracts and
 `rusty.lattice.*` schema IDs for spaces, transforms, tracked poses, view sets,
