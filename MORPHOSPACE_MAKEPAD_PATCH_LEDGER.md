@@ -223,6 +223,9 @@ but it must not define Manifold command/session/stream authority.
 
 ## Recent Patch Notes
 
+- 2026-06-15: fixed `TextInputTextPlacement.InnerAlign` to measure/draw the
+  text row with neutral internal horizontal layout while using `label_align` for
+  the outer inner-rect placement. This prevents double horizontal alignment.
 - 2026-06-15: exported `TextInputTextPlacement` through `mod.widgets` so
   script clients can opt in with `TextInputTextPlacement.InnerAlign` instead
   of relying on an unregistered bare enum variant.

@@ -937,6 +937,17 @@ impl TextInput {
         }
     }
 
+    fn text_layout_align(&self) -> Align {
+        if !self.is_multiline && self.text_placement == TextInputTextPlacement::InnerAlign {
+            Align {
+                x: 0.0,
+                y: self.label_align.y,
+            }
+        } else {
+            self.label_align
+        }
+    }
+
     fn layout_text(&mut self, cx: &mut Cx2d) {
         let turtle_rect = cx.turtle().inner_rect();
         // For single-line mode, don't constrain the max width so the text lays out
@@ -969,7 +980,7 @@ impl TextInput {
             0.0,
             max_width_in_lpxs,
             wrap,
-            self.label_align,
+            self.text_layout_align(),
             text,
         ));
     }
@@ -984,7 +995,7 @@ impl TextInput {
                     0.0,
                     None,
                     false,
-                    self.label_align,
+                    self.text_layout_align(),
                     &self.empty_text,
                 );
                 if let Some(origin) =
