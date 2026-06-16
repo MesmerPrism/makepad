@@ -793,6 +793,31 @@ def check_split_maps(checks):
         'self.mark_all_submitted_work_completed("device-wait-idle")',
         "Vulkan device-idle completion watermark update",
     )
+    checks.contains(
+        "platform/src/os/linux/opengl.rs",
+        "pub(crate) fn oes_external_texture_supported",
+        "Android OpenGL OES video capability gate",
+    )
+    checks.contains(
+        "platform/src/os/linux/opengl.rs",
+        "pub struct OesBlitContext",
+        "Android OpenGL OES-to-2D video companion blit helper",
+    )
+    checks.contains(
+        "platform/src/os/linux/opengl.rs",
+        "pub fn ensure_2d_companion",
+        "Android OpenGL VideoExternal 2D companion allocation",
+    )
+    checks.contains(
+        "platform/src/os/linux/android/android.rs",
+        "video_external_texture_ids: HashMap::new()",
+        "Android OpenGL video texture-id tracking",
+    )
+    checks.contains(
+        "platform/src/os/linux/android/android_java_messages.rs",
+        "ensure_2d_companion",
+        "Android OpenGL video prepared-size companion resize",
+    )
     checks.not_contains(
         "platform/src/os/linux/vulkan/texture_lifetime.rs",
         "dlopen(",

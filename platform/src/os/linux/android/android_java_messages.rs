@@ -910,6 +910,22 @@ impl Cx {
                     self.os
                         .video_surfaces
                         .insert(LiveId(video_id), surface_texture);
+                    #[cfg(not(use_vulkan))]
+                    if video_width > 0 && video_height > 0 {
+                        if let Some(texture_id) = self
+                            .os
+                            .video_external_texture_ids
+                            .get(&LiveId(video_id))
+                            .copied()
+                        {
+                            let gl = self.os.gl() as *const LibGl;
+                            self.textures[texture_id].ensure_2d_companion(
+                                unsafe { &*gl },
+                                video_width as i32,
+                                video_height as i32,
+                            );
+                        }
+                    }
                 }
                 self.call_event_handler(&e);
             }

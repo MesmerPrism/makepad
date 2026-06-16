@@ -224,6 +224,15 @@ but it must not define Manifold command/session/stream authority.
 
 ## Recent Patch Notes
 
+- 2026-06-16: evaluated
+  `https://github.com/alanpoon/makepad/tree/video_player_fix_android` as a
+  diff-only Android video candidate and imported only the non-Vulkan OpenGL
+  `VideoExternal` fallback. Android OpenGL video playback now tracks the
+  Makepad texture id for native `SurfaceTexture` playback, allocates/resizes a
+  sampler2D companion texture, blits OES frames into it after
+  `updateTexImage`, and substitutes OES shader sampling only when the backend
+  reports it is unsafe. Rejected the branch as a whole-merge candidate and did
+  not touch the Quest Vulkan/XR direct-HWB path.
 - 2026-06-16: imported/adapted upstream makepad/makepad#922 so attribute
   packing aligns every non-float instance attribute, including single-slot
   UInt/SInt values, to the same vec4 boundary used by GLSL. Metal

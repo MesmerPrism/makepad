@@ -1065,6 +1065,41 @@ impl Cx {
                 }
             }
         }
+        #[cfg(not(use_vulkan))]
+        for live_id in &videos_to_update {
+            let Some(texture_id) = self.os.video_external_texture_ids.get(live_id).copied() else {
+                continue;
+            };
+            let texture = &self.textures[texture_id];
+            let oes_texture = texture.os.gl_texture;
+            let companion = texture.os.gl_2d_companion;
+            let companion_fbo = texture.os.gl_2d_companion_fbo;
+            let companion_size = texture.os.gl_2d_companion_size;
+            let (Some(oes_texture), Some(_companion), Some(companion_fbo)) =
+                (oes_texture, companion, companion_fbo)
+            else {
+                continue;
+            };
+            if companion_size.0 <= 0 || companion_size.1 <= 0 {
+                continue;
+            }
+            if self.os.oes_blit.is_none() {
+                let result = crate::os::linux::opengl::OesBlitContext::try_new(self.os.gl());
+                if let Err(err) = &result {
+                    crate::warning!("OES video companion blit init failed: {err}");
+                }
+                self.os.oes_blit = Some(result);
+            }
+            if let Some(Ok(blit)) = self.os.oes_blit.as_ref() {
+                blit.blit(
+                    self.os.gl(),
+                    oes_texture,
+                    companion_fbo,
+                    companion_size.0,
+                    companion_size.1,
+                );
+            }
+        }
         videos_to_update
     }
 
@@ -2162,6 +2197,10 @@ impl Cx {
                             "VIDEO: MAKEPAD_FORCE_SOFTWARE_VIDEO ignored for native-only video source"
                         );
                     }
+                    #[cfg(not(use_vulkan))]
+                    self.os
+                        .video_external_texture_ids
+                        .insert(video_id, texture_id);
                     // Notify widget so it can bind textures to shader slots
                     // (needed if native decode fails and we fall back to software)
                     self.call_event_handler(&Event::VideoYuvTexturesReady(VideoYuvTexturesReady {
@@ -2249,6 +2288,8 @@ impl Cx {
                     }
                 }
                 CxOsOp::CleanupVideoPlaybackResources(video_id) => {
+                    #[cfg(not(use_vulkan))]
+                    self.os.video_external_texture_ids.remove(&video_id);
                     if let Some(mut player) = self.os.camera_players.remove(&video_id) {
                         player.cleanup();
                         unsafe {
@@ -3535,6 +3576,10 @@ impl Default for CxOs {
             fullscreen: false,
             timers: Default::default(),
             video_surfaces: HashMap::new(),
+            #[cfg(not(use_vulkan))]
+            video_external_texture_ids: HashMap::new(),
+            #[cfg(not(use_vulkan))]
+            oes_blit: None,
             video_configs: HashMap::new(),
             camera_players: HashMap::new(),
             #[cfg(use_vulkan)]
@@ -3687,6 +3732,10 @@ pub struct CxOs {
     pub(crate) vulkan: Option<CxVulkan>,
     pub(crate) media: CxAndroidMedia,
     pub(crate) video_surfaces: HashMap<LiveId, jobject>,
+    #[cfg(not(use_vulkan))]
+    pub(crate) video_external_texture_ids: HashMap<LiveId, TextureId>,
+    #[cfg(not(use_vulkan))]
+    pub(crate) oes_blit: Option<Result<crate::os::linux::opengl::OesBlitContext, String>>,
     pub(crate) video_configs: HashMap<LiveId, AndroidVideoConfig>,
     pub(crate) camera_players: HashMap<LiveId, AndroidCameraPlayer>,
     #[cfg(use_vulkan)]

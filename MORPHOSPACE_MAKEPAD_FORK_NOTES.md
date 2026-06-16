@@ -100,6 +100,12 @@ This branch currently carries:
   permission filtering: camera-free apps need both no camera permissions in the
   generated APK and no passive runtime camera discovery when streaming is
   disabled.
+- An adapted Android OpenGL `VideoExternal` fallback from
+  `alanpoon/makepad:video_player_fix_android`: non-Vulkan Android video
+  playback now can blit `SurfaceTexture`/OES frames into a sampler2D companion
+  texture for Adreno/emulator/OpenHarmony shader compatibility. This is a
+  GL-only widget/video mechanics import; it does not change the Quest
+  Vulkan/XR direct-hardware-buffer camera path.
 - Quest manifest launch semantics for generated XR activities, including
   VR-only/focus-aware metadata and non-resizeable activity declarations needed
   to distinguish immersive presentation from Horizon OS volumetric-window
