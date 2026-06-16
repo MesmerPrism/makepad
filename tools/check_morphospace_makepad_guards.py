@@ -524,6 +524,58 @@ def check_text_input_alignment(checks):
     )
 
 
+def check_shader_layout_imports(checks):
+    draw_shader = "platform/src/draw_shader.rs"
+    shader_metal = "platform/script/src/shader_metal.rs"
+    patch_ledger = "MORPHOSPACE_MAKEPAD_PATCH_LEDGER.md"
+
+    checks.contains(
+        draw_shader,
+        "let needs_int_align = attr_format != DrawShaderAttrFormat::Float;",
+        "#922 non-float attribute alignment without single-slot blind spot",
+    )
+    checks.not_contains(
+        draw_shader,
+        "attr_format != DrawShaderAttrFormat::Float && slots > 1",
+        "#922 old single-slot integer alignment guard",
+    )
+    checks.contains(
+        draw_shader,
+        "attribute_packing_aligns_single_slot_uint_instances",
+        "#922 UInt instance-layout regression test",
+    )
+    checks.contains(
+        draw_shader,
+        "attribute_packing_aligns_single_slot_sint_instances",
+        "#922 SInt instance-layout regression test",
+    )
+    checks.contains(
+        shader_metal,
+        "fn metal_instance_is_non_float_pod_ty",
+        "#922 Metal non-float instance type helper",
+    )
+    checks.contains(
+        shader_metal,
+        "fn metal_write_instance_padding",
+        "#922 Metal IoInstanceRaw padding helper",
+    )
+    checks.contains(
+        shader_metal,
+        "float _instance_pad_{};",
+        "#922 Metal IoInstanceRaw explicit padding fields",
+    )
+    checks.contains(
+        shader_metal,
+        "metal_instance_padding_matches_single_slot_integer_layout",
+        "#922 Metal padding regression test",
+    )
+    checks.contains(
+        patch_ledger,
+        "makepad/makepad#922",
+        "#922 patch ledger traceability",
+    )
+
+
 def check_split_maps(checks):
     required_modules = [
         "tools/cargo_makepad/src/android/compile/aab_assembly.rs",
@@ -887,6 +939,7 @@ def main():
     check_h264_defaults(checks)
     check_upstream_p0_imports(checks)
     check_text_input_alignment(checks)
+    check_shader_layout_imports(checks)
     check_split_maps(checks)
     check_docs(checks)
 

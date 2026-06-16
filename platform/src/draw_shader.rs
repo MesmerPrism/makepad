@@ -221,7 +221,7 @@ impl DrawShaderInputs {
     pub fn push(&mut self, id: LiveId, slots: usize, attr_format: DrawShaderAttrFormat) {
         match self.packing_method {
             DrawShaderInputPacking::Attribute => {
-                let needs_int_align = attr_format != DrawShaderAttrFormat::Float && slots > 1;
+                let needs_int_align = attr_format != DrawShaderAttrFormat::Float;
                 if needs_int_align && (self.total_slots & 3) != 0 {
                     self.total_slots += 4 - (self.total_slots & 3);
                 }
@@ -321,6 +321,37 @@ impl DrawShaderInputs {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attribute_packing_aligns_single_slot_uint_instances() {
+        let mut inputs = DrawShaderInputs::new(DrawShaderInputPacking::Attribute);
+        inputs.push(LiveId(1), 1, DrawShaderAttrFormat::Float);
+        inputs.push(LiveId(2), 1, DrawShaderAttrFormat::Float);
+        inputs.push(LiveId(3), 1, DrawShaderAttrFormat::UInt);
+        inputs.push(LiveId(4), 2, DrawShaderAttrFormat::Float);
+
+        assert_eq!(inputs.inputs[0].offset, 0);
+        assert_eq!(inputs.inputs[1].offset, 1);
+        assert_eq!(inputs.inputs[2].offset, 4);
+        assert_eq!(inputs.inputs[3].offset, 8);
+        assert_eq!(inputs.total_slots, 10);
+    }
+
+    #[test]
+    fn attribute_packing_aligns_single_slot_sint_instances() {
+        let mut inputs = DrawShaderInputs::new(DrawShaderInputPacking::Attribute);
+        inputs.push(LiveId(1), 1, DrawShaderAttrFormat::Float);
+        inputs.push(LiveId(2), 1, DrawShaderAttrFormat::SInt);
+
+        assert_eq!(inputs.inputs[0].offset, 0);
+        assert_eq!(inputs.inputs[1].offset, 4);
+        assert_eq!(inputs.total_slots, 8);
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::pod::{ScriptPodMat, ScriptPodTy};
+use crate::pod::{ScriptPodMat, ScriptPodTy, ScriptPodVec};
 use crate::shader::{ShaderIoKind, ShaderOutput, TextureType};
 use crate::vm::ScriptVm;
 use makepad_live_id::{id, LiveId};
@@ -152,42 +152,86 @@ impl ShaderOutput {
         writeln!(out, "}};").ok();
     }
 
+    fn metal_instance_is_non_float_pod_ty(ty: &ScriptPodTy) -> bool {
+        match ty {
+            ScriptPodTy::U32
+            | ScriptPodTy::AtomicU32
+            | ScriptPodTy::Bool
+            | ScriptPodTy::I32
+            | ScriptPodTy::AtomicI32 => true,
+            ScriptPodTy::Vec(v) => matches!(
+                v,
+                ScriptPodVec::Vec2u
+                    | ScriptPodVec::Vec3u
+                    | ScriptPodVec::Vec4u
+                    | ScriptPodVec::Vec2b
+                    | ScriptPodVec::Vec3b
+                    | ScriptPodVec::Vec4b
+                    | ScriptPodVec::Vec2i
+                    | ScriptPodVec::Vec3i
+                    | ScriptPodVec::Vec4i
+            ),
+            _ => false,
+        }
+    }
+
+    fn metal_instance_is_non_float(vm: &ScriptVm, ty: crate::ScriptPodType) -> bool {
+        let pod_ty = vm.bx.heap.pod_type_ref(ty);
+        Self::metal_instance_is_non_float_pod_ty(&pod_ty.ty)
+    }
+
+    fn metal_write_instance_padding(
+        out: &mut String,
+        current_slot: &mut usize,
+        pad_idx: &mut usize,
+    ) {
+        if (*current_slot & 3) == 0 {
+            return;
+        }
+        let pad = 4 - (*current_slot & 3);
+        for _ in 0..pad {
+            writeln!(out, "    float _instance_pad_{};", pad_idx).ok();
+            *pad_idx += 1;
+            *current_slot += 1;
+        }
+    }
+
     pub fn metal_create_instance_struct(&self, vm: &ScriptVm, out: &mut String) {
         writeln!(out, "struct IoInstanceRaw {{").ok();
 
-        // 1. Output Dyn instance fields first (order doesn't matter, just output as encountered)
-        // Use packed types to match CPU-side repr(C) struct alignment
-        for io in &self.io {
-            if let ShaderIoKind::DynInstance = io.kind {
-                let pod_ty = vm.bx.heap.pod_type_ref(io.ty);
-                if matches!(pod_ty.ty, ScriptPodTy::Mat(ScriptPodMat::Mat4x4f)) {
-                    for col in 0..4 {
-                        writeln!(out, "    packed_float4 {}_{};", io.name, col).ok();
-                    }
-                } else {
-                    write!(out, "    ").ok();
-                    self.backend
-                        .pod_type_name_packed_from_ty(&vm.bx.heap, io.ty, out);
-                    writeln!(out, " {};", io.name).ok();
-                }
+        // Match DrawShaderInputs::push(Attribute): DynInstance fields first,
+        // then RustInstance fields, with vec4 padding around non-float fields.
+        let mut current_slot = 0usize;
+        let mut pad_idx = 0usize;
+        for io in self
+            .io
+            .iter()
+            .filter(|io| matches!(io.kind, ShaderIoKind::DynInstance))
+            .chain(
+                self.io
+                    .iter()
+                    .filter(|io| matches!(io.kind, ShaderIoKind::RustInstance)),
+            )
+        {
+            let pod_ty = vm.bx.heap.pod_type_ref(io.ty);
+            let slots = pod_ty.ty.slots();
+            let is_non_float = Self::metal_instance_is_non_float(vm, io.ty);
+            if is_non_float {
+                Self::metal_write_instance_padding(out, &mut current_slot, &mut pad_idx);
             }
-        }
-
-        // 2. Output Rust instance fields last (already in correct order from pre_collect_rust_instance_io)
-        // Use packed types to match CPU-side repr(C) struct alignment
-        for io in &self.io {
-            if let ShaderIoKind::RustInstance = io.kind {
-                let pod_ty = vm.bx.heap.pod_type_ref(io.ty);
-                if matches!(pod_ty.ty, ScriptPodTy::Mat(ScriptPodMat::Mat4x4f)) {
-                    for col in 0..4 {
-                        writeln!(out, "    packed_float4 {}_{};", io.name, col).ok();
-                    }
-                } else {
-                    write!(out, "    ").ok();
-                    self.backend
-                        .pod_type_name_packed_from_ty(&vm.bx.heap, io.ty, out);
-                    writeln!(out, " {};", io.name).ok();
+            if matches!(pod_ty.ty, ScriptPodTy::Mat(ScriptPodMat::Mat4x4f)) {
+                for col in 0..4 {
+                    writeln!(out, "    packed_float4 {}_{};", io.name, col).ok();
                 }
+            } else {
+                write!(out, "    ").ok();
+                self.backend
+                    .pod_type_name_packed_from_ty(&vm.bx.heap, io.ty, out);
+                writeln!(out, " {};", io.name).ok();
+            }
+            current_slot += slots;
+            if is_non_float {
+                Self::metal_write_instance_padding(out, &mut current_slot, &mut pad_idx);
             }
         }
 
@@ -596,5 +640,58 @@ impl ShaderOutput {
             )
             .ok();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metal_instance_non_float_detection_covers_integer_and_bool_pods() {
+        assert!(ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::U32
+        ));
+        assert!(ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::I32
+        ));
+        assert!(ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::Bool
+        ));
+        assert!(ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::Vec(ScriptPodVec::Vec2u)
+        ));
+        assert!(ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::Vec(ScriptPodVec::Vec3i)
+        ));
+        assert!(ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::Vec(ScriptPodVec::Vec4b)
+        ));
+        assert!(!ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::F32
+        ));
+        assert!(!ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::Vec(ScriptPodVec::Vec2f)
+        ));
+        assert!(!ShaderOutput::metal_instance_is_non_float_pod_ty(
+            &ScriptPodTy::Mat(ScriptPodMat::Mat4x4f)
+        ));
+    }
+
+    #[test]
+    fn metal_instance_padding_matches_single_slot_integer_layout() {
+        let mut out = String::new();
+        let mut current_slot = 2usize;
+        let mut pad_idx = 0usize;
+
+        ShaderOutput::metal_write_instance_padding(&mut out, &mut current_slot, &mut pad_idx);
+        assert_eq!(current_slot, 4);
+        current_slot += ScriptPodTy::U32.slots();
+        ShaderOutput::metal_write_instance_padding(&mut out, &mut current_slot, &mut pad_idx);
+
+        assert_eq!(current_slot, 8);
+        assert_eq!(pad_idx, 5);
+        assert!(out.contains("float _instance_pad_0;"));
+        assert!(out.contains("float _instance_pad_4;"));
     }
 }

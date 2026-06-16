@@ -120,6 +120,10 @@ This branch currently carries:
   sequence/timestamp, acquire/upload/import timing, texture resource path,
   descriptor shape, Vulkan format facts, and fallback state without forcing app
   adapters to reconstruct those facts from marker text.
+- An adapted upstream `makepad/makepad#922` shader-layout fix so single-slot
+  UInt/SInt instance attributes use the same vec4-aligned attribute packing as
+  GLSL, with matching explicit Metal `IoInstanceRaw` padding for raw instance
+  buffer stride correctness.
 - Android Java-message coalescing and dispatch now lives in
   `platform/src/os/linux/android/android_java_messages.rs`. The child module
   keeps high-rate touch/stereo hardware-buffer coalescing plus grouped
