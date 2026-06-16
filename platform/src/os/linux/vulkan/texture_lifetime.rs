@@ -1,9 +1,6 @@
-use crate::os::linux::{
-    android::ndk_sys,
-    libc_sys::{dlopen, dlsym, RTLD_LAZY, RTLD_LOCAL},
-};
+use crate::os::linux::{android::ndk_sys, module_loader::ModuleLoader};
 use ash::vk;
-use std::{ffi::CStr, os::raw::c_void, sync::OnceLock};
+use std::sync::OnceLock;
 
 use super::{
     CxVulkan, RetiredTextureResource, VideoHardwareBufferTextureCacheEntry, VulkanTextureKey,
@@ -15,25 +12,24 @@ const VIDEO_HARDWARE_BUFFER_TEXTURE_CACHE_LIMIT: usize = 16;
 type AHardwareBufferGetIdFn =
     unsafe extern "C" fn(*const ndk_sys::AHardwareBuffer, *mut u64) -> i32;
 
+struct AHardwareBufferGetIdSymbols {
+    _lib: ModuleLoader,
+    get_id: AHardwareBufferGetIdFn,
+}
+
+unsafe impl Send for AHardwareBufferGetIdSymbols {}
+unsafe impl Sync for AHardwareBufferGetIdSymbols {}
+
 impl CxVulkan {
-    fn ahardware_buffer_get_id_fn() -> Option<AHardwareBufferGetIdFn> {
-        static GET_ID_FN: OnceLock<Option<AHardwareBufferGetIdFn>> = OnceLock::new();
-        *GET_ID_FN.get_or_init(|| unsafe {
-            let library = CStr::from_bytes_with_nul_unchecked(b"libandroid.so\0");
-            let symbol = CStr::from_bytes_with_nul_unchecked(b"AHardwareBuffer_getId\0");
-            let handle = dlopen(library.as_ptr(), RTLD_LAZY | RTLD_LOCAL);
-            if handle.is_null() {
-                return None;
-            }
-            let symbol = dlsym(handle, symbol.as_ptr());
-            if symbol.is_null() {
-                None
-            } else {
-                Some(std::mem::transmute::<*mut c_void, AHardwareBufferGetIdFn>(
-                    symbol,
-                ))
-            }
-        })
+    fn ahardware_buffer_get_id_symbols() -> Option<&'static AHardwareBufferGetIdSymbols> {
+        static GET_ID_SYMBOLS: OnceLock<Option<AHardwareBufferGetIdSymbols>> = OnceLock::new();
+        GET_ID_SYMBOLS
+            .get_or_init(|| {
+                let lib = ModuleLoader::load("libandroid.so").ok()?;
+                let get_id = lib.get_symbol("AHardwareBuffer_getId").ok()?;
+                Some(AHardwareBufferGetIdSymbols { _lib: lib, get_id })
+            })
+            .as_ref()
     }
 
     pub(super) fn hardware_buffer_cache_key(
@@ -42,10 +38,10 @@ impl CxVulkan {
         if hardware_buffer.is_null() {
             return None;
         }
-        if let Some(get_id) = Self::ahardware_buffer_get_id_fn() {
+        if let Some(symbols) = Self::ahardware_buffer_get_id_symbols() {
             let mut native_id = 0u64;
             let id_result = unsafe {
-                get_id(
+                (symbols.get_id)(
                     hardware_buffer as *const ndk_sys::AHardwareBuffer,
                     &mut native_id,
                 )

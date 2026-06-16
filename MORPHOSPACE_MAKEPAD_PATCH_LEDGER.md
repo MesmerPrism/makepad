@@ -223,6 +223,11 @@ but it must not define Manifold command/session/stream authority.
 
 ## Recent Patch Notes
 
+- 2026-06-16: switched the Vulkan hardware-buffer texture lifetime
+  `AHardwareBuffer_getId` lookup to the shared Linux `ModuleLoader` path. The
+  cached symbol table now owns the loaded `libandroid.so` module beside the
+  function pointer, preserving the previous process-lifetime optional symbol
+  behavior without file-local `dlopen`/`dlsym` code in the Vulkan child module.
 - 2026-06-16: switched Android AMidi dynamic symbol loading to the shared
   Linux `ModuleLoader` path while preserving API-26-safe optional loading,
   cached function pointers, and graceful fallback when `libamidi.so` is absent.

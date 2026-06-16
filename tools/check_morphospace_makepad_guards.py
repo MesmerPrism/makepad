@@ -681,6 +681,26 @@ def check_split_maps(checks):
         "RUSTY_XR_MAKEPAD_VULKAN_VIDEO_SHADER_INTERFACE",
         "Vulkan video shader interface marker owner",
     )
+    checks.contains(
+        "platform/src/os/linux/vulkan/texture_lifetime.rs",
+        'ModuleLoader::load("libandroid.so")',
+        "Vulkan hardware-buffer id ModuleLoader path",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan/texture_lifetime.rs",
+        "AHardwareBuffer_getId",
+        "Vulkan hardware-buffer native id lookup",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan/texture_lifetime.rs",
+        "dlopen(",
+        "Vulkan texture lifetime direct dlopen after ModuleLoader cleanup",
+    )
+    checks.not_contains(
+        "platform/src/os/linux/vulkan/texture_lifetime.rs",
+        "dlsym(",
+        "Vulkan texture lifetime direct dlsym after ModuleLoader cleanup",
+    )
     checks.not_contains(
         "platform/src/os/linux/vulkan.rs",
         "fn ensure_pipeline(",
