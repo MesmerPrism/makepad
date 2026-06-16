@@ -231,6 +231,12 @@ but it must not define Manifold command/session/stream authority.
   non-float instance fields so raw struct stride matches the CPU instance
   buffer. Added narrow CPU-packing and Metal-padding unit tests plus guard
   signatures for the old `slots > 1` blind spot.
+- 2026-06-16: hardened Android Quest/Vulkan WSI recovery and
+  `AHardwareBuffer` texture lifetime by making window-fence and device-idle
+  waits advance the GPU completed-submit watermark and collect ready retired
+  texture resources. Present-time `ERROR_SURFACE_LOST_KHR` now waits the
+  submitted window frame before suspending/destroying the surface, matching the
+  existing out-of-date/suboptimal swapchain recovery path.
 - 2026-06-16: switched the Vulkan hardware-buffer texture lifetime
   `AHardwareBuffer_getId` lookup to the shared Linux `ModuleLoader` path. The
   cached symbol table now owns the loaded `libandroid.so` module beside the

@@ -1541,6 +1541,7 @@ impl CxVulkan {
                 return Ok(false);
             }
             Err(vk::Result::ERROR_SURFACE_LOST_KHR) => {
+                self.wait_for_window_frame_fence("surface-lost swapchain suspend")?;
                 self.suspend_surface();
                 return Ok(false);
             }
@@ -2630,11 +2631,43 @@ impl CxVulkan {
         }
     }
 
-    fn device_wait_idle(&self) {
-        let _ = unsafe { self.device.device_wait_idle() };
+    fn mark_completed_submit_serial(&mut self, completed_submit_serial: u64, reason: &str) {
+        if completed_submit_serial == 0 {
+            self.collect_retired_texture_resources();
+            return;
+        }
+        let previous_completed_submit_serial = self.gpu_completed_submit_serial;
+        self.gpu_completed_submit_serial = self
+            .gpu_completed_submit_serial
+            .max(completed_submit_serial);
+        if self.window_in_flight_submit_serial <= self.gpu_completed_submit_serial {
+            self.window_in_flight_submit_serial = 0;
+        }
+        crate::log!(
+            "RUSTY_XR_MAKEPAD_VULKAN_WSI_LIFETIME schema=rusty.xr.makepad-vulkan-wsi-lifetime.v1 phase=submit-complete reason={} completedSubmitSerial={} previousCompletedSubmitSerial={} latestSubmitSerial={} pendingRetiredTextureCount={}",
+            reason,
+            self.gpu_completed_submit_serial,
+            previous_completed_submit_serial,
+            self.gpu_submit_serial,
+            self.retired_texture_resources.len(),
+        );
+        self.collect_retired_texture_resources();
     }
 
-    fn wait_for_window_frame_fence(&self, reason: &str) -> Result<(), String> {
+    fn mark_all_submitted_work_completed(&mut self, reason: &str) {
+        self.mark_completed_submit_serial(self.gpu_submit_serial, reason);
+    }
+
+    fn device_wait_idle(&mut self) {
+        match unsafe { self.device.device_wait_idle() } {
+            Ok(()) => self.mark_all_submitted_work_completed("device-wait-idle"),
+            Err(err) => {
+                crate::warning!("Android Vulkan: device_wait_idle failed: {err:?}");
+            }
+        }
+    }
+
+    fn wait_for_window_frame_fence(&mut self, reason: &str) -> Result<(), String> {
         if self.in_flight_fence == vk::Fence::null() {
             return Ok(());
         }
@@ -2644,6 +2677,7 @@ impl CxVulkan {
                 .wait_for_fences(&[self.in_flight_fence], true, u64::MAX)
                 .map_err(|e| format!("wait_for_fences({reason}) failed: {e:?}"))?;
         }
+        self.mark_completed_submit_serial(self.window_in_flight_submit_serial, reason);
         Ok(())
     }
 }

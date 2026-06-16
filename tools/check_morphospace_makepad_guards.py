@@ -773,6 +773,26 @@ def check_split_maps(checks):
         "AHardwareBuffer_getId",
         "Vulkan hardware-buffer native id lookup",
     )
+    checks.contains(
+        "platform/src/os/linux/vulkan.rs",
+        "fn mark_completed_submit_serial(&mut self, completed_submit_serial: u64, reason: &str)",
+        "Vulkan WSI completion watermark helper",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan.rs",
+        "self.collect_retired_texture_resources();",
+        "Vulkan WSI retired texture collection after completion",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan.rs",
+        'self.wait_for_window_frame_fence("surface-lost swapchain suspend")?;',
+        "Vulkan present surface-lost fence wait before suspend",
+    )
+    checks.contains(
+        "platform/src/os/linux/vulkan.rs",
+        'self.mark_all_submitted_work_completed("device-wait-idle")',
+        "Vulkan device-idle completion watermark update",
+    )
     checks.not_contains(
         "platform/src/os/linux/vulkan/texture_lifetime.rs",
         "dlopen(",

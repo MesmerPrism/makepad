@@ -79,6 +79,11 @@ This branch currently carries:
 - A targeted Android Vulkan frame-fence wait before recreating
   swapchain-backed window resources after suboptimal or out-of-date present
   paths on Quest/Horizon OS.
+- Android Vulkan WSI recovery now records completed-submit watermarks when a
+  window fence or device-idle wait proves GPU work is done, then collects ready
+  retired texture resources. Present-time `ERROR_SURFACE_LOST_KHR` waits for
+  the submitted window frame before suspending the surface, so imported
+  `AHardwareBuffer` textures are released only after proven GPU completion.
 - Public-safe Android activity/bootstrap phase markers for the Rusty XR Makepad
   Quest validation lane. These bracket Java activity entry, native library
   loading, native activity handoff, Java init/surface bootstrap, EGL setup,
