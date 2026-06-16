@@ -492,6 +492,36 @@ def check_text_input_alignment(checks):
         "TextInputTextPlacement.InnerAlign",
         "UIZoo TextInput inner alignment example",
     )
+    checks.contains(
+        text_input,
+        "enum TextNavigation",
+        "#1101 TextInput navigation classifier",
+    )
+    checks.contains(
+        text_input,
+        "fn handle_navigation_key",
+        "#1101 TextInput navigation event handler",
+    )
+    checks.contains(
+        text_input,
+        "pub fn move_cursor_word_left",
+        "#1101 TextInput word-left cursor movement",
+    )
+    checks.contains(
+        text_input,
+        "pub fn move_cursor_page_down",
+        "#1101 TextInput page-down cursor movement",
+    )
+    checks.contains(
+        text_input,
+        "fn backspace_range",
+        "#1101 TextInput modifier-aware backspace range",
+    )
+    checks.contains(
+        text_input,
+        "fn floor_grapheme_boundary",
+        "#1101 TextInput grapheme-boundary clamp",
+    )
 
 
 def check_split_maps(checks):
