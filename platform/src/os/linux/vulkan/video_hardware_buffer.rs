@@ -636,6 +636,7 @@ impl CxVulkan {
         if hardware_buffer.is_null() {
             return Err("Android Vulkan camera import failed: null AHardwareBuffer".to_string());
         }
+        let hardware_buffer_id = Self::hardware_buffer_cache_key(hardware_buffer);
 
         let tex_y_key = Self::texture_key(tex_y_id);
         let tex_u_key = Self::texture_key(tex_u_id);
@@ -652,7 +653,7 @@ impl CxVulkan {
                 .get(&tex_u_key)
                 .map(|resource| resource.format == vk::Format::R8G8_UNORM)
                 .unwrap_or(false);
-            let metadata = VideoTextureUpdateMetadata::default()
+            let mut metadata = VideoTextureUpdateMetadata::default()
                 .with_resource(
                     VideoTextureResourcePath::HardwareBufferYuvPlanes,
                     VideoTextureDescriptorShape::ImportedYuvPlaneTextures,
@@ -660,6 +661,9 @@ impl CxVulkan {
                     height,
                 )
                 .with_resource_reused(true);
+            if let Some(hardware_buffer_id) = hardware_buffer_id {
+                metadata = metadata.with_hardware_buffer_id(hardware_buffer_id);
+            }
             return Ok((
                 VideoYuvMetadata {
                     enabled: true,
@@ -920,7 +924,7 @@ impl CxVulkan {
         self.textures.insert(tex_u_key, u_resource);
         self.textures.insert(tex_v_key, v_resource);
 
-        let metadata = VideoTextureUpdateMetadata::default()
+        let mut metadata = VideoTextureUpdateMetadata::default()
             .with_resource(
                 VideoTextureResourcePath::HardwareBufferYuvPlanes,
                 VideoTextureDescriptorShape::ImportedYuvPlaneTextures,
@@ -929,6 +933,9 @@ impl CxVulkan {
             )
             .with_vulkan_format(format!("{vk_format:?}"), Some(external_format))
             .with_resource_reused(false);
+        if let Some(hardware_buffer_id) = hardware_buffer_id {
+            metadata = metadata.with_hardware_buffer_id(hardware_buffer_id);
+        }
         Ok((
             VideoYuvMetadata {
                 enabled: true,
@@ -964,6 +971,7 @@ impl CxVulkan {
                 width,
                 height,
             )
+            .with_hardware_buffer_id(hardware_buffer_key)
             .with_resource_reused(same_source);
         if same_source {
             if let Some(ycbcr_conversion) = self

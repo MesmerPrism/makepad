@@ -137,6 +137,7 @@ pub struct VideoTextureUpdateMetadata {
     pub camera_frame_sequence: Option<u64>,
     pub camera_timestamp_ns: Option<u64>,
     pub acquire_time_ns: Option<u64>,
+    pub hardware_buffer_id: Option<u64>,
     pub upload_sequence: Option<u64>,
     pub upload_time_ns: Option<u64>,
     pub import_sequence: Option<u64>,
@@ -182,6 +183,11 @@ impl VideoTextureUpdateMetadata {
         self.camera_frame_sequence = Some(sequence);
         self.camera_timestamp_ns = Some(timestamp_ns);
         self.acquire_time_ns = acquire_time_ns;
+        self
+    }
+
+    pub fn with_hardware_buffer_id(mut self, hardware_buffer_id: u64) -> Self {
+        self.hardware_buffer_id = Some(hardware_buffer_id);
         self
     }
 
