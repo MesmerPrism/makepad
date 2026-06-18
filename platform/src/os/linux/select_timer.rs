@@ -30,7 +30,9 @@ impl SelectTimers {
         let mut fds = mem::MaybeUninit::uninit();
         unsafe {
             libc_sys::FD_ZERO(fds.as_mut_ptr());
-            libc_sys::FD_SET(0, fds.as_mut_ptr());
+            // Do not watch stdin here. X11 and Wayland event loops do not read
+            // from it, and fd 0 can be permanently readable when redirected
+            // from /dev/null, which turns the idle wait into a busy loop.
             libc_sys::FD_SET(fd, fds.as_mut_ptr());
         }
         //libc_sys::FD_SET(self.signal_fds[0], fds.as_mut_ptr());

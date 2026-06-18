@@ -15,6 +15,8 @@ pub struct OpenglCx {
 
     pub egl_platform: egl_sys::EGLenum,
     pub egl_platform_display: *mut c_void,
+
+    pub swap_interval: egl_sys::EGLint,
 }
 
 fn egl_error_name(error: egl_sys::EGLint) -> &'static str {
@@ -208,6 +210,12 @@ impl OpenglCx {
         })
         .expect("Cant load openGL functions");
 
+        let swap_interval = if std::env::var_os("MAKEPAD_NO_VSYNC").is_some() {
+            0
+        } else {
+            1
+        };
+
         OpenglCx {
             libegl,
             libgl,
@@ -217,6 +225,7 @@ impl OpenglCx {
 
             egl_platform,
             egl_platform_display,
+            swap_interval,
         }
     }
 
@@ -260,6 +269,9 @@ impl Cx {
                     egl_error_name(egl_error)
                 );
                 return;
+            }
+            if let Some(egl_swap_interval) = opengl_cx.libegl.eglSwapInterval {
+                (egl_swap_interval)(opengl_cx.egl_display, opengl_cx.swap_interval);
             }
             (gl.glViewport)(0, 0, pix_width.floor() as i32, pix_height.floor() as i32);
         }

@@ -313,6 +313,16 @@ fn collect_compiled_sites_for_file(
         let ScriptSource::Mod(script_mod) = &body.source else {
             continue;
         };
+        // `script_apply_eval!` bodies are tagged with `__script_source__`.
+        // They are Rust-driven runtime evals, not static `script_mod!` blocks,
+        // so the source extractor cannot match them during file hot reload.
+        if script_mod
+            .code
+            .trim_start()
+            .starts_with("__script_source__")
+        {
+            continue;
+        }
         let Some(compiled_file_name) = resolve_matching_script_mod_file(script_mod, file_name)
         else {
             continue;

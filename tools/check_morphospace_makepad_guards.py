@@ -576,6 +576,110 @@ def check_shader_layout_imports(checks):
     )
 
 
+def check_render_cache_and_live_reload_imports(checks):
+    """Guard small upstream rendering/cache/live-reload fixes."""
+
+    shader_control = "platform/script/src/shader_control.rs"
+    opengl_rs = "platform/src/os/linux/opengl.rs"
+    x11_sys = "platform/src/os/linux/x11/x11_sys.rs"
+    xlib_window = "platform/src/os/linux/x11/xlib_window.rs"
+    d3d11 = "platform/src/os/windows/d3d11.rs"
+    select_timer = "platform/src/os/linux/select_timer.rs"
+    opengl_cx = "platform/src/os/linux/opengl_cx.rs"
+    linux_x11 = "platform/src/os/linux/x11/linux_x11.rs"
+    linux_wayland = "platform/src/os/linux/wayland/linux_wayland.rs"
+    live_reload = "platform/src/live_reload.rs"
+
+    checks.contains(
+        shader_control,
+        "ShaderBackend::Glsl",
+        "#979 GLSL shader for-loop explicit cast backend",
+    )
+    checks.contains(
+        shader_control,
+        "for({3} {0} = {3}({1}); {0} < {3}({2}); {0}++)",
+        "#979 GLSL u32 loop bound constructor casts",
+    )
+    checks.contains(
+        opengl_rs,
+        "fn shader_source_len",
+        "#979/#GL shader source length helper retained",
+    )
+    checks.contains(
+        x11_sys,
+        "pub const USPosition",
+        "#979 X11 user-position hint constant",
+    )
+    checks.contains(
+        x11_sys,
+        "pub fn XTranslateCoordinates",
+        "#979 X11 root-relative position lookup",
+    )
+    checks.contains(
+        xlib_window,
+        "x11_sys::USPosition | x11_sys::PPosition",
+        "#979 X11 WM normal position hint",
+    )
+    checks.contains(
+        xlib_window,
+        "XMoveWindow(display, window, pos.x as i32, pos.y as i32)",
+        "#979 X11 pre-map move",
+    )
+
+    checks.contains(
+        d3d11,
+        "d3d11_shader_cache",
+        "#987/#988 Windows D3D11 shader bytecode cache",
+    )
+    checks.contains(
+        d3d11,
+        "fn shader_cache_dir() -> Option<&'static std::path::Path>",
+        "#988 cached LocalAppData shader cache path",
+    )
+    checks.contains(
+        d3d11,
+        "std::mem::take(&mut self.draw_shaders.compile_set)",
+        "#988 no-copy shader compile-set drain",
+    )
+    checks.contains(
+        d3d11,
+        "Background vertex-shader compile failed",
+        "local async HLSL compile adoption over #987/#988 cache",
+    )
+
+    checks.not_contains(
+        select_timer,
+        "FD_SET(0",
+        "#1103 no stdin watch in Linux idle select loop",
+    )
+    checks.contains(
+        opengl_cx,
+        "MAKEPAD_NO_VSYNC",
+        "#1103 explicit Linux OpenGL vsync opt-out",
+    )
+    checks.contains(
+        opengl_cx,
+        "eglSwapInterval",
+        "#1103 Linux OpenGL swap interval application",
+    )
+    checks.contains(
+        linux_x11,
+        "if !cx.any_passes_dirty() && !cx.demo_time_repaint",
+        "#1103 X11 skip idle repaint work",
+    )
+    checks.contains(
+        linux_wayland,
+        "if !cx.any_passes_dirty() && !cx.demo_time_repaint",
+        "#1103 Wayland skip idle repaint work",
+    )
+
+    checks.contains(
+        live_reload,
+        'starts_with("__script_source__")',
+        "#1124 ignore script_apply_eval bodies in static script_mod hot reload matching",
+    )
+
+
 def check_split_maps(checks):
     required_modules = [
         "tools/cargo_makepad/src/android/compile/aab_assembly.rs",
@@ -985,6 +1089,7 @@ def main():
     check_upstream_p0_imports(checks)
     check_text_input_alignment(checks)
     check_shader_layout_imports(checks)
+    check_render_cache_and_live_reload_imports(checks)
     check_split_maps(checks)
     check_docs(checks)
 

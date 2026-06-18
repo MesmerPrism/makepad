@@ -76,6 +76,21 @@ This branch currently carries:
   emit opt-in `MAKEPAD_ANDROID_TIMING` phase markers for APK packaging steps.
 - Dependent Rust shared-library bundling for Android APK output.
 - Windows path normalization for generated Android wrapper inputs.
+- Imported upstream Linux/desktop rendering fixes from `makepad/makepad#979`:
+  GLSL `u32` shader loop bounds use explicit constructor casts, and X11
+  saved-position restore uses WM position hints plus root-relative position
+  reads.
+- Imported upstream Windows shader-cache fixes from `makepad/makepad#987` and
+  `#988`, with local async HLSL compile hardening layered on top so repeated
+  Windows app launches avoid blocking the UI thread on unchanged shader
+  bytecode.
+- Imported the narrow upstream `makepad/makepad#1103` Linux idle/vsync fix:
+  X11/Wayland select waits no longer watch stdin, idle repaint work is skipped
+  when no pass is dirty, and EGL swap interval defaults to vsync with
+  `MAKEPAD_NO_VSYNC` as the explicit benchmark opt-out.
+- Imported upstream `makepad/makepad#1124` hot-reload matching fix so
+  `script_apply_eval!` runtime bodies tagged with `__script_source__` are not
+  counted as static `script_mod!` blocks during file hot reload.
 - A targeted Android Vulkan frame-fence wait before recreating
   swapchain-backed window resources after suboptimal or out-of-date present
   paths on Quest/Horizon OS.

@@ -1060,6 +1060,12 @@ impl WaylandCx {
     }
 
     pub(crate) fn handle_repaint(&self, state: &mut WaylandState) {
+        {
+            let cx = self.cx.borrow();
+            if !cx.any_passes_dirty() && !cx.demo_time_repaint {
+                return;
+            }
+        }
         let mut cx = self.cx.borrow_mut();
         cx.os.opengl_cx.as_ref().unwrap().make_current();
         let mut passes_todo = Vec::new();

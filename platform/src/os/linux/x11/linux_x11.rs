@@ -429,6 +429,12 @@ impl X11Cx {
     }
 
     pub(crate) fn handle_repaint(&mut self, opengl_windows: &mut Vec<OpenglWindow>) {
+        {
+            let cx = self.cx.borrow();
+            if !cx.any_passes_dirty() && !cx.demo_time_repaint {
+                return;
+            }
+        }
         let mut passes_todo = Vec::new();
         {
             let mut cx = self.cx.borrow_mut();
