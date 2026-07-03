@@ -255,7 +255,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
         int packetsRead = 0;
         while (mRunning &&
             shouldReadMorePrimerPackets(header, pending, packetsRead)) {
-            Packet packet = mStreamReader.readPacket(input, header.schemaVersion);
+            Packet packet = mStreamReader.readPacket(input, header);
             pending.add(packet);
             packetsRead++;
         }
@@ -330,7 +330,7 @@ final class BrokerH264VideoPlayer extends VideoPlayer {
                     }
                     if (packet == null && shouldReadMorePackets(header, packetsRead)) {
                         try {
-                            packet = mStreamReader.readPacket(input, header.schemaVersion);
+                            packet = mStreamReader.readPacket(input, header);
                             packetsRead++;
                         } catch (EOFException eof) {
                             packet = null;

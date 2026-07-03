@@ -91,6 +91,7 @@ final class ManifoldVideoStreamReader {
             metadataSource));
         return new StreamHeader(
             schemaVersion,
+            STREAM_MAGIC.equals(magic) || schemaVersion >= 2,
             codecId,
             width,
             height,
@@ -100,7 +101,7 @@ final class ManifoldVideoStreamReader {
             projectionMetadata);
     }
 
-    Packet readPacket(DataInputStream input, int schemaVersion) throws Exception {
+    Packet readPacket(DataInputStream input, StreamHeader header) throws Exception {
         long ptsUs = input.readLong();
         int flags = input.readInt();
         int size = input.readInt();
@@ -109,7 +110,7 @@ final class ManifoldVideoStreamReader {
         }
         long sourceElapsedNs = 0L;
         long sourceUnixNs = 0L;
-        if (schemaVersion >= 2) {
+        if (header.extendedPacketTimestamps) {
             sourceElapsedNs = input.readLong();
             sourceUnixNs = input.readLong();
         }
@@ -126,6 +127,7 @@ final class ManifoldVideoStreamReader {
 
 final class StreamHeader {
     final int schemaVersion;
+    final boolean extendedPacketTimestamps;
     final int codecId;
     final int width;
     final int height;
@@ -136,6 +138,7 @@ final class StreamHeader {
 
     StreamHeader(
         int schemaVersion,
+        boolean extendedPacketTimestamps,
         int codecId,
         int width,
         int height,
@@ -144,6 +147,7 @@ final class StreamHeader {
         String projectionMetadataJson,
         JSONObject projectionMetadata) {
         this.schemaVersion = schemaVersion;
+        this.extendedPacketTimestamps = extendedPacketTimestamps;
         this.codecId = codecId;
         this.width = Math.max(1, width);
         this.height = Math.max(1, height);
