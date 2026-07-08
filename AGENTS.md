@@ -1,16 +1,23 @@
 # Morphospace Makepad Fork Agent Notes
 
-This checkout can be used as the maintained Makepad fork branch for the
+This checkout is now a legacy / explicit-request Makepad fork branch for the
 Morphospace Makepad Quest lane. Upstream Makepad remains the framework source
 of truth; the Morphospace Makepad patch branch should stay a shallow patch
-queue for Android packaging, Quest/Horizon OS Vulkan window-swapchain
-correctness, workspace metadata, and branch-local documentation.
+queue for already accepted Android packaging, Quest/Horizon OS Vulkan
+window-swapchain correctness, workspace metadata, and branch-local
+documentation.
 
 Rusty Morphospace is the top-level project/platform umbrella for the refactor
 repo family. This Makepad fork remains a toolkit/adapter dependency, not a
 Morphospace authority or module namespace. Keep Morphospace, Matter, Lattice,
 Manifold, Optics, Studio, and Quest contracts outside the fork unless a change
 is a general Makepad adapter or public example requirement.
+
+Makepad is no longer a default Rusty Morphospace runtime target. Work in this
+fork only when the user explicitly requests Makepad compatibility, migration,
+regression repair, or historical evidence replay. New Quest runtime work
+defaults to native OpenXR/Vulkan and Meta Spatial SDK in `rusty-quest`; new
+Windows operator work defaults to WPF plus CLI/API-equivalent routes.
 
 For Morphospace Makepad tasks in this repo, read these first:
 
@@ -35,7 +42,7 @@ package identities, SDK caches, or downstream tuning into this branch.
 
 ## Morphospace Patch Boundaries
 
-Current acceptable Makepad-side changes for the Morphospace Makepad lane are:
+Acceptable Makepad-side changes for explicit legacy work are:
 
 - Android `cargo-makepad` packaging fixes needed by the public Makepad Quest
   example lane.
